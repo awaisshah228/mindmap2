@@ -41,9 +41,10 @@ import {
   EdgeAnchorNode,
   IconNode,
 } from "@/components/nodes";
-import { FreeDrawPreview, type Stroke } from "./FreeDrawPreview";
+import type { Stroke } from "./FreeDrawPreview";
 import { EdgeDrawPreview } from "./EdgeDrawPreview";
 import { EraserPreview } from "./EraserPreview";
+import { FreehandOverlay } from "./FreehandOverlay";
 import LabeledConnectorEdge from "@/components/edges/LabeledConnectorEdge";
 import { CustomConnectionLine } from "@/components/edges/CustomConnectionLine";
 import { MindMapLayoutPanel } from "@/components/panels/MindMapLayoutPanel";
@@ -200,8 +201,6 @@ export default function DiagramCanvas() {
     horizontal: { y: number; x1: number; x2: number } | null;
     vertical: { x: number; y1: number; y2: number } | null;
   }>({ horizontal: null, vertical: null });
-
-  const [currentStroke, setCurrentStroke] = useState<Stroke | null>(null);
 
   const [edgeDrawStart, setEdgeDrawStart] = useState<{ x: number; y: number } | null>(null);
   const [edgeDrawEndPreview, setEdgeDrawEndPreview] = useState<{ x: number; y: number } | null>(null);
@@ -572,17 +571,10 @@ export default function DiagramCanvas() {
         return;
       }
 
-      if (activeTool !== "freeDraw" || !reactFlowRef.current) return;
-      if (target.closest(".react-flow__node") || target.closest(".react-flow__controls")) return;
-      e.preventDefault();
-      const pos = reactFlowRef.current.screenToFlowPosition({ x: e.clientX, y: e.clientY });
-      const pressure = e.pressure || 0.5;
-      setCurrentStroke({
-        id: `stroke-${Date.now()}`,
-        points: [[pos.x, pos.y, pressure]],
-        color: "#000000",
-        size: 8,
-      });
+      if (activeTool === "freeDraw") {
+        // Freehand drawing is handled by the overlay component.
+        return;
+      }
     },
     [activeTool, edgeDrawStart, eraseAt]
   );
@@ -622,22 +614,12 @@ export default function DiagramCanvas() {
         });
         return;
       }
-      if (activeTool !== "freeDraw" || !currentStroke || !reactFlowRef.current) return;
-      e.preventDefault();
-      const pos = reactFlowRef.current.screenToFlowPosition({ x: e.clientX, y: e.clientY });
-      const pressure = e.pressure || 0.5;
-      // Downsample points a bit so we don't add one on every tiny move.
-      setCurrentStroke((s) => {
-        if (!s) return s;
-        const last = s.points[s.points.length - 1];
-        const dx = pos.x - last[0];
-        const dy = pos.y - last[1];
-        const MIN_DIST_SQ = 9; // ~3px
-        if (dx * dx + dy * dy < MIN_DIST_SQ) return s;
-        return { ...s, points: [...s.points, [pos.x, pos.y, pressure]] };
-      });
+      if (activeTool === "freeDraw") {
+        // Freehand drawing is handled by the overlay component.
+        return;
+      }
     },
-    [activeTool, currentStroke, edgeDrawStart, pendingEdgeType, isErasing, eraseAt]
+    [activeTool, edgeDrawStart, pendingEdgeType, isErasing, eraseAt]
   );
 
   const onPointerUp = useCallback(
@@ -702,21 +684,16 @@ export default function DiagramCanvas() {
         return;
       }
 
-      // Finish freehand stroke
-      if (activeTool !== "freeDraw" || !currentStroke) return;
-      e.preventDefault();
-      if (currentStroke.points.length > 1) {
-        createFreeDrawNode(currentStroke);
+      if (activeTool === "freeDraw") {
+        // Freehand stroke lifecycle is fully handled by the overlay.
+        return;
       }
-      setCurrentStroke(null);
     },
     [
       activeTool,
       edgeDrawStart,
       edgeDrawPoints,
       pendingEdgeType,
-      currentStroke,
-      createFreeDrawNode,
       addNode,
       addEdgeToStore,
       setNodes,
@@ -875,7 +852,6 @@ export default function DiagramCanvas() {
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
         if (activeTool === "freeDraw") {
-          setCurrentStroke(null);
           setActiveTool("select");
         } else if (activeTool === "connector" && edgeDrawStart) {
           setEdgeDrawStart(null);
@@ -909,11 +885,8 @@ export default function DiagramCanvas() {
   }, [storeNodes.length, storeEdges.length, setNodes, setEdges]);
 
   const onPointerLeave = useCallback(() => {
-    if (activeTool === "freeDraw" && currentStroke && currentStroke.points.length > 1) {
-      createFreeDrawNode(currentStroke);
-      setCurrentStroke(null);
-    }
-  }, [activeTool, currentStroke, createFreeDrawNode]);
+    // No-op for freehand; overlay handles stroke lifecycle.
+  }, []);
 
   const handleUpdateNodeData = useCallback(
     (nodeId: string, data: Record<string, unknown>) => {
@@ -926,13 +899,20 @@ export default function DiagramCanvas() {
     [setNodes]
   );
 
+  const handleFreehandStrokeComplete = useCallback(
+    (stroke: Stroke) => {
+      createFreeDrawNode(stroke);
+    },
+    [createFreeDrawNode]
+  );
+
   return (
     <MindMapLayoutProvider
       onAddAndLayout={handleAddMindMapNode}
       onUpdateNodeData={handleUpdateNodeData}
     >
       <div
-        className="w-full h-full"
+        className="w-full h-full relative"
         style={{
           cursor:
             activeTool === "freeDraw" || activeTool === "connector"
@@ -958,7 +938,19 @@ export default function DiagramCanvas() {
         undo={undo}
         redo={redo}
       />
-      <ReactFlow
+        {activeTool === "freeDraw" && (
+          <FreehandOverlay onStrokeComplete={handleFreehandStrokeComplete} />
+        )}
+        {activeTool === "freeDraw" && reactFlowRef.current && (
+          <FreehandOverlay
+            onStrokeComplete={handleFreehandStrokeComplete}
+            screenToFlowPosition={(pos) =>
+              reactFlowRef.current?.screenToFlowPosition(pos) ?? pos
+            }
+            zoom={reactFlowRef.current?.getViewport().zoom ?? 1}
+          />
+        )}
+        <ReactFlow
         nodes={visibleNodes}
         edges={visibleEdges}
         onInit={onInit}
@@ -1001,7 +993,6 @@ export default function DiagramCanvas() {
         proOptions={{ hideAttribution: true }}
       >
         <HelperLines horizontal={helperLines.horizontal} vertical={helperLines.vertical} />
-        <FreeDrawPreview currentStroke={currentStroke} />
         <EdgeDrawPreview
           start={edgeDrawStart}
           end={edgeDrawEndPreview}

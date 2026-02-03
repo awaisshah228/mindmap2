@@ -49,11 +49,11 @@ function FreeDrawNode({ id, data, width, height, selected, dragging }: NodeProps
 
   if (!points.length) return null;
 
-  const baseWidth = initialSize?.width;
-  const baseHeight = initialSize?.height;
+  const baseWidth = initialSize?.width ?? width ?? 1;
+  const baseHeight = initialSize?.height ?? height ?? 1;
 
-  const scaleX = baseWidth && width ? width / baseWidth : 1;
-  const scaleY = baseHeight && height ? height / baseHeight : 1;
+  const scaleX = (width ?? baseWidth) / baseWidth;
+  const scaleY = (height ?? baseHeight) / baseHeight;
 
   const normalizedPoints = useMemo(
     () =>
@@ -75,29 +75,43 @@ function FreeDrawNode({ id, data, width, height, selected, dragging }: NodeProps
 
   return (
     <>
-      {selected && (
-        <NodeResizer
-          nodeId={id}
-          isVisible={selected && !dragging}
-          minWidth={20}
-          minHeight={20}
-          keepAspectRatio={false}
-          color="rgb(139 92 246)"
-          lineClassName="!border-violet-400"
-          handleClassName="!w-2 !h-2 !bg-violet-500 !border-white"
-          onResizeStart={() => pushUndo()}
-        />
-      )}
+      <NodeResizer
+        nodeId={id}
+        isVisible={selected && !dragging}
+        minWidth={20}
+        minHeight={20}
+        keepAspectRatio={false}
+        color="rgb(139 92 246)"
+        lineClassName="!border-violet-400"
+        handleClassName="!w-2 !h-2 !bg-violet-500 !border-white"
+        onResizeStart={() => pushUndo()}
+      />
       <div
         className="relative"
-        style={{ width: width ?? baseWidth ?? 20, height: height ?? baseHeight ?? 20, minWidth: 20, minHeight: 20 }}
+        style={{
+          width: width ?? baseWidth ?? 20,
+          height: height ?? baseHeight ?? 20,
+          minWidth: 20,
+          minHeight: 20,
+        }}
       >
         <svg
-          width="100%"
-          height="100%"
-          style={{ overflow: "visible", cursor: "move" }}
+          width={width ?? baseWidth ?? 20}
+          height={height ?? baseHeight ?? 20}
+          style={{
+            overflow: "visible",
+            pointerEvents: selected ? "auto" : "none",
+          }}
         >
-          <path d={pathData} fill={color} stroke="none" />
+          <path
+            d={pathData}
+            fill={color}
+            stroke="none"
+            style={{
+              pointerEvents: "visiblePainted",
+              cursor: "pointer",
+            }}
+          />
         </svg>
       </div>
     </>
