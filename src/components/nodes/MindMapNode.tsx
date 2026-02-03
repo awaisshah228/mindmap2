@@ -6,6 +6,7 @@ import {
   type NodeProps,
   Position,
   useReactFlow,
+  NodeResizer,
   type Node,
   type Edge,
 } from "@xyflow/react";
@@ -28,6 +29,7 @@ import { NodeInlineToolbar } from "@/components/toolbar/NodeInlineToolbar";
 import { useMindMapLayout, useMindMapUpdateNodeData } from "@/contexts/MindMapLayoutContext";
 import { getChildCount } from "@/lib/mindmap-utils";
 import { useCanvasStore } from "@/lib/store/canvas-store";
+import { getIconById } from "@/lib/icon-registry";
 
 function MindMapNode({ id, data, selected }: NodeProps) {
   const mindMapLayout = useCanvasStore((s) => s.mindMapLayout);
@@ -36,8 +38,10 @@ function MindMapNode({ id, data, selected }: NodeProps) {
   const label = (data.label as string) || "Mind map";
   const collapsed = (data.collapsed as boolean) ?? false;
   const [menuOpen, setMenuOpen] = useState(false);
-  const { getNodes, getEdges } = useReactFlow();
+  const { getNodes, getEdges, getNode } = useReactFlow();
+  const node = getNode(id);
   const addAndLayout = useMindMapLayout();
+  const pushUndo = useCanvasStore((s) => s.pushUndo);
   const updateNodeData = useMindMapUpdateNodeData();
   const edges = getEdges();
   const childCount = getChildCount(id, edges);
@@ -47,6 +51,9 @@ function MindMapNode({ id, data, selected }: NodeProps) {
     edges,
     data.color as string | undefined
   );
+  const customIcon = data.customIcon as string | undefined;
+  const iconDef = getIconById(data.icon as string);
+  const IconComponent = iconDef?.Icon;
 
   const handleToggleCollapse = useCallback(
     (e: React.MouseEvent) => {
@@ -141,14 +148,34 @@ function MindMapNode({ id, data, selected }: NodeProps) {
     editRef.current?.focus();
   }, []);
 
+  const setHoveredNodeId = useCanvasStore((s) => s.setHoveredNodeId);
+  const onMouseEnter = useCallback(() => setHoveredNodeId(id), [id, setHoveredNodeId]);
+  const onMouseLeave = useCallback(() => setHoveredNodeId(null), [setHoveredNodeId]);
+
   return (
     <>
-      <NodeInlineToolbar nodeId={id} />
+      <NodeInlineToolbar nodeId={id} selected={selected} />
+      <NodeResizer
+        nodeId={id}
+        isVisible={selected}
+        minWidth={100}
+        minHeight={36}
+        color="rgb(139 92 246)"
+        lineClassName="!border-violet-400"
+        handleClassName="!bg-violet-400 !border-violet-500 !w-2 !h-2"
+        onResizeStart={() => pushUndo()}
+      />
       <div
         className={cn(
           "group flex items-center transition-all",
           "min-w-[140px] min-h-[36px]"
         )}
+        style={{
+          ...(node?.width != null && { width: node.width }),
+          ...(node?.height != null && { height: node.height }),
+        }}
+        onMouseEnter={onMouseEnter}
+        onMouseLeave={onMouseLeave}
       >
         {/* All 4 handles so edges always find their connection point (avoids disappearing when direction/layout mismatch) */}
         {/* Drag handle: large tap target for dragging on mobile */}
@@ -220,6 +247,15 @@ function MindMapNode({ id, data, selected }: NodeProps) {
             </button>
           ) : (
             <span className="w-7 shrink-0" aria-hidden />
+          )}
+          {(customIcon || IconComponent) && (
+            <span className="shrink-0 opacity-90" style={IconComponent ? { color: branchStyle.stroke } : undefined}>
+              {customIcon ? (
+                <img src={customIcon} alt="" className="w-4 h-4 object-contain" />
+              ) : IconComponent ? (
+                <IconComponent className="w-4 h-4" />
+              ) : null}
+            </span>
           )}
           <EditableNodeContent
             nodeId={id}

@@ -169,12 +169,17 @@ export default function DiagramCanvas() {
   );
 
   const activeTool = useCanvasStore((s) => s.activeTool);
+  const pendingShape = useCanvasStore((s) => s.pendingShape);
+  const setPendingShape = useCanvasStore((s) => s.setPendingShape);
   const addNode = useCanvasStore((s) => s.addNode);
   const addEdgeToStore = useCanvasStore((s) => s.addEdge);
   const setActiveTool = useCanvasStore((s) => s.setActiveTool);
   const pushUndo = useCanvasStore((s) => s.pushUndo);
+  const undo = useCanvasStore((s) => s.undo);
+  const redo = useCanvasStore((s) => s.redo);
   const mindMapLayout = useCanvasStore((s) => s.mindMapLayout);
   const reactFlowRef = useRef<ReactFlowInstance | null>(null);
+  const skipCanvasToStoreRef = useRef(false);
 
   const [helperLines, setHelperLines] = useState<{
     horizontal: { y: number; x1: number; x2: number } | null;
@@ -270,6 +275,10 @@ export default function DiagramCanvas() {
     [nodes, hiddenNodeIds, getNodeBounds]
   );
 
+  const onNodeDragStart = useCallback(() => {
+    pushUndo();
+  }, [pushUndo]);
+
   const onNodeDrag = useCallback(
     (_event: React.MouseEvent, node: Node) => {
       const align = checkAlignment(node);
@@ -310,24 +319,21 @@ export default function DiagramCanvas() {
     reactFlowRef.current = instance;
   }, []);
 
-  // Sync canvas → store for persistence
+  // Sync canvas → store for persistence (skip when we just applied store → canvas to avoid loop)
   useEffect(() => {
+    if (skipCanvasToStoreRef.current) {
+      skipCanvasToStoreRef.current = false;
+      return;
+    }
     setStoreNodes(nodes);
     setStoreEdges(edges);
   }, [nodes, edges, setStoreNodes, setStoreEdges]);
 
-  // Sync store → canvas when undo/redo updates the store
+  // Sync store → canvas when undo/redo (or store) updates; apply so position/dimension/delete undo works
   useEffect(() => {
-    if (storeNodes.length > 0 || storeEdges.length > 0) {
-      const idsMatch =
-        nodes.length === storeNodes.length &&
-        nodes.every((n, i) => n.id === storeNodes[i]?.id) &&
-        edges.length === storeEdges.length;
-      if (!idsMatch) {
-        setNodes(storeNodes);
-        setEdges(storeEdges);
-      }
-    }
+    setNodes(storeNodes);
+    setEdges(storeEdges);
+    skipCanvasToStoreRef.current = true;
   }, [storeNodes, storeEdges, setNodes, setEdges]);
 
   const onNodesChange = useCallback(
@@ -525,6 +531,19 @@ export default function DiagramCanvas() {
 
       const type = nodeTypesMap[activeTool] ?? "rectangle";
       const id = `node-${Date.now()}`;
+      const isShapeType = ["rectangle", "diamond", "circle", "document"].includes(activeTool);
+      const shapeFromPending = isShapeType && pendingShape ? pendingShape : null;
+      const defaultShape =
+        type === "rectangle"
+          ? (activeTool === "rectangle" ? "rectangle" : "document")
+          : type === "diamond"
+            ? "diamond"
+            : type === "circle"
+              ? "circle"
+              : type === "document"
+                ? "document"
+                : "rectangle";
+      const shape = shapeFromPending ?? defaultShape;
 
       pushUndo();
 
@@ -533,24 +552,21 @@ export default function DiagramCanvas() {
         type: type as keyof typeof nodeTypes,
         position: { x: flowX - 60, y: flowY - 25 },
         data:
-          type === "rectangle"
+          type === "rectangle" || type === "diamond" || type === "circle" || type === "document"
             ? {
-                label: "Node",
-                shape:
-                  activeTool === "rectangle" ? "rectangle" : "document",
+                label:
+                  shape === "diamond" ? "Decision" : shape === "circle" ? "Process" : shape === "document" ? "Document" : shape === "table" ? "Table" : "Node",
+                shape,
               }
-            : type === "diamond"
-              ? { label: "Decision", shape: "diamond" }
-              : type === "circle"
-                ? { label: "Process", shape: "circle" }
-                : { label: type === "mindMap" ? "Mind map" : "New node" },
+            : { label: type === "mindMap" ? "Mind map" : "New node" },
       };
 
       addNode(newNode);
       setNodes((nds) => [...nds, { ...newNode, selected: false }]);
       setActiveTool("select");
+      setPendingShape(null);
     },
-    [activeTool, addNode, setNodes, setActiveTool, pushUndo]
+    [activeTool, pendingShape, setPendingShape, addNode, setNodes, setActiveTool, pushUndo]
   );
 
   useEffect(() => {
@@ -624,6 +640,8 @@ export default function DiagramCanvas() {
           reactFlowRef.current?.screenToFlowPosition(pos) ?? pos
         }
         pushUndo={pushUndo}
+        undo={undo}
+        redo={redo}
       />
       <ReactFlow
         nodes={visibleNodes}
@@ -633,6 +651,7 @@ export default function DiagramCanvas() {
         onEdgesChange={onEdgesChange}
         onConnect={onConnect}
         onPaneClick={onPaneClick}
+        onNodeDragStart={onNodeDragStart}
         onNodeDrag={onNodeDrag}
         onNodeDragStop={onNodeDragStop}
         nodeTypes={nodeTypes}
@@ -673,7 +692,7 @@ export default function DiagramCanvas() {
         <MobileColorIndicator />
         <Panel position="bottom-right" className="flex flex-col gap-2 m-2">
           <span className="text-xs text-gray-500 px-2 py-1 bg-white/80 rounded shadow">
-            Ctrl+A select all • Ctrl+Shift+A deselect • Ctrl+C/V copy/paste • Del delete • Esc deselect
+            Ctrl/Cmd+Z undo • Ctrl/Cmd+Shift+Z or Ctrl/Cmd+Y redo • Ctrl+A select all • Ctrl+C/V copy/paste • Del delete • Esc deselect
           </span>
         </Panel>
       </ReactFlow>

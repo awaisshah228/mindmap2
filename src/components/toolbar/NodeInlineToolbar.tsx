@@ -8,31 +8,37 @@ import {
   Bold,
   Italic,
   Strikethrough,
-  List,
-  ListOrdered,
-  Link,
-  AtSign,
-  Scissors,
-  User,
-  GitBranch,
   LayoutGrid,
   Wand2,
   Copy,
   MessageSquare,
   MoreHorizontal,
   X,
-  Filter,
-  PenTool,
   Palette,
-  EyeOff,
-  Minus,
   Type,
+  Shapes,
+  Smile,
 } from "lucide-react";
+import { cn } from "@/lib/utils";
+import { useCanvasStore } from "@/lib/store/canvas-store";
 import { PALETTE_COLORS } from "@/lib/branch-colors";
+import { SHAPE_TYPES, SHAPE_LABELS, type ShapeType } from "@/lib/shape-types";
+
+/** Extended palette for shape fill (18 colors, circular swatches). */
+const SHAPE_COLOR_PALETTE = [
+  "#ffffff", "#fef3c7", "#d1fae5", "#dbeafe", "#fce7f3", "#e9d5ff",
+  "#fef9c3", "#bbf7d0", "#bfdbfe", "#fbcfe8", "#ddd6fe", "#fde68a",
+  "#86efac", "#93c5fd", "#f9a8d4", "#c4b5fd", "#fcd34d", "#4ade80",
+];
+import { IconPickerPanel } from "@/components/panels/IconPickerPanel";
 import type { FontSize } from "@/components/nodes/EditableNodeContent";
+
+/** Node types that use the shape picker (rectangle, diamond, circle, document). */
+const SHAPE_NODE_TYPES = ["rectangle", "diamond", "circle", "document"];
 
 interface NodeInlineToolbarProps {
   nodeId: string;
+  selected?: boolean;
 }
 
 const FONT_SIZES: { value: FontSize; label: string }[] = [
@@ -43,14 +49,24 @@ const FONT_SIZES: { value: FontSize; label: string }[] = [
   { value: "xl", label: "XL" },
 ];
 
-export function NodeInlineToolbar({ nodeId }: NodeInlineToolbarProps) {
+export function NodeInlineToolbar({ nodeId, selected = false }: NodeInlineToolbarProps) {
   const router = useRouter();
   const [colorOpen, setColorOpen] = useState(false);
   const [fontSizeOpen, setFontSizeOpen] = useState(false);
+  const [shapeOpen, setShapeOpen] = useState(false);
+  const hoveredNodeId = useCanvasStore((s) => s.hoveredNodeId);
   const { getNode, setNodes, deleteElements, updateNodeData } = useReactFlow();
   const node = getNode(nodeId);
-  const isMindMap = node?.type === "mindMap";
-  const hasColorPicker = ["mindMap", "stickyNote", "text", "rectangle", "diamond", "circle", "document"].includes(node?.type ?? "");
+  const nodeType = node?.type ?? "";
+  const isMindMap = nodeType === "mindMap";
+  const isShapeNode = SHAPE_NODE_TYPES.includes(nodeType);
+  const hasColorPicker = ["mindMap", "stickyNote", "text", "rectangle", "diamond", "circle", "document"].includes(nodeType);
+  const hasShapePicker = isShapeNode;
+  const hasIconPicker = ["rectangle", "diamond", "circle", "document", "mindMap", "stickyNote", "text"].includes(nodeType);
+  const toolbarVisible = selected || hoveredNodeId === nodeId;
+  const currentShape = (node?.data?.shape as ShapeType) ?? "rectangle";
+  const currentIcon = (node?.data?.icon as string) ?? null;
+  const currentCustomIcon = (node?.data?.customIcon as string) ?? null;
 
   const handleDuplicate = () => {
     const node = getNode(nodeId);
@@ -96,107 +112,151 @@ export function NodeInlineToolbar({ nodeId }: NodeInlineToolbarProps) {
     setFontSizeOpen(false);
   };
 
+  const handleShapeChange = (shape: ShapeType) => {
+    if (hasShapePicker) {
+      updateNodeData(nodeId, { shape });
+      setShapeOpen(false);
+    }
+  };
+
+  const handleIconChange = (iconId: string | null) => {
+    if (hasIconPicker) updateNodeData(nodeId, { icon: iconId ?? undefined });
+  };
+
+  const handleCustomIconChange = (dataUrl: string | null) => {
+    if (hasIconPicker) updateNodeData(nodeId, { customIcon: dataUrl ?? undefined });
+  };
+
   return (
-    <NodeToolbar position={Position.Top} offset={8} align="center">
-      <div className="flex items-center gap-0.5 bg-gray-800 text-gray-200 rounded-lg px-1 py-1 shadow-lg border border-gray-700">
-        <ToolbarButton title="Filter/Sort">
-          <Filter className="w-3.5 h-3.5" />
-        </ToolbarButton>
-        <ToolbarDivider />
-        <ToolbarButton
-          title="Bold"
-          onClick={handleBold}
-          active={fontWeight === "bold"}
-        >
-          <Bold className="w-3.5 h-3.5" />
-        </ToolbarButton>
-        <ToolbarButton
-          title="Italic"
-          onClick={handleItalic}
-          active={fontStyle === "italic"}
-        >
-          <Italic className="w-3.5 h-3.5" />
-        </ToolbarButton>
-        <ToolbarButton
-          title="Strikethrough"
-          onClick={handleStrikethrough}
-          active={textDecoration === "line-through"}
-        >
-          <Strikethrough className="w-3.5 h-3.5" />
-        </ToolbarButton>
-        <ToolbarDivider />
-        <ToolbarButton title="Bullet list">
-          <List className="w-3.5 h-3.5" />
-        </ToolbarButton>
-        <ToolbarButton title="Numbered list">
-          <ListOrdered className="w-3.5 h-3.5" />
-        </ToolbarButton>
-        <ToolbarButton title="Link">
-          <Link className="w-3.5 h-3.5" />
-        </ToolbarButton>
-        <ToolbarButton title="Mention">
-          <AtSign className="w-3.5 h-3.5" />
-        </ToolbarButton>
-        <ToolbarDivider />
-        <ToolbarButton title="Cut/Split">
-          <Scissors className="w-3.5 h-3.5" />
-        </ToolbarButton>
-        <ToolbarButton title="Assign">
-          <User className="w-3.5 h-3.5" />
-        </ToolbarButton>
-        <ToolbarButton title="Line style">
-          <GitBranch className="w-3.5 h-3.5" />
-        </ToolbarButton>
-        <ToolbarButton title="Stroke style">
-          <Minus className="w-3.5 h-3.5" />
-        </ToolbarButton>
-        {hasColorPicker ? (
-          <Popover.Root open={colorOpen} onOpenChange={setColorOpen}>
+    <NodeToolbar position={Position.Top} offset={8} align="center" isVisible={toolbarVisible}>
+      <div className="flex flex-wrap items-center gap-0.5 bg-gray-800 text-gray-200 rounded-lg px-1 py-1 shadow-lg border border-gray-700">
+        {hasShapePicker && (
+          <Popover.Root open={shapeOpen} onOpenChange={setShapeOpen}>
             <Popover.Trigger asChild>
               <button
                 type="button"
-                title="Background color"
+                title="Change shape"
                 className="p-1.5 rounded hover:bg-gray-600 transition-colors"
-                aria-label="Background color"
+                aria-label="Change shape"
               >
-                <Palette className="w-3.5 h-3.5" />
+                <Shapes className="w-3.5 h-3.5" />
               </button>
             </Popover.Trigger>
             <Popover.Portal>
               <Popover.Content
-                className="z-50 w-40 p-2 rounded-lg bg-gray-800 border border-gray-600 shadow-lg"
+                className="z-50 w-56 p-2 rounded-lg bg-gray-800 border border-gray-600 shadow-lg"
                 sideOffset={4}
                 align="start"
               >
-                <div className="text-xs text-gray-400 mb-2">Background color</div>
-                <div className="grid grid-cols-5 gap-1.5">
-                  {PALETTE_COLORS.map((color) => (
+                <div className="text-xs text-gray-400 mb-2">Shape</div>
+                <div className="grid grid-cols-3 gap-1.5">
+                  {SHAPE_TYPES.map((shape) => (
                     <button
-                      key={color}
+                      key={shape}
                       type="button"
-                      onClick={() => handleColorChange(color)}
-                      className="w-6 h-6 rounded-md border-2 border-gray-600 hover:border-gray-400 transition-colors"
-                      style={{ backgroundColor: color }}
-                      title={color}
-                    />
+                      onClick={() => handleShapeChange(shape)}
+                      className={`px-2 py-1.5 text-left text-xs rounded transition-colors ${
+                        currentShape === shape ? "bg-violet-600 text-white" : "hover:bg-gray-700 text-gray-200"
+                      }`}
+                      title={SHAPE_LABELS[shape]}
+                    >
+                      {SHAPE_LABELS[shape]}
+                    </button>
                   ))}
+                </div>
+              </Popover.Content>
+            </Popover.Portal>
+          </Popover.Root>
+        )}
+        <ToolbarDivider />
+        <ToolbarButton title="Bold" onClick={handleBold} active={fontWeight === "bold"}>
+          <Bold className="w-3.5 h-3.5" />
+        </ToolbarButton>
+        <ToolbarButton title="Italic" onClick={handleItalic} active={fontStyle === "italic"}>
+          <Italic className="w-3.5 h-3.5" />
+        </ToolbarButton>
+        <ToolbarButton title="Strikethrough" onClick={handleStrikethrough} active={textDecoration === "line-through"}>
+          <Strikethrough className="w-3.5 h-3.5" />
+        </ToolbarButton>
+        <ToolbarDivider />
+        {hasIconPicker && (
+          <IconPickerPanel
+            value={currentIcon}
+            onChange={handleIconChange}
+            customIcon={currentCustomIcon}
+            onCustomIconChange={handleCustomIconChange}
+            trigger={
+              <button
+                type="button"
+                title="Add icon"
+                className="p-1.5 rounded hover:bg-gray-600 transition-colors"
+                aria-label="Add icon"
+              >
+                <Smile className="w-3.5 h-3.5" />
+              </button>
+            }
+          />
+        )}
+        {hasColorPicker && (
+          <Popover.Root open={colorOpen} onOpenChange={setColorOpen}>
+            <Popover.Trigger asChild>
+              <button
+                type="button"
+                title="Fill color"
+                className={cn(
+                  "p-1.5 rounded transition-colors flex items-center justify-center",
+                  colorOpen ? "bg-white text-gray-800 ring-2 ring-violet-400" : "hover:bg-gray-600"
+                )}
+                aria-label="Fill color"
+              >
+                <span className="flex items-center justify-center w-5 h-5 rounded-full border-2 border-gray-500 bg-white" aria-hidden />
+              </button>
+            </Popover.Trigger>
+            <Popover.Portal>
+              <Popover.Content
+                className="z-50 w-52 p-3 rounded-xl bg-gray-800 border border-gray-600 shadow-xl"
+                sideOffset={8}
+                align="start"
+              >
+                <div className="text-xs font-medium text-gray-400 mb-2.5">Fill color</div>
+                <div className="grid grid-cols-6 gap-2">
+                  {(isShapeNode ? SHAPE_COLOR_PALETTE : PALETTE_COLORS).map((color) => {
+                    const isSelected = (node?.data?.color as string) === color;
+                    return (
+                      <button
+                        key={color}
+                        type="button"
+                        onClick={() => handleColorChange(color)}
+                        className={cn(
+                          "w-7 h-7 rounded-full border-2 transition-all hover:scale-110",
+                          isSelected ? "border-violet-400 ring-2 ring-violet-400/50 ring-offset-2 ring-offset-gray-800" : "border-gray-600 hover:border-gray-500"
+                        )}
+                        style={{ backgroundColor: color }}
+                        title={color}
+                      />
+                    );
+                  })}
                 </div>
                 {isMindMap && (
                   <button
                     type="button"
                     onClick={() => handleColorChange("")}
-                    className="mt-2 w-full text-xs text-gray-400 hover:text-white py-1"
+                    className="mt-3 w-full text-xs text-gray-400 hover:text-white py-1.5 rounded"
                   >
                     Reset to branch
                   </button>
                 )}
+                <div className="mt-2 pt-2 border-t border-gray-700 flex items-center justify-center gap-2">
+                  <button type="button" className="p-1.5 rounded hover:bg-gray-700 text-gray-400" title="Opacity" aria-label="Opacity">
+                    <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="4" y1="12" x2="20" y2="12" /><line x1="4" y1="8" x2="20" y2="8" /><line x1="4" y1="16" x2="20" y2="16" /></svg>
+                  </button>
+                  <button type="button" className="p-1.5 rounded hover:bg-gray-700 text-gray-400" title="Pick color" aria-label="Pick color">
+                    <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M15 3l1.5 1.5L9 12l-3 1 1-3 7.5-7.5L15 3z" /><path d="M3 21h9" /></svg>
+                  </button>
+                </div>
               </Popover.Content>
             </Popover.Portal>
           </Popover.Root>
-        ) : (
-          <ToolbarButton title="Color">
-            <Palette className="w-3.5 h-3.5" />
-          </ToolbarButton>
         )}
         <Popover.Root open={fontSizeOpen} onOpenChange={setFontSizeOpen}>
           <Popover.Trigger asChild>
@@ -232,15 +292,24 @@ export function NodeInlineToolbar({ nodeId }: NodeInlineToolbarProps) {
             </Popover.Content>
           </Popover.Portal>
         </Popover.Root>
-        <ToolbarButton title="Layout">
-          <LayoutGrid className="w-3.5 h-3.5" />
+        <ToolbarButton title="Bold" onClick={handleBold} active={fontWeight === "bold"}>
+          <Bold className="w-3.5 h-3.5" />
         </ToolbarButton>
-        <ToolbarButton title="Draw">
-          <PenTool className="w-3.5 h-3.5" />
+        <ToolbarButton title="Italic" onClick={handleItalic} active={fontStyle === "italic"}>
+          <Italic className="w-3.5 h-3.5" />
         </ToolbarButton>
-        <ToolbarButton title="Hide">
-          <EyeOff className="w-3.5 h-3.5" />
+        <ToolbarButton title="Strikethrough" onClick={handleStrikethrough} active={textDecoration === "line-through"}>
+          <Strikethrough className="w-3.5 h-3.5" />
         </ToolbarButton>
+        {isMindMap && (
+          <>
+            <ToolbarDivider />
+            <ToolbarButton title="Layout">
+              <LayoutGrid className="w-3.5 h-3.5" />
+            </ToolbarButton>
+          </>
+        )}
+        <ToolbarDivider />
         <ToolbarButton title="AI" onClick={handleAI}>
           <Wand2 className="w-3.5 h-3.5" />
         </ToolbarButton>
@@ -254,7 +323,7 @@ export function NodeInlineToolbar({ nodeId }: NodeInlineToolbarProps) {
         <ToolbarButton title="More">
           <MoreHorizontal className="w-3.5 h-3.5" />
         </ToolbarButton>
-        <ToolbarButton title="Close" onClick={handleDelete}>
+        <ToolbarButton title="Delete" onClick={handleDelete}>
           <X className="w-3.5 h-3.5" />
         </ToolbarButton>
       </div>

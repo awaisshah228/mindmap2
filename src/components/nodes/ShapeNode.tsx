@@ -3,19 +3,25 @@
 import { memo } from "react";
 import { Handle, type NodeProps, Position } from "@xyflow/react";
 import { cn } from "@/lib/utils";
+import { BaseNode } from "./BaseNode";
 import { EditableNodeContent } from "./EditableNodeContent";
-import { NodeInlineToolbar } from "@/components/toolbar/NodeInlineToolbar";
+import { SHAPE_PATHS, type ShapeType } from "@/lib/shape-types";
+import { PALETTE_COLORS } from "@/lib/branch-colors";
+import { getIconById } from "@/lib/icon-registry";
 
-type ShapeType = "rectangle" | "diamond" | "circle" | "document";
+const DEFAULT_SHAPE: ShapeType = "rectangle";
+const WIDTH = 140;
+const HEIGHT = 72;
 
 function ShapeNode({ id, data, selected }: NodeProps) {
-  const shape = (data.shape as ShapeType) ?? "rectangle";
+  const shape = (data.shape as ShapeType) ?? DEFAULT_SHAPE;
   const label = (data.label as string) || "Node";
-  const bgColor = data.color as string | undefined;
-
-  const baseClasses =
-    "min-w-[100px] min-h-[50px] flex items-center justify-center p-3 transition-shadow bg-white border-2 " +
-    (selected ? "border-violet-500 shadow-md" : "border-gray-300");
+  const bgColor = (data.color as string) ?? PALETTE_COLORS[0];
+  const pathD = (SHAPE_PATHS[shape as ShapeType] ?? SHAPE_PATHS.rectangle);
+  const isTable = shape === "table";
+  const customIcon = data.customIcon as string | undefined;
+  const iconDef = getIconById(data.icon as string);
+  const IconComponent = iconDef?.Icon;
 
   const formatProps = {
     formatting: {
@@ -26,58 +32,101 @@ function ShapeNode({ id, data, selected }: NodeProps) {
     },
   };
 
-  if (shape === "diamond") {
+  if (isTable) {
+    const rows = 3;
+    const cols = 3;
     return (
-      <>
-        <NodeInlineToolbar nodeId={id} />
-        <div className={cn(baseClasses, "!min-w-[90px] !min-h-[90px]")} style={bgColor ? { backgroundColor: bgColor } : undefined}>
+      <BaseNode
+        nodeId={id}
+        selected={selected}
+        className={cn(
+          "relative border-2 rounded overflow-hidden",
+          selected ? "border-2 border-violet-400 shadow-md" : "border-gray-300"
+        )}
+        style={{ width: WIDTH, height: HEIGHT, backgroundColor: bgColor }}
+      >
           <div
-            className="w-16 h-16 rotate-45 flex items-center justify-center bg-white border-2 border-gray-200"
-            style={{ borderColor: selected ? "rgb(139 92 246)" : undefined }}
+            className="grid w-full h-full"
+            style={{ gridTemplateRows: `repeat(${rows}, 1fr)`, gridTemplateColumns: `repeat(${cols}, 1fr)` }}
           >
-            <EditableNodeContent
-              nodeId={id}
-              value={label}
-              placeholder="Decision"
-              className="text-xs text-gray-700 -rotate-45 truncate max-w-[60px]"
-              {...formatProps}
-            />
+            {Array.from({ length: rows * cols }).map((_, i) => (
+              <div
+                key={i}
+                className="border border-gray-300/80 min-w-0 min-h-0 flex flex-col items-center justify-center p-0.5 gap-0"
+              >
+                {i === 0 ? (
+                  <>
+                    {customIcon ? (
+                      <img src={customIcon} alt="" className="w-4 h-4 object-contain shrink-0" />
+                    ) : IconComponent ? (
+                      <span className="shrink-0 text-gray-600">
+                        <IconComponent className="w-4 h-4" />
+                      </span>
+                    ) : null}
+                    <div className="pointer-events-auto nodrag nokey w-full text-center text-xs">
+                      <EditableNodeContent
+                        nodeId={id}
+                        value={label}
+                        placeholder="Table"
+                        className="text-xs text-gray-800 truncate max-w-full"
+                        {...formatProps}
+                      />
+                    </div>
+                  </>
+                ) : null}
+              </div>
+            ))}
           </div>
-          <Handle id="top" type="target" position={Position.Top} className="!w-2 !h-2" />
-          <Handle id="bottom" type="source" position={Position.Bottom} className="!w-2 !h-2" />
-          <Handle id="left" type="target" position={Position.Left} className="!w-2 !h-2" />
-          <Handle id="right" type="source" position={Position.Right} className="!w-2 !h-2" />
-        </div>
-      </>
+          <Handle id="top" type="target" position={Position.Top} className="!w-2 !h-2 !-top-1" />
+          <Handle id="bottom" type="source" position={Position.Bottom} className="!w-2 !h-2 !-bottom-1" />
+          <Handle id="left" type="target" position={Position.Left} className="!w-2 !h-2 !-left-1" />
+          <Handle id="right" type="source" position={Position.Right} className="!w-2 !h-2 !-right-1" />
+      </BaseNode>
     );
   }
 
   return (
-    <>
-      <NodeInlineToolbar nodeId={id} />
-      <div
-        className={cn(
-          baseClasses,
-          shape === "circle" && "rounded-full !min-w-[70px] !min-h-[70px]",
-          shape === "rectangle" && "rounded",
-          shape === "document" && "rounded-tl rounded-tr rounded-br-lg rounded-bl-lg"
-        )}
-        style={bgColor ? { backgroundColor: bgColor } : undefined}
-      >
-        <Handle id="top" type="target" position={Position.Top} className="!w-2 !h-2" />
-        <Handle id="bottom" type="source" position={Position.Bottom} className="!w-2 !h-2" />
-        <Handle id="left" type="target" position={Position.Left} className="!w-2 !h-2" />
-        <Handle id="right" type="source" position={Position.Right} className="!w-2 !h-2" />
-        <EditableNodeContent
-          nodeId={id}
-          value={label}
-          placeholder="Node"
-          className="text-sm text-gray-700 truncate px-1"
-          {...formatProps}
-        />
-      </div>
-    </>
+    <BaseNode nodeId={id} selected={selected} className="relative" style={{ width: WIDTH, height: HEIGHT }}>
+        <svg
+          width="100%"
+          height="100%"
+          viewBox="0 0 100 100"
+          preserveAspectRatio="none"
+          className="absolute inset-0 pointer-events-none"
+        >
+          <path
+            d={pathD}
+            fill={bgColor}
+            stroke={selected ? "rgb(139 92 246)" : "rgb(148 163 184)"}
+            strokeWidth={selected ? 3 : 1.5}
+            className="pointer-events-auto"
+          />
+        </svg>
+        <div className="absolute inset-0 flex flex-col items-center justify-center p-2 pointer-events-none gap-0.5">
+          {customIcon ? (
+            <img src={customIcon} alt="" className="w-5 h-5 object-contain shrink-0 pointer-events-none" />
+          ) : IconComponent ? (
+            <span className="pointer-events-none shrink-0 text-gray-600">
+              <IconComponent className="w-5 h-5" />
+            </span>
+          ) : null}
+          <div className="pointer-events-auto nodrag nokey w-full min-w-0 text-center">
+            <EditableNodeContent
+              nodeId={id}
+              value={label}
+              placeholder="Node"
+              className="text-sm text-gray-800 truncate max-w-full mx-auto"
+              {...formatProps}
+            />
+          </div>
+        </div>
+        <Handle id="top" type="target" position={Position.Top} className="!w-2 !h-2 !-top-1" />
+        <Handle id="bottom" type="source" position={Position.Bottom} className="!w-2 !h-2 !-bottom-1" />
+        <Handle id="left" type="target" position={Position.Left} className="!w-2 !h-2 !-left-1" />
+        <Handle id="right" type="source" position={Position.Right} className="!w-2 !h-2 !-right-1" />
+    </BaseNode>
   );
 }
 
 export default memo(ShapeNode);
+export type { ShapeType };

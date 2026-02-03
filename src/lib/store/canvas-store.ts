@@ -1,6 +1,7 @@
 import { type Node, type Edge } from "@xyflow/react";
 import { create } from "zustand";
 import type { LayoutDirection, LayoutAlgorithm } from "@/lib/layout-engine";
+import type { ShapeType } from "@/lib/shape-types";
 
 export type MindMapLayoutOptions = {
   algorithm: LayoutAlgorithm;
@@ -35,17 +36,21 @@ interface CanvasState {
   edges: Edge[];
   selectedNodeIds: string[];
   selectedEdgeIds: string[];
+  hoveredNodeId: string | null;
   activeTool: Tool;
+  pendingShape: ShapeType | null;
   mindMapLayout: MindMapLayoutOptions;
   undoStack: { nodes: Node[]; edges: Edge[] }[];
   redoStack: { nodes: Node[]; edges: Edge[] }[];
 
+  setHoveredNodeId: (id: string | null) => void;
   setMindMapLayout: (options: Partial<MindMapLayoutOptions>) => void;
   setNodes: (nodes: Node[] | ((prev: Node[]) => Node[])) => void;
   setEdges: (edges: Edge[] | ((prev: Edge[]) => Edge[])) => void;
   setSelectedNodeIds: (ids: string[]) => void;
   setSelectedEdgeIds: (ids: string[]) => void;
   setActiveTool: (tool: Tool) => void;
+  setPendingShape: (shape: ShapeType | null) => void;
   addNode: (node: Node) => void;
   addNodes: (nodes: Node[]) => void;
   addEdge: (edge: Edge) => void;
@@ -63,11 +68,14 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
   edges: [],
   selectedNodeIds: [],
   selectedEdgeIds: [],
+  hoveredNodeId: null,
   activeTool: "select",
+  pendingShape: null,
   mindMapLayout: DEFAULT_MIND_MAP_LAYOUT,
   undoStack: [],
   redoStack: [],
 
+  setHoveredNodeId: (id) => set({ hoveredNodeId: id }),
   setMindMapLayout: (options) =>
     set((s) => ({
       mindMapLayout: { ...s.mindMapLayout, ...options },
@@ -87,6 +95,7 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
   setSelectedNodeIds: (ids) => set({ selectedNodeIds: ids }),
   setSelectedEdgeIds: (ids) => set({ selectedEdgeIds: ids }),
   setActiveTool: (tool) => set({ activeTool: tool }),
+  setPendingShape: (shape) => set({ pendingShape: shape }),
 
   addNode: (node) =>
     set((state) => ({

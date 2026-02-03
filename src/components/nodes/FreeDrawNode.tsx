@@ -1,9 +1,10 @@
 "use client";
 
 import { memo } from "react";
-import { type NodeProps, NodeResizer } from "@xyflow/react";
+import { type NodeProps, NodeResizer, useReactFlow } from "@xyflow/react";
 import getStroke from "perfect-freehand";
 import { NodeInlineToolbar } from "@/components/toolbar/NodeInlineToolbar";
+import { useCanvasStore } from "@/lib/store/canvas-store";
 
 export type StrokePoint = [number, number, number];
 
@@ -43,6 +44,8 @@ function getBounds(points: StrokePoint[]) {
 
 function FreeDrawNode({ id, data, selected }: NodeProps) {
   const { points = [], color = "#000000", strokeSize = 8 } = (data || {}) as unknown as FreeDrawNodeData;
+  const pushUndo = useCanvasStore((s) => s.pushUndo);
+  const node = useReactFlow().getNode(id);
 
   if (!points.length) return null;
 
@@ -74,16 +77,25 @@ function FreeDrawNode({ id, data, selected }: NodeProps) {
       <NodeInlineToolbar nodeId={id} />
       {selected && (
         <NodeResizer
+          nodeId={id}
+          isVisible={selected}
           minWidth={20}
           minHeight={20}
           keepAspectRatio={false}
+          color="rgb(139 92 246)"
           lineClassName="!border-violet-400"
           handleClassName="!w-2 !h-2 !bg-violet-500 !border-white"
+          onResizeStart={() => pushUndo()}
         />
       )}
       <div
         className="nodrag nokey"
-        style={{ width, height, minWidth: 20, minHeight: 20 }}
+        style={{
+          width: node?.width ?? width,
+          height: node?.height ?? height,
+          minWidth: 20,
+          minHeight: 20,
+        }}
       >
         <svg
           width="100%"

@@ -11,6 +11,8 @@ interface KeyboardHandlerProps {
   setEdges: (edges: Edge[] | ((prev: Edge[]) => Edge[])) => void;
   screenToFlowPosition: (pos: { x: number; y: number }) => { x: number; y: number };
   pushUndo?: () => void;
+  undo?: () => void;
+  redo?: () => void;
 }
 
 export function KeyboardHandler({
@@ -20,6 +22,8 @@ export function KeyboardHandler({
   setEdges,
   screenToFlowPosition,
   pushUndo,
+  undo,
+  redo,
 }: KeyboardHandlerProps) {
   const { copy, paste, deleteSelected } = useCopyPaste(
     getNodes,
@@ -45,6 +49,7 @@ export function KeyboardHandler({
         e.target instanceof HTMLInputElement ||
         e.target instanceof HTMLTextAreaElement ||
         (e.target as HTMLElement).isContentEditable;
+      const isUndoRedo = (e.metaKey || e.ctrlKey) && !inInput;
 
       if (e.key === "a" && (e.metaKey || e.ctrlKey) && !inInput) {
         e.preventDefault();
@@ -59,6 +64,18 @@ export function KeyboardHandler({
       } else if (e.key === "v" && (e.metaKey || e.ctrlKey)) {
         e.preventDefault();
         paste();
+      } else if (isUndoRedo && (e.key === "z" || e.key === "Z" || e.keyCode === 90)) {
+        e.preventDefault();
+        e.stopPropagation();
+        if (e.shiftKey) {
+          redo?.();
+        } else {
+          undo?.();
+        }
+      } else if (isUndoRedo && (e.key === "y" || e.key === "Y" || e.keyCode === 89)) {
+        e.preventDefault();
+        e.stopPropagation();
+        redo?.();
       } else if (e.key === "Escape") {
         if (!inInput) deselectAll();
       } else if (e.key === "Backspace" || e.key === "Delete") {
@@ -69,9 +86,9 @@ export function KeyboardHandler({
         }
       }
     };
-    window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [copy, paste, deleteSelected, pushUndo, selectAll, deselectAll]);
+    document.addEventListener("keydown", handleKeyDown, true);
+    return () => document.removeEventListener("keydown", handleKeyDown, true);
+  }, [copy, paste, deleteSelected, pushUndo, undo, redo, selectAll, deselectAll]);
 
   return null;
 }

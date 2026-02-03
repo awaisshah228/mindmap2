@@ -1,3 +1,4 @@
+export { BaseNode } from "./BaseNode";
 export { default as StickyNoteNode } from "./StickyNoteNode";
 export { default as MindMapNode } from "./MindMapNode";
 export { default as ShapeNode } from "./ShapeNode";
