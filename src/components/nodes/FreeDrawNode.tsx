@@ -1,9 +1,8 @@
 "use client";
 
-import { memo } from "react";
-import { type NodeProps, NodeResizer, useReactFlow } from "@xyflow/react";
+import { memo, useMemo } from "react";
+import { type NodeProps, NodeResizer } from "@xyflow/react";
 import getStroke from "perfect-freehand";
-import { NodeInlineToolbar } from "@/components/toolbar/NodeInlineToolbar";
 import { useCanvasStore } from "@/lib/store/canvas-store";
 
 export type StrokePoint = [number, number, number];
@@ -12,6 +11,7 @@ export interface FreeDrawNodeData {
   points: StrokePoint[];
   color?: string;
   strokeSize?: number;
+  initialSize?: { width: number; height: number };
 }
 
 function getSvgPathFromStroke(stroke: number[][]): string {
@@ -42,29 +42,30 @@ function getBounds(points: StrokePoint[]) {
   return { minX, minY, maxX, maxY };
 }
 
-function FreeDrawNode({ id, data, selected }: NodeProps) {
-  const { points = [], color = "#000000", strokeSize = 8 } = (data || {}) as unknown as FreeDrawNodeData;
+function FreeDrawNode({ id, data, width, height, selected, dragging }: NodeProps) {
+  const { points = [], color = "#000000", strokeSize = 8, initialSize } =
+    (data || {}) as unknown as FreeDrawNodeData;
   const pushUndo = useCanvasStore((s) => s.pushUndo);
-  const node = useReactFlow().getNode(id);
 
   if (!points.length) return null;
 
-  const bounds = getBounds(points);
-  const padding = (strokeSize || 8) + 4;
-  const width = bounds.maxX - bounds.minX + padding * 2;
-  const height = bounds.maxY - bounds.minY + padding * 2;
+  const baseWidth = initialSize?.width;
+  const baseHeight = initialSize?.height;
 
-  const normalizedPoints = points.map(([x, y, pressure]) => [
-    x - bounds.minX + padding,
-    y - bounds.minY + padding,
-    pressure,
-  ]);
+  const scaleX = baseWidth && width ? width / baseWidth : 1;
+  const scaleY = baseHeight && height ? height / baseHeight : 1;
+
+  const normalizedPoints = useMemo(
+    () =>
+      points.map(([x, y, pressure]) => [x * scaleX, y * scaleY, pressure] as StrokePoint),
+    [points, scaleX, scaleY]
+  );
 
   const outlinePoints = getStroke(normalizedPoints, {
     size: strokeSize || 8,
-    thinning: 0.5,
-    smoothing: 0.5,
-    streamline: 0.5,
+    thinning: 0.6,
+    smoothing: 0.7,
+    streamline: 0.7,
     easing: (t) => t,
     start: { taper: 0, cap: true },
     end: { taper: 0, cap: true },
@@ -74,11 +75,10 @@ function FreeDrawNode({ id, data, selected }: NodeProps) {
 
   return (
     <>
-      <NodeInlineToolbar nodeId={id} />
       {selected && (
         <NodeResizer
           nodeId={id}
-          isVisible={selected}
+          isVisible={selected && !dragging}
           minWidth={20}
           minHeight={20}
           keepAspectRatio={false}
@@ -89,25 +89,15 @@ function FreeDrawNode({ id, data, selected }: NodeProps) {
         />
       )}
       <div
-        className="nodrag nokey"
-        style={{
-          width: node?.width ?? width,
-          height: node?.height ?? height,
-          minWidth: 20,
-          minHeight: 20,
-        }}
+        className="relative"
+        style={{ width: width ?? baseWidth ?? 20, height: height ?? baseHeight ?? 20, minWidth: 20, minHeight: 20 }}
       >
         <svg
           width="100%"
           height="100%"
-          style={{ overflow: "visible" }}
-          className={selected ? "ring-2 ring-violet-400 rounded" : ""}
+          style={{ overflow: "visible", cursor: "move" }}
         >
-          <path
-            d={pathData}
-            fill={color}
-            stroke="none"
-          />
+          <path d={pathData} fill={color} stroke="none" />
         </svg>
       </div>
     </>

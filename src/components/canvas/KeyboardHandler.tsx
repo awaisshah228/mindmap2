@@ -3,6 +3,7 @@
 import { useCallback, useEffect } from "react";
 import { useCopyPaste } from "@/hooks/useCopyPaste";
 import type { Node, Edge } from "@xyflow/react";
+import { useCanvasStore } from "@/lib/store/canvas-store";
 
 interface KeyboardHandlerProps {
   getNodes: () => Node[];
@@ -33,6 +34,8 @@ export function KeyboardHandler({
     screenToFlowPosition
   );
 
+  const setActiveTool = useCanvasStore((s) => s.setActiveTool);
+
   const selectAll = useCallback(() => {
     setNodes((nds) => nds.map((n) => ({ ...n, selected: true })));
     setEdges((eds) => eds.map((e) => ({ ...e, selected: true })));
@@ -50,6 +53,28 @@ export function KeyboardHandler({
         e.target instanceof HTMLTextAreaElement ||
         (e.target as HTMLElement).isContentEditable;
       const isUndoRedo = (e.metaKey || e.ctrlKey) && !inInput;
+
+      // Tool switching (only when not in input and no modifier keys)
+      if (!inInput && !e.metaKey && !e.ctrlKey) {
+        if (e.key === "v" || e.key === "V") {
+          // V = Select tool (like Figma)
+          e.preventDefault();
+          setActiveTool("select");
+          return;
+        }
+        if (e.key === "m" || e.key === "M") {
+          // M = Move nodes tool
+          e.preventDefault();
+          setActiveTool("move");
+          return;
+        }
+        if (e.key === "h" || e.key === "H") {
+          // H = Pan tool (hand)
+          e.preventDefault();
+          setActiveTool("pan");
+          return;
+        }
+      }
 
       if (e.key === "a" && (e.metaKey || e.ctrlKey) && !inInput) {
         e.preventDefault();

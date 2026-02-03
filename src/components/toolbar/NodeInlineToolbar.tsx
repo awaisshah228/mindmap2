@@ -18,6 +18,10 @@ import {
   Type,
   Shapes,
   Smile,
+  Plus,
+  Minus,
+  Rows3,
+  Columns3,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useCanvasStore } from "@/lib/store/canvas-store";
@@ -60,9 +64,10 @@ export function NodeInlineToolbar({ nodeId, selected = false }: NodeInlineToolba
   const nodeType = node?.type ?? "";
   const isMindMap = nodeType === "mindMap";
   const isShapeNode = SHAPE_NODE_TYPES.includes(nodeType);
-  const hasColorPicker = ["mindMap", "stickyNote", "text", "rectangle", "diamond", "circle", "document"].includes(nodeType);
+  const hasColorPicker = ["mindMap", "stickyNote", "text", "rectangle", "diamond", "circle", "document", "table"].includes(nodeType);
   const hasShapePicker = isShapeNode;
   const hasIconPicker = ["rectangle", "diamond", "circle", "document", "mindMap", "stickyNote", "text"].includes(nodeType);
+  const isTableNode = nodeType === "table";
   const toolbarVisible = selected || hoveredNodeId === nodeId;
   const currentShape = (node?.data?.shape as ShapeType) ?? "rectangle";
   const currentIcon = (node?.data?.icon as string) ?? null;
@@ -127,9 +132,48 @@ export function NodeInlineToolbar({ nodeId, selected = false }: NodeInlineToolba
     if (hasIconPicker) updateNodeData(nodeId, { customIcon: dataUrl ?? undefined });
   };
 
+  const tableRows = (node?.data?.tableRows as number) ?? 3;
+  const tableCols = (node?.data?.tableCols as number) ?? 3;
+  const tableCells = (node?.data?.cells as Record<string, string>) ?? {};
+  const handleTableAddRow = () => updateNodeData(nodeId, { tableRows: tableRows + 1 });
+  const handleTableAddColumn = () => updateNodeData(nodeId, { tableCols: tableCols + 1 });
+  const handleTableDeleteRow = () => {
+    if (tableRows <= 1) return;
+    const nextCells = { ...tableCells };
+    for (let c = 0; c < tableCols; c++) delete nextCells[`${tableRows - 1},${c}`];
+    updateNodeData(nodeId, { tableRows: tableRows - 1, cells: nextCells });
+  };
+  const handleTableDeleteColumn = () => {
+    if (tableCols <= 1) return;
+    const nextCells = { ...tableCells };
+    for (let r = 0; r < tableRows; r++) delete nextCells[`${r},${tableCols - 1}`];
+    updateNodeData(nodeId, { tableCols: tableCols - 1, cells: nextCells });
+  };
+
   return (
     <NodeToolbar position={Position.Top} offset={8} align="center" isVisible={toolbarVisible}>
       <div className="flex flex-wrap items-center gap-0.5 bg-gray-800 text-gray-200 rounded-lg px-1 py-1 shadow-lg border border-gray-700">
+        {isTableNode && (
+          <>
+            <ToolbarButton title="Add row" onClick={handleTableAddRow}>
+              <Plus className="w-3.5 h-3.5" />
+              <Rows3 className="w-3.5 h-3.5" />
+            </ToolbarButton>
+            <ToolbarButton title="Add column" onClick={handleTableAddColumn}>
+              <Plus className="w-3.5 h-3.5" />
+              <Columns3 className="w-3.5 h-3.5" />
+            </ToolbarButton>
+            <ToolbarButton title="Delete last row" onClick={handleTableDeleteRow} disabled={tableRows <= 1}>
+              <Minus className="w-3.5 h-3.5" />
+              <Rows3 className="w-3.5 h-3.5" />
+            </ToolbarButton>
+            <ToolbarButton title="Delete last column" onClick={handleTableDeleteColumn} disabled={tableCols <= 1}>
+              <Minus className="w-3.5 h-3.5" />
+              <Columns3 className="w-3.5 h-3.5" />
+            </ToolbarButton>
+            <ToolbarDivider />
+          </>
+        )}
         {hasShapePicker && (
           <Popover.Root open={shapeOpen} onOpenChange={setShapeOpen}>
             <Popover.Trigger asChild>
@@ -336,18 +380,21 @@ function ToolbarButton({
   children,
   onClick,
   active,
+  disabled,
 }: {
   title: string;
   children: React.ReactNode;
   onClick?: () => void;
   active?: boolean;
+  disabled?: boolean;
 }) {
   return (
     <button
       type="button"
       onClick={onClick}
       title={title}
-      className={`p-1.5 rounded transition-colors ${active ? "bg-violet-600 text-white" : "hover:bg-gray-600"}`}
+      disabled={disabled}
+      className={`p-1.5 rounded transition-colors ${active ? "bg-violet-600 text-white" : "hover:bg-gray-600"} ${disabled ? "opacity-50 cursor-not-allowed" : ""}`}
       aria-label={title}
     >
       {children}

@@ -27,9 +27,13 @@ export type NodeType =
   | "mindMap"
   | "frame"
   | "list"
-  | "freeDraw";
+  | "freeDraw"
+  | "icon";
 
-export type Tool = NodeType | "connector" | "pan" | "select" | "ai";
+export type Tool = NodeType | "connector" | "pan" | "select" | "move" | "emoji" | "eraser" | "ai";
+
+/** Edge connector type for new edges (Bezier, Straight, Smooth step). */
+export type PendingEdgeType = "default" | "straight" | "smoothstep";
 
 interface CanvasState {
   nodes: Node[];
@@ -39,6 +43,10 @@ interface CanvasState {
   hoveredNodeId: string | null;
   activeTool: Tool;
   pendingShape: ShapeType | null;
+  pendingEmoji: string | null;
+  pendingIconId: string | null;
+  /** Connector type for newly drawn edges when connector tool is used. */
+  pendingEdgeType: PendingEdgeType;
   mindMapLayout: MindMapLayoutOptions;
   undoStack: { nodes: Node[]; edges: Edge[] }[];
   redoStack: { nodes: Node[]; edges: Edge[] }[];
@@ -51,6 +59,9 @@ interface CanvasState {
   setSelectedEdgeIds: (ids: string[]) => void;
   setActiveTool: (tool: Tool) => void;
   setPendingShape: (shape: ShapeType | null) => void;
+  setPendingEmoji: (emoji: string | null) => void;
+  setPendingIconId: (id: string | null) => void;
+  setPendingEdgeType: (type: PendingEdgeType) => void;
   addNode: (node: Node) => void;
   addNodes: (nodes: Node[]) => void;
   addEdge: (edge: Edge) => void;
@@ -69,8 +80,11 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
   selectedNodeIds: [],
   selectedEdgeIds: [],
   hoveredNodeId: null,
-  activeTool: "select",
+  activeTool: "move",
   pendingShape: null,
+  pendingEmoji: null,
+  pendingIconId: null,
+  pendingEdgeType: "default",
   mindMapLayout: DEFAULT_MIND_MAP_LAYOUT,
   undoStack: [],
   redoStack: [],
@@ -96,6 +110,9 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
   setSelectedEdgeIds: (ids) => set({ selectedEdgeIds: ids }),
   setActiveTool: (tool) => set({ activeTool: tool }),
   setPendingShape: (shape) => set({ pendingShape: shape }),
+  setPendingEmoji: (emoji) => set({ pendingEmoji: emoji }),
+  setPendingIconId: (id) => set({ pendingIconId: id }),
+  setPendingEdgeType: (type) => set({ pendingEdgeType: type }),
 
   addNode: (node) =>
     set((state) => ({

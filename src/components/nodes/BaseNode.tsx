@@ -34,6 +34,7 @@ export function BaseNode({
   const { getNode } = useReactFlow();
   const node = getNode(nodeId);
   const setHoveredNodeId = useCanvasStore((s) => s.setHoveredNodeId);
+  const activeTool = useCanvasStore((s) => s.activeTool);
   const pushUndo = useCanvasStore((s) => s.pushUndo);
   const onMouseEnter = useCallback(() => setHoveredNodeId(nodeId), [nodeId, setHoveredNodeId]);
   const onMouseLeave = useCallback(() => setHoveredNodeId(null), [setHoveredNodeId]);
@@ -59,7 +60,7 @@ export function BaseNode({
       />
       <div
         className={cn(
-          "transition-shadow",
+          "relative transition-shadow",
           selected && "ring-2 ring-violet-400 ring-offset-1 shadow-md",
           className
         )}
@@ -67,7 +68,17 @@ export function BaseNode({
         onMouseEnter={onMouseEnter}
         onMouseLeave={onMouseLeave}
       >
-        {children}
+        <div
+          className={cn(
+            "h-full w-full",
+            // Allow dragging from the whole body when:
+            // - Move tool is active
+            // - OR Select tool is active AND this node is already selected
+            !(activeTool === "move" || (activeTool === "select" && selected)) && "nodrag"
+          )}
+        >
+          {children}
+        </div>
       </div>
     </>
   );

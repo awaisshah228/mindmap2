@@ -22,7 +22,7 @@ import {
 } from "@xyflow/react";
 import { KeyboardHandler } from "./KeyboardHandler";
 import { HelperLines } from "./HelperLines";
-import { getLayoutedElements, type LayoutDirection } from "@/lib/layout-engine";
+import { getLayoutedElements } from "@/lib/layout-engine";
 import { resolveCollisions } from "@/lib/resolve-collisions";
 import { getHiddenNodeIds } from "@/lib/mindmap-utils";
 import "@xyflow/react/dist/style.css";
@@ -37,12 +37,20 @@ import {
   ShapeNode,
   TextNode,
   FreeDrawNode,
+  TableNode,
+  EdgeAnchorNode,
+  IconNode,
 } from "@/components/nodes";
 import { FreeDrawPreview, type Stroke } from "./FreeDrawPreview";
+import { EdgeDrawPreview } from "./EdgeDrawPreview";
+import { EraserPreview } from "./EraserPreview";
 import LabeledConnectorEdge from "@/components/edges/LabeledConnectorEdge";
+import { CustomConnectionLine } from "@/components/edges/CustomConnectionLine";
 import { MindMapLayoutPanel } from "@/components/panels/MindMapLayoutPanel";
 import { MobileColorIndicator } from "@/components/panels/MobileColorIndicator";
 import { MindMapLayoutProvider } from "@/contexts/MindMapLayoutContext";
+
+const EDGE_ANCHOR_SIZE = 12;
 
 const nodeTypes = {
   stickyNote: StickyNoteNode,
@@ -51,8 +59,11 @@ const nodeTypes = {
   diamond: ShapeNode,
   circle: ShapeNode,
   document: ShapeNode,
+  table: TableNode,
   text: TextNode,
   freeDraw: FreeDrawNode,
+  edgeAnchor: EdgeAnchorNode,
+  icon: IconNode,
 };
 
 const MIND_MAP_NODE_WIDTH = 170;
@@ -171,6 +182,10 @@ export default function DiagramCanvas() {
   const activeTool = useCanvasStore((s) => s.activeTool);
   const pendingShape = useCanvasStore((s) => s.pendingShape);
   const setPendingShape = useCanvasStore((s) => s.setPendingShape);
+  const pendingEmoji = useCanvasStore((s) => s.pendingEmoji);
+  const setPendingEmoji = useCanvasStore((s) => s.setPendingEmoji);
+  const pendingIconId = useCanvasStore((s) => s.pendingIconId);
+  const setPendingIconId = useCanvasStore((s) => s.setPendingIconId);
   const addNode = useCanvasStore((s) => s.addNode);
   const addEdgeToStore = useCanvasStore((s) => s.addEdge);
   const setActiveTool = useCanvasStore((s) => s.setActiveTool);
@@ -187,6 +202,12 @@ export default function DiagramCanvas() {
   }>({ horizontal: null, vertical: null });
 
   const [currentStroke, setCurrentStroke] = useState<Stroke | null>(null);
+
+  const [edgeDrawStart, setEdgeDrawStart] = useState<{ x: number; y: number } | null>(null);
+  const [edgeDrawEndPreview, setEdgeDrawEndPreview] = useState<{ x: number; y: number } | null>(null);
+  const [edgeDrawPoints, setEdgeDrawPoints] = useState<{ x: number; y: number }[]>([]);
+  const [eraserPoints, setEraserPoints] = useState<{ x: number; y: number }[]>([]);
+  const [isErasing, setIsErasing] = useState(false);
 
   const hiddenNodeIds = useMemo(
     () => getHiddenNodeIds(nodes, edges),
@@ -223,6 +244,39 @@ export default function DiagramCanvas() {
       centerY: node.position.y + (Number(h) || DEFAULT_NODE_HEIGHT) / 2,
     };
   }, []);
+
+  const eraseAt = useCallback(
+    (x: number, y: number) => {
+      setNodes((prevNodes) => {
+        const toRemoveIds = prevNodes
+          .filter((n) => {
+            if (n.type === "freeDraw") return true;
+            if (["rectangle", "diamond", "circle", "document", "stickyNote", "text", "table"].includes(n.type ?? "")) {
+              return true;
+            }
+            return false;
+          })
+          .filter((n) => {
+            const w = n.measured?.width ?? n.width ?? DEFAULT_NODE_WIDTH;
+            const h = n.measured?.height ?? n.height ?? DEFAULT_NODE_HEIGHT;
+            const left = n.position.x;
+            const top = n.position.y;
+            const right = left + (Number(w) || DEFAULT_NODE_WIDTH);
+            const bottom = top + (Number(h) || DEFAULT_NODE_HEIGHT);
+            return x >= left && x <= right && y >= top && y <= bottom;
+          })
+          .map((n) => n.id);
+
+        if (!toRemoveIds.length) return prevNodes;
+
+        setEdges((eds) =>
+          eds.filter((e) => !toRemoveIds.includes(e.source) && !toRemoveIds.includes(e.target))
+        );
+        return prevNodes.filter((n) => !toRemoveIds.includes(n.id));
+      });
+    },
+    [setNodes, setEdges]
+  );
 
   const checkAlignment = useCallback(
     (draggedNode: Node) => {
@@ -301,19 +355,19 @@ export default function DiagramCanvas() {
     [checkAlignment, setNodes]
   );
 
-  const onNodeDragStop = useCallback(
-    (_event: React.MouseEvent, _node: Node, nodesOnStop: Node[]) => {
-      setHelperLines({ horizontal: null, vertical: null });
-      setNodes((nds) =>
-        resolveCollisions(nds, {
-          maxIterations: 100,
-          overlapThreshold: 0.5,
-          margin: 15,
-        })
-      );
-    },
-    [setNodes]
-  );
+  const onNodeDragStop = useCallback(() => {
+    setHelperLines({ horizontal: null, vertical: null });
+    setNodes((nds) => {
+      const movable = nds.filter((n) => n.type !== "freeDraw");
+      const freeDraw = nds.filter((n) => n.type === "freeDraw");
+      const resolved = resolveCollisions(movable, {
+        maxIterations: 100,
+        overlapThreshold: 0.5,
+        margin: 15,
+      });
+      return [...resolved, ...freeDraw];
+    });
+  }, [setNodes]);
 
   const onInit = useCallback((instance: ReactFlowInstance) => {
     reactFlowRef.current = instance;
@@ -350,6 +404,7 @@ export default function DiagramCanvas() {
     [setEdges]
   );
 
+  const pendingEdgeType = useCanvasStore((s) => s.pendingEdgeType);
   const onConnect = useCallback(
     (params: Connection) => {
       pushUndo();
@@ -360,33 +415,61 @@ export default function DiagramCanvas() {
         ...params,
         id: edgeId,
         type: "labeledConnector",
-        data: { connectorType: "default" },
+        data: { connectorType: pendingEdgeType },
       };
       setEdges((eds) => [...eds, newEdge]);
       addEdgeToStore(newEdge);
     },
-    [setEdges, addEdgeToStore]
+    [setEdges, addEdgeToStore, pendingEdgeType, pushUndo]
   );
 
-  const onLayout = useCallback(
-    async (direction: LayoutDirection) => {
-      const spacing: [number, number] = [mindMapLayout.spacingX, mindMapLayout.spacingY];
-      const { nodes: layoutedNodes, edges: layoutedEdges } = await getLayoutedElements(
-        nodes,
-        edges,
-        direction,
-        spacing,
-        mindMapLayout.algorithm
-      );
-      setEdges(layoutedEdges);
-      const collisionFreeNodes = resolveCollisions(layoutedNodes, {
-        maxIterations: 150,
-        overlapThreshold: 0,
-        margin: 24,
-      });
-      setNodes(collisionFreeNodes);
+  const onConnectEnd = useCallback(
+    (
+      event: MouseEvent | TouchEvent,
+      connectionState: {
+        fromNode?: { id: string } | null;
+        fromHandle?: { id?: string | null } | null;
+        isValid?: boolean | null;
+      }
+    ) => {
+      if (connectionState.isValid || !connectionState.fromNode || !reactFlowRef.current) return;
+      const fromNodeData = nodes.find((n) => n.id === connectionState.fromNode?.id);
+      const isFromMindMap = fromNodeData?.type === "mindMap";
+      const { clientX, clientY } =
+        "changedTouches" in event ? (event as TouchEvent).changedTouches[0] : (event as MouseEvent);
+      const position = reactFlowRef.current.screenToFlowPosition({ x: clientX, y: clientY });
+      pushUndo();
+      const newNodeId = `node-${Date.now()}`;
+      const newNode: Node = isFromMindMap
+        ? {
+            id: newNodeId,
+            type: "mindMap",
+            position: { x: position.x - MIND_MAP_NODE_WIDTH / 2, y: position.y - 22 },
+            data: { label: "New node" },
+          }
+        : {
+            id: newNodeId,
+            type: "rectangle",
+            position: { x: position.x - 70, y: position.y - 36 },
+            data: { label: "New node", shape: "rectangle" },
+          };
+      addNode(newNode);
+      setNodes((nds) => [...nds, { ...newNode, selected: false }]);
+      const sourceHandleId = connectionState.fromHandle?.id ?? undefined;
+      const edgeId = `e-${connectionState.fromNode.id}-${sourceHandleId ?? "s"}-${newNodeId}-left-${Date.now()}`;
+      const newEdge: Edge = {
+        id: edgeId,
+        source: connectionState.fromNode.id,
+        target: newNodeId,
+        sourceHandle: sourceHandleId,
+        targetHandle: "left",
+        type: "labeledConnector",
+        data: { connectorType: pendingEdgeType },
+      };
+      setEdges((eds) => [...eds, newEdge]);
+      addEdgeToStore(newEdge);
     },
-    [nodes, edges, setNodes, setEdges, mindMapLayout]
+    [nodes, addNode, setNodes, setEdges, addEdgeToStore, pushUndo, pendingEdgeType]
   );
 
   const handleAddMindMapNode = useCallback(
@@ -443,26 +526,53 @@ export default function DiagramCanvas() {
         maxY = Math.max(maxY, y);
       }
       const padding = stroke.size + 4;
-      const normalizedPoints = pts.map(([x, y, p]) => [x - minX, y - minY, p] as [number, number, number]);
+      const normalizedPoints = pts.map(([x, y, p]) => [x - minX + padding, y - minY + padding, p] as [number, number, number]);
       pushUndo();
       const newNode: Node = {
         id: `fd-${Date.now()}`,
         type: "freeDraw",
         position: { x: minX - padding, y: minY - padding },
-        data: { points: normalizedPoints, color: stroke.color, strokeSize: stroke.size },
+        data: {
+          points: normalizedPoints,
+          color: stroke.color,
+          strokeSize: stroke.size,
+          initialSize: {
+            width: maxX - minX + padding * 2,
+            height: maxY - minY + padding * 2,
+          },
+        },
+        width: maxX - minX + padding * 2,
+        height: maxY - minY + padding * 2,
       };
-      setNodes((nds) => nds.map((n) => ({ ...n, selected: false })));
+      // Keep existing selections; also select the new freehand node
       setNodes((nds) => [...nds, { ...newNode, selected: true }]);
       addNode(newNode);
-      setActiveTool("select");
     },
-    [pushUndo, setNodes, addNode, setActiveTool]
+    [pushUndo, setNodes, addNode]
   );
 
   const onPointerDown = useCallback(
     (e: React.PointerEvent) => {
-      if (activeTool !== "freeDraw" || !reactFlowRef.current) return;
       const target = e.target as HTMLElement;
+      const onPane = !target.closest(".react-flow__node") && !target.closest(".react-flow__controls");
+
+      if (activeTool === "eraser" && reactFlowRef.current && onPane) {
+        const pos = reactFlowRef.current.screenToFlowPosition({ x: e.clientX, y: e.clientY });
+        setIsErasing(true);
+        setEraserPoints([{ x: pos.x, y: pos.y }]);
+        eraseAt(pos.x, pos.y);
+        return;
+      }
+
+      if (activeTool === "connector" && onPane && reactFlowRef.current && !edgeDrawStart) {
+        const pos = reactFlowRef.current.screenToFlowPosition({ x: e.clientX, y: e.clientY });
+        setEdgeDrawStart({ x: pos.x, y: pos.y });
+        setEdgeDrawEndPreview({ x: pos.x, y: pos.y });
+        setEdgeDrawPoints([]);
+        return;
+      }
+
+      if (activeTool !== "freeDraw" || !reactFlowRef.current) return;
       if (target.closest(".react-flow__node") || target.closest(".react-flow__controls")) return;
       e.preventDefault();
       const pos = reactFlowRef.current.screenToFlowPosition({ x: e.clientX, y: e.clientY });
@@ -474,24 +584,125 @@ export default function DiagramCanvas() {
         size: 8,
       });
     },
-    [activeTool]
+    [activeTool, edgeDrawStart, eraseAt]
   );
 
   const onPointerMove = useCallback(
     (e: React.PointerEvent) => {
+      if (activeTool === "eraser" && isErasing && reactFlowRef.current) {
+        const pos = reactFlowRef.current.screenToFlowPosition({ x: e.clientX, y: e.clientY });
+        setEraserPoints((pts) => [...pts, { x: pos.x, y: pos.y }]);
+        eraseAt(pos.x, pos.y);
+        return;
+      }
+
+      if (activeTool === "connector" && edgeDrawStart && reactFlowRef.current) {
+        const pos = reactFlowRef.current.screenToFlowPosition({ x: e.clientX, y: e.clientY });
+        setEdgeDrawEndPreview({ x: pos.x, y: pos.y });
+
+        // For straight edges, always preview a simple straight line (no intermediate points).
+        if (pendingEdgeType === "straight") {
+          return;
+        }
+
+        // For curved/step edges, collect preview points (downsampled) so the line follows the drag path.
+        setEdgeDrawPoints((pts) => {
+          const last = pts[pts.length - 1] ?? edgeDrawStart;
+          const dx = pos.x - last.x;
+          const dy = pos.y - last.y;
+          const MIN_DIST_SQ = 16; // ~4px
+          if (dx * dx + dy * dy < MIN_DIST_SQ) return pts;
+
+          const MAX_POINTS = 200;
+          const next = { x: pos.x, y: pos.y };
+          if (pts.length >= MAX_POINTS) {
+            return [...pts.slice(pts.length - MAX_POINTS + 1), next];
+          }
+          return [...pts, next];
+        });
+        return;
+      }
       if (activeTool !== "freeDraw" || !currentStroke || !reactFlowRef.current) return;
       e.preventDefault();
       const pos = reactFlowRef.current.screenToFlowPosition({ x: e.clientX, y: e.clientY });
       const pressure = e.pressure || 0.5;
-      setCurrentStroke((s) =>
-        s ? { ...s, points: [...s.points, [pos.x, pos.y, pressure]] } : null
-      );
+      // Downsample points a bit so we don't add one on every tiny move.
+      setCurrentStroke((s) => {
+        if (!s) return s;
+        const last = s.points[s.points.length - 1];
+        const dx = pos.x - last[0];
+        const dy = pos.y - last[1];
+        const MIN_DIST_SQ = 9; // ~3px
+        if (dx * dx + dy * dy < MIN_DIST_SQ) return s;
+        return { ...s, points: [...s.points, [pos.x, pos.y, pressure]] };
+      });
     },
-    [activeTool, currentStroke]
+    [activeTool, currentStroke, edgeDrawStart, pendingEdgeType, isErasing, eraseAt]
   );
 
   const onPointerUp = useCallback(
     (e: React.PointerEvent) => {
+      if (activeTool === "eraser" && isErasing) {
+        setIsErasing(false);
+        setEraserPoints([]);
+        return;
+      }
+
+      // Finish standalone connector on mouse/touch release
+      if (activeTool === "connector" && edgeDrawStart && reactFlowRef.current) {
+        const pos = reactFlowRef.current.screenToFlowPosition({ x: e.clientX, y: e.clientY });
+
+        // If the drag didn't really move, don't create a degenerate edge
+        const dx = pos.x - edgeDrawStart.x;
+        const dy = pos.y - edgeDrawStart.y;
+        const distSq = dx * dx + dy * dy;
+        const MIN_DIST_SQ = 4; // 2px in flow units (roughly)
+
+        if (distSq >= MIN_DIST_SQ) {
+          pushUndo();
+          const half = EDGE_ANCHOR_SIZE / 2;
+          const id1 = `anchor-${Date.now()}-1`;
+          const id2 = `anchor-${Date.now()}-2`;
+          const anchor1: Node = {
+            id: id1,
+            type: "edgeAnchor",
+            position: { x: edgeDrawStart.x - half, y: edgeDrawStart.y - half },
+            data: {},
+          };
+          const anchor2: Node = {
+            id: id2,
+            type: "edgeAnchor",
+            position: { x: pos.x - half, y: pos.y - half },
+            data: {},
+          };
+          const edgeId = `e-${id1}-${id2}-${Date.now()}`;
+          const newEdge: Edge = {
+            id: edgeId,
+            source: id1,
+            target: id2,
+            sourceHandle: "right",
+            targetHandle: "left",
+            type: "labeledConnector",
+            data: {
+              connectorType: pendingEdgeType,
+              // For straight edges, ignore drag path points so the edge is a true straight line.
+              pathPoints: pendingEdgeType === "straight" ? [] : edgeDrawPoints,
+            },
+          };
+          addNode(anchor1);
+          addNode(anchor2);
+          addEdgeToStore(newEdge);
+          setNodes((nds) => [...nds, anchor1, anchor2]);
+          setEdges((eds) => [...eds, newEdge]);
+        }
+
+        setEdgeDrawStart(null);
+        setEdgeDrawEndPreview(null);
+        setEdgeDrawPoints([]);
+        return;
+      }
+
+      // Finish freehand stroke
       if (activeTool !== "freeDraw" || !currentStroke) return;
       e.preventDefault();
       if (currentStroke.points.length > 1) {
@@ -499,12 +710,35 @@ export default function DiagramCanvas() {
       }
       setCurrentStroke(null);
     },
-    [activeTool, currentStroke, createFreeDrawNode]
+    [
+      activeTool,
+      edgeDrawStart,
+      edgeDrawPoints,
+      pendingEdgeType,
+      currentStroke,
+      createFreeDrawNode,
+      addNode,
+      addEdgeToStore,
+      setNodes,
+      setEdges,
+      pushUndo,
+      setEdgeDrawStart,
+      setEdgeDrawEndPreview,
+      setEdgeDrawPoints,
+      isErasing,
+    ]
   );
 
   const onPaneClick = useCallback(
     (event: React.MouseEvent) => {
-      if (activeTool === "select" || activeTool === "pan" || activeTool === "ai" || activeTool === "freeDraw")
+      if (
+        activeTool === "select" ||
+        activeTool === "move" ||
+        activeTool === "eraser" ||
+        activeTool === "pan" ||
+        activeTool === "ai" ||
+        activeTool === "freeDraw"
+      )
         return;
 
       const target = event.target as HTMLElement;
@@ -517,48 +751,104 @@ export default function DiagramCanvas() {
         y: event.clientY,
       });
 
+      if (activeTool === "connector") {
+        // Standalone connector drawing is handled via pointer down/move/up;
+        // pane clicks while in connector mode should not start or finish edges.
+        return;
+      }
+
+      if (activeTool === "emoji") {
+        if (pendingIconId) {
+          pushUndo();
+          const id = `icon-${Date.now()}`;
+          const size = 64;
+          const newNode: Node = {
+            id,
+            type: "icon",
+            position: { x: flowX - size / 2, y: flowY - size / 2 },
+            data: { iconId: pendingIconId },
+            width: size,
+            height: size,
+          };
+          addNode(newNode);
+          setNodes((nds) => [...nds, { ...newNode, selected: true }]);
+          setActiveTool("move");
+          setPendingIconId(null);
+        } else if (pendingEmoji) {
+          pushUndo();
+          const id = `emoji-${Date.now()}`;
+          const size = 64;
+          const newNode: Node = {
+            id,
+            type: "icon",
+            position: { x: flowX - size / 2, y: flowY - size / 2 },
+            data: { emoji: pendingEmoji },
+            width: size,
+            height: size,
+          };
+          addNode(newNode);
+          setNodes((nds) => [...nds, { ...newNode, selected: true }]);
+          setActiveTool("move");
+          setPendingEmoji(null);
+        }
+        return;
+      }
+
+
       const nodeTypesMap: Record<string, string> = {
         stickyNote: "stickyNote",
         rectangle: "rectangle",
         diamond: "diamond",
         circle: "circle",
         document: "document",
+        table: "table",
         text: "text",
         mindMap: "mindMap",
         frame: "rectangle",
         list: "text",
       };
 
-      const type = nodeTypesMap[activeTool] ?? "rectangle";
-      const id = `node-${Date.now()}`;
       const isShapeType = ["rectangle", "diamond", "circle", "document"].includes(activeTool);
       const shapeFromPending = isShapeType && pendingShape ? pendingShape : null;
-      const defaultShape =
-        type === "rectangle"
-          ? (activeTool === "rectangle" ? "rectangle" : "document")
-          : type === "diamond"
-            ? "diamond"
-            : type === "circle"
-              ? "circle"
-              : type === "document"
-                ? "document"
-                : "rectangle";
-      const shape = shapeFromPending ?? defaultShape;
+      const shape =
+        shapeFromPending ??
+        (activeTool === "rectangle"
+          ? "rectangle"
+          : activeTool === "document"
+            ? "document"
+            : activeTool === "diamond"
+              ? "diamond"
+              : activeTool === "circle"
+                ? "circle"
+                : "rectangle");
+
+      const type =
+        shape === "table"
+          ? "table"
+          : (nodeTypesMap[activeTool] ?? "rectangle");
+      const id = `node-${Date.now()}`;
 
       pushUndo();
 
       const newNode: Node = {
         id,
         type: type as keyof typeof nodeTypes,
-        position: { x: flowX - 60, y: flowY - 25 },
+        position: { x: flowX - 120, y: flowY - 80 },
         data:
-          type === "rectangle" || type === "diamond" || type === "circle" || type === "document"
+          type === "table"
             ? {
-                label:
-                  shape === "diamond" ? "Decision" : shape === "circle" ? "Process" : shape === "document" ? "Document" : shape === "table" ? "Table" : "Node",
-                shape,
+                tableRows: 3,
+                tableCols: 3,
+                cells: {},
               }
-            : { label: type === "mindMap" ? "Mind map" : "New node" },
+            : type === "rectangle" || type === "diamond" || type === "circle" || type === "document"
+              ? {
+                  label:
+                    shape === "diamond" ? "Decision" : shape === "circle" ? "Process" : shape === "document" ? "Document" : "Node",
+                  shape,
+                }
+              : { label: type === "mindMap" ? "Mind map" : "New node" },
+        ...(type === "table" && { width: 240, height: 160 }),
       };
 
       addNode(newNode);
@@ -566,19 +856,37 @@ export default function DiagramCanvas() {
       setActiveTool("select");
       setPendingShape(null);
     },
-    [activeTool, pendingShape, setPendingShape, addNode, setNodes, setActiveTool, pushUndo]
+    [
+      activeTool,
+      pendingShape,
+      setPendingShape,
+      pendingEmoji,
+      setPendingEmoji,
+      pendingIconId,
+      setPendingIconId,
+      addNode,
+      setNodes,
+      setActiveTool,
+      pushUndo,
+    ]
   );
 
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
-      if (e.key === "Escape" && activeTool === "freeDraw") {
-        setCurrentStroke(null);
-        setActiveTool("select");
+      if (e.key === "Escape") {
+        if (activeTool === "freeDraw") {
+          setCurrentStroke(null);
+          setActiveTool("select");
+        } else if (activeTool === "connector" && edgeDrawStart) {
+          setEdgeDrawStart(null);
+          setEdgeDrawEndPreview(null);
+          setEdgeDrawPoints([]);
+        }
       }
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [activeTool, setActiveTool]);
+  }, [activeTool, setActiveTool, edgeDrawStart]);
 
   useEffect(() => {
     return () => {
@@ -625,7 +933,14 @@ export default function DiagramCanvas() {
     >
       <div
         className="w-full h-full"
-        style={{ cursor: activeTool === "freeDraw" ? "crosshair" : undefined }}
+        style={{
+          cursor:
+            activeTool === "freeDraw" || activeTool === "connector"
+              ? "crosshair"
+              : activeTool === "pan"
+                ? "grab"
+                : undefined,
+        }}
         onPointerDown={onPointerDown}
         onPointerMove={onPointerMove}
         onPointerUp={onPointerUp}
@@ -650,6 +965,7 @@ export default function DiagramCanvas() {
         onNodesChange={onNodesChange}
         onEdgesChange={onEdgesChange}
         onConnect={onConnect}
+        onConnectEnd={onConnectEnd}
         onPaneClick={onPaneClick}
         onNodeDragStart={onNodeDragStart}
         onNodeDrag={onNodeDrag}
@@ -657,17 +973,28 @@ export default function DiagramCanvas() {
         nodeTypes={nodeTypes}
         edgeTypes={edgeTypes}
         fitView
-        nodesDraggable
-        nodesConnectable
-        elementsSelectable
-        edgesFocusable
+        nodesDraggable={activeTool !== "freeDraw"}
+        nodesConnectable={activeTool !== "freeDraw"}
+        elementsSelectable={activeTool !== "freeDraw"}
+        edgesFocusable={activeTool !== "freeDraw"}
         zoomOnScroll
         zoomOnPinch
         zoomOnDoubleClick
+        panOnDrag={activeTool === "pan"}
         minZoom={0.1}
         maxZoom={4}
-        connectionLineType={ConnectionLineType.Bezier}
-        defaultEdgeOptions={{ type: "labeledConnector", data: { connectorType: "default" } }}
+        connectionLineType={
+          pendingEdgeType === "straight"
+            ? ConnectionLineType.Straight
+            : pendingEdgeType === "smoothstep"
+              ? ConnectionLineType.SmoothStep
+              : ConnectionLineType.Bezier
+        }
+        connectionLineComponent={CustomConnectionLine}
+        defaultEdgeOptions={{
+          type: "labeledConnector",
+          data: { connectorType: "default" },
+        }}
         snapGrid={[16, 16]}
         snapToGrid
         connectionRadius={40}
@@ -675,6 +1002,13 @@ export default function DiagramCanvas() {
       >
         <HelperLines horizontal={helperLines.horizontal} vertical={helperLines.vertical} />
         <FreeDrawPreview currentStroke={currentStroke} />
+        <EdgeDrawPreview
+          start={edgeDrawStart}
+          end={edgeDrawEndPreview}
+          // For straight edges, preview a pure straight line.
+          points={pendingEdgeType === "straight" ? [] : edgeDrawPoints}
+        />
+        <EraserPreview points={isErasing ? eraserPoints : []} />
         <Background variant={BackgroundVariant.Dots} gap={16} size={1} />
         <Controls showZoom showFitView showInteractive />
         <MiniMap

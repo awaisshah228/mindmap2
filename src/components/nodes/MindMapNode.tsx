@@ -179,48 +179,62 @@ function MindMapNode({ id, data, selected }: NodeProps) {
       >
         {/* All 4 handles so edges always find their connection point (avoids disappearing when direction/layout mismatch) */}
         {/* Drag handle: large tap target for dragging on mobile */}
+        {/* Easy Connect: only this handle drags the node; rest is for connections */}
         <div
           className="shrink-0 flex items-center justify-center w-9 min-w-[36px] h-9 min-h-[36px] rounded-l-2xl cursor-grab active:cursor-grabbing touch-manipulation opacity-70 hover:opacity-100 transition-opacity border border-transparent border-r-0"
           style={{
             backgroundColor: branchStyle.bg,
             borderColor: `${branchStyle.stroke}40`,
           }}
-          title="Drag to move"
-          aria-label="Drag handle"
+          title="Drag to move node"
+          aria-label="Drag to move node"
         >
           <GripVertical className="w-5 h-5" style={{ color: branchStyle.stroke }} />
         </div>
+        {/* Easy Connect: larger hit areas; circles visible only when node selected */}
         <Handle
           id="left"
           type={sourceHandleId === "left" ? "source" : "target"}
           position={Position.Left}
-          className="!w-2 !h-2 !min-w-2 !min-h-2 !rounded-full !border !border-gray-300/60 !-left-1 opacity-50 hover:!opacity-100 !transition-all"
-          style={{ backgroundColor: branchStyle.bg, borderColor: branchStyle.stroke }}
+          className={cn(
+            "!w-5 !h-5 !min-w-5 !min-h-5 !-left-2.5 !top-1/2 !-translate-y-1/2 !rounded-full !border-2 !transition-all",
+            selected ? "!border-gray-300/60 !opacity-60 hover:!opacity-100" : "!opacity-0"
+          )}
+          style={selected ? { backgroundColor: branchStyle.bg, borderColor: branchStyle.stroke } : undefined}
         />
         <Handle
           id="right"
           type={sourceHandleId === "right" ? "source" : "target"}
           position={Position.Right}
-          className="!w-2 !h-2 !min-w-2 !min-h-2 !rounded-full !border !border-gray-300/60 !-right-1 opacity-50 hover:!opacity-100 !transition-all"
-          style={{ backgroundColor: branchStyle.bg, borderColor: branchStyle.stroke }}
+          className={cn(
+            "!w-5 !h-5 !min-w-5 !min-h-5 !-right-2.5 !top-1/2 !-translate-y-1/2 !rounded-full !border-2 !transition-all",
+            selected ? "!border-gray-300/60 !opacity-60 hover:!opacity-100" : "!opacity-0"
+          )}
+          style={selected ? { backgroundColor: branchStyle.bg, borderColor: branchStyle.stroke } : undefined}
         />
         <Handle
           id="top"
           type={sourceHandleId === "top" ? "source" : "target"}
           position={Position.Top}
-          className="!w-2 !h-2 !min-w-2 !min-h-2 !rounded-full !border !border-gray-300/60 !-top-1 opacity-50 hover:!opacity-100 !transition-all"
-          style={{ backgroundColor: branchStyle.bg, borderColor: branchStyle.stroke }}
+          className={cn(
+            "!w-5 !h-5 !min-w-5 !min-h-5 !-top-2.5 !left-1/2 !-translate-x-1/2 !rounded-full !border-2 !transition-all",
+            selected ? "!border-gray-300/60 !opacity-60 hover:!opacity-100" : "!opacity-0"
+          )}
+          style={selected ? { backgroundColor: branchStyle.bg, borderColor: branchStyle.stroke } : undefined}
         />
         <Handle
           id="bottom"
           type={sourceHandleId === "bottom" ? "source" : "target"}
           position={Position.Bottom}
-          className="!w-2 !h-2 !min-w-2 !min-h-2 !rounded-full !border !border-gray-300/60 !-bottom-1 opacity-50 hover:!opacity-100 !transition-all"
-          style={{ backgroundColor: branchStyle.bg, borderColor: branchStyle.stroke }}
+          className={cn(
+            "!w-5 !h-5 !min-w-5 !min-h-5 !-bottom-2.5 !left-1/2 !-translate-x-1/2 !rounded-full !border-2 !transition-all",
+            selected ? "!border-gray-300/60 !opacity-60 hover:!opacity-100" : "!opacity-0"
+          )}
+          style={selected ? { backgroundColor: branchStyle.bg, borderColor: branchStyle.stroke } : undefined}
         />
         <div
           className={cn(
-            "flex-1 min-w-0 flex items-center gap-2 rounded-r-2xl rounded-l-none px-3 py-2.5 transition-all shadow-sm",
+            "nodrag flex-1 min-w-0 flex items-center gap-2 rounded-r-2xl rounded-l-none px-3 py-2.5 transition-all shadow-sm",
             "border border-transparent",
             selected && "ring-2 ring-violet-400 ring-offset-2 shadow-md"
           )}

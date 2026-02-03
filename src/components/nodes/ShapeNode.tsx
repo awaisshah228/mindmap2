@@ -18,7 +18,6 @@ function ShapeNode({ id, data, selected }: NodeProps) {
   const label = (data.label as string) || "Node";
   const bgColor = (data.color as string) ?? PALETTE_COLORS[0];
   const pathD = (SHAPE_PATHS[shape as ShapeType] ?? SHAPE_PATHS.rectangle);
-  const isTable = shape === "table";
   const customIcon = data.customIcon as string | undefined;
   const iconDef = getIconById(data.icon as string);
   const IconComponent = iconDef?.Icon;
@@ -31,59 +30,6 @@ function ShapeNode({ id, data, selected }: NodeProps) {
       fontSize: (data.fontSize as "xs" | "sm" | "base" | "lg" | "xl") ?? "sm",
     },
   };
-
-  if (isTable) {
-    const rows = 3;
-    const cols = 3;
-    return (
-      <BaseNode
-        nodeId={id}
-        selected={selected}
-        className={cn(
-          "relative border-2 rounded overflow-hidden",
-          selected ? "border-2 border-violet-400 shadow-md" : "border-gray-300"
-        )}
-        style={{ width: WIDTH, height: HEIGHT, backgroundColor: bgColor }}
-      >
-          <div
-            className="grid w-full h-full"
-            style={{ gridTemplateRows: `repeat(${rows}, 1fr)`, gridTemplateColumns: `repeat(${cols}, 1fr)` }}
-          >
-            {Array.from({ length: rows * cols }).map((_, i) => (
-              <div
-                key={i}
-                className="border border-gray-300/80 min-w-0 min-h-0 flex flex-col items-center justify-center p-0.5 gap-0"
-              >
-                {i === 0 ? (
-                  <>
-                    {customIcon ? (
-                      <img src={customIcon} alt="" className="w-4 h-4 object-contain shrink-0" />
-                    ) : IconComponent ? (
-                      <span className="shrink-0 text-gray-600">
-                        <IconComponent className="w-4 h-4" />
-                      </span>
-                    ) : null}
-                    <div className="pointer-events-auto nodrag nokey w-full text-center text-xs">
-                      <EditableNodeContent
-                        nodeId={id}
-                        value={label}
-                        placeholder="Table"
-                        className="text-xs text-gray-800 truncate max-w-full"
-                        {...formatProps}
-                      />
-                    </div>
-                  </>
-                ) : null}
-              </div>
-            ))}
-          </div>
-          <Handle id="top" type="target" position={Position.Top} className="!w-2 !h-2 !-top-1" />
-          <Handle id="bottom" type="source" position={Position.Bottom} className="!w-2 !h-2 !-bottom-1" />
-          <Handle id="left" type="target" position={Position.Left} className="!w-2 !h-2 !-left-1" />
-          <Handle id="right" type="source" position={Position.Right} className="!w-2 !h-2 !-right-1" />
-      </BaseNode>
-    );
-  }
 
   return (
     <BaseNode nodeId={id} selected={selected} className="relative" style={{ width: WIDTH, height: HEIGHT }}>
@@ -120,10 +66,11 @@ function ShapeNode({ id, data, selected }: NodeProps) {
             />
           </div>
         </div>
-        <Handle id="top" type="target" position={Position.Top} className="!w-2 !h-2 !-top-1" />
-        <Handle id="bottom" type="source" position={Position.Bottom} className="!w-2 !h-2 !-bottom-1" />
-        <Handle id="left" type="target" position={Position.Left} className="!w-2 !h-2 !-left-1" />
-        <Handle id="right" type="source" position={Position.Right} className="!w-2 !h-2 !-right-1" />
+        {/* Easy Connect: circles visible only when node selected */}
+        <Handle id="top" type="target" position={Position.Top} className={cn("!w-5 !h-5 !-top-2.5 !left-1/2 !-translate-x-1/2 !rounded !border-2 !transition-all", selected ? "!border-violet-400/50 !bg-white/90 hover:!bg-violet-50" : "!opacity-0")} />
+        <Handle id="bottom" type="source" position={Position.Bottom} className={cn("!w-5 !h-5 !-bottom-2.5 !left-1/2 !-translate-x-1/2 !rounded !border-2 !transition-all", selected ? "!border-violet-400/50 !bg-white/90 hover:!bg-violet-50" : "!opacity-0")} />
+        <Handle id="left" type="target" position={Position.Left} className={cn("!w-5 !h-5 !-left-2.5 !top-1/2 !-translate-y-1/2 !rounded !border-2 !transition-all", selected ? "!border-violet-400/50 !bg-white/90 hover:!bg-violet-50" : "!opacity-0")} />
+        <Handle id="right" type="source" position={Position.Right} className={cn("!w-5 !h-5 !-right-2.5 !top-1/2 !-translate-y-1/2 !rounded !border-2 !transition-all", selected ? "!border-violet-400/50 !bg-white/90 hover:!bg-violet-50" : "!opacity-0")} />
     </BaseNode>
   );
 }

@@ -1,10 +1,10 @@
 "use client";
 
 import { memo } from "react";
-import { BaseEdge as ReactFlowBaseEdge } from "@xyflow/react";
+import { BaseEdge as ReactFlowBaseEdge, type EdgeMarker } from "@xyflow/react";
 import { cn } from "@/lib/utils";
 
-const DEFAULT_STROKE_WIDTH = 3;
+const DEFAULT_STROKE_WIDTH = 4;
 
 export interface BaseEdgeProps {
   id: string;
@@ -13,9 +13,11 @@ export interface BaseEdgeProps {
   strokeColor?: string;
   strokeWidth?: number;
   strokeDasharray?: string;
-  markerStart?: string;
-  markerEnd?: string;
+  markerStart?: EdgeMarker | string;
+  markerEnd?: EdgeMarker | string;
   className?: string;
+  onMouseEnter?: React.MouseEventHandler<SVGPathElement>;
+  onMouseLeave?: React.MouseEventHandler<SVGPathElement>;
 }
 
 const SELECTED_STROKE = "rgb(139 92 246)";
@@ -34,6 +36,8 @@ function BaseEdgeComponent({
   markerStart,
   markerEnd,
   className,
+  onMouseEnter,
+  onMouseLeave,
 }: BaseEdgeProps) {
   const style: React.CSSProperties = {
     stroke: selected ? SELECTED_STROKE : strokeColor,
@@ -48,6 +52,8 @@ function BaseEdgeComponent({
       style={style}
       markerStart={markerStart}
       markerEnd={markerEnd}
+      onMouseEnter={onMouseEnter}
+      onMouseLeave={onMouseLeave}
       className={cn(className)}
     />
   );
