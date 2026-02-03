@@ -273,6 +273,32 @@ export default function DiagramCanvas() {
         );
         return prevNodes.filter((n) => !toRemoveIds.includes(n.id));
       });
+
+      // Also erase standalone edges whose path passes near the eraser point.
+      // This is similar in spirit to the React Flow whiteboard eraser example:
+      // if the eraser trail intersects an edge path, we delete that edge.
+      setEdges((prevEdges) => {
+        const ERASER_RADIUS = 10;
+        const radiusSq = ERASER_RADIUS * ERASER_RADIUS;
+
+        return prevEdges.filter((edge) => {
+          const pathPoints = (edge.data as any)?.pathPoints as
+            | { x: number; y: number }[]
+            | undefined;
+
+          if (!Array.isArray(pathPoints) || pathPoints.length === 0) {
+            return true;
+          }
+
+          const hit = pathPoints.some((p) => {
+            const dx = x - p.x;
+            const dy = y - p.y;
+            return dx * dx + dy * dy <= radiusSq;
+          });
+
+          return !hit;
+        });
+      });
     },
     [setNodes, setEdges]
   );
@@ -951,47 +977,49 @@ export default function DiagramCanvas() {
           />
         )}
         <ReactFlow
-        nodes={visibleNodes}
-        edges={visibleEdges}
-        onInit={onInit}
-        onNodesChange={onNodesChange}
-        onEdgesChange={onEdgesChange}
-        onConnect={onConnect}
-        onConnectEnd={onConnectEnd}
-        onPaneClick={onPaneClick}
-        onNodeDragStart={onNodeDragStart}
-        onNodeDrag={onNodeDrag}
-        onNodeDragStop={onNodeDragStop}
-        nodeTypes={nodeTypes}
-        edgeTypes={edgeTypes}
-        fitView
-        nodesDraggable={activeTool !== "freeDraw"}
-        nodesConnectable={activeTool !== "freeDraw"}
-        elementsSelectable={activeTool !== "freeDraw"}
-        edgesFocusable={activeTool !== "freeDraw"}
-        zoomOnScroll
-        zoomOnPinch
-        zoomOnDoubleClick
-        panOnDrag={activeTool === "pan"}
-        minZoom={0.1}
-        maxZoom={4}
-        connectionLineType={
-          pendingEdgeType === "straight"
-            ? ConnectionLineType.Straight
-            : pendingEdgeType === "smoothstep"
-              ? ConnectionLineType.SmoothStep
-              : ConnectionLineType.Bezier
-        }
-        connectionLineComponent={CustomConnectionLine}
-        defaultEdgeOptions={{
-          type: "labeledConnector",
-          data: { connectorType: "default" },
-        }}
-        snapGrid={[16, 16]}
-        snapToGrid
-        connectionRadius={40}
-        proOptions={{ hideAttribution: true }}
-      >
+          nodes={visibleNodes}
+          edges={visibleEdges}
+          onInit={onInit}
+          onNodesChange={onNodesChange}
+          onEdgesChange={onEdgesChange}
+          onConnect={onConnect}
+          onConnectEnd={onConnectEnd}
+          onPaneClick={onPaneClick}
+          onNodeDragStart={onNodeDragStart}
+          onNodeDrag={onNodeDrag}
+          onNodeDragStop={onNodeDragStop}
+          nodeTypes={nodeTypes}
+          edgeTypes={edgeTypes}
+          fitView
+          nodesDraggable={activeTool !== "freeDraw"}
+          nodesConnectable={activeTool !== "freeDraw"}
+          elementsSelectable={activeTool !== "freeDraw"}
+          edgesFocusable={activeTool !== "freeDraw"}
+          zoomOnScroll
+          zoomOnPinch
+          zoomOnDoubleClick
+          panOnDrag={activeTool === "pan"}
+          selectionOnDrag={activeTool === "select"}
+          selectionMode="partial"
+          minZoom={0.1}
+          maxZoom={4}
+          connectionLineType={
+            pendingEdgeType === "straight"
+              ? ConnectionLineType.Straight
+              : pendingEdgeType === "smoothstep"
+                ? ConnectionLineType.SmoothStep
+                : ConnectionLineType.Bezier
+          }
+          connectionLineComponent={CustomConnectionLine}
+          defaultEdgeOptions={{
+            type: "labeledConnector",
+            data: { connectorType: "default" },
+          }}
+          snapGrid={[16, 16]}
+          snapToGrid
+          connectionRadius={40}
+          proOptions={{ hideAttribution: true }}
+        >
         <HelperLines horizontal={helperLines.horizontal} vertical={helperLines.vertical} />
         <EdgeDrawPreview
           start={edgeDrawStart}
