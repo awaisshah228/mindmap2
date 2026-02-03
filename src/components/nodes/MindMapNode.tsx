@@ -17,6 +17,7 @@ import {
   ArrowRight,
   ChevronDown,
   ChevronRight,
+  GripVertical,
   Pencil,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -150,6 +151,18 @@ function MindMapNode({ id, data, selected }: NodeProps) {
         )}
       >
         {/* All 4 handles so edges always find their connection point (avoids disappearing when direction/layout mismatch) */}
+        {/* Drag handle: large tap target for dragging on mobile */}
+        <div
+          className="shrink-0 flex items-center justify-center w-9 min-w-[36px] h-9 min-h-[36px] rounded-l-2xl cursor-grab active:cursor-grabbing touch-manipulation opacity-70 hover:opacity-100 transition-opacity border border-transparent border-r-0"
+          style={{
+            backgroundColor: branchStyle.bg,
+            borderColor: `${branchStyle.stroke}40`,
+          }}
+          title="Drag to move"
+          aria-label="Drag handle"
+        >
+          <GripVertical className="w-5 h-5" style={{ color: branchStyle.stroke }} />
+        </div>
         <Handle
           id="left"
           type={sourceHandleId === "left" ? "source" : "target"}
@@ -180,7 +193,7 @@ function MindMapNode({ id, data, selected }: NodeProps) {
         />
         <div
           className={cn(
-            "flex-1 min-w-0 flex items-center gap-2 rounded-2xl px-3 py-2.5 transition-all shadow-sm",
+            "flex-1 min-w-0 flex items-center gap-2 rounded-r-2xl rounded-l-none px-3 py-2.5 transition-all shadow-sm",
             "border border-transparent",
             selected && "ring-2 ring-violet-400 ring-offset-2 shadow-md"
           )}
