@@ -41,6 +41,7 @@ import {
 import { FreeDrawPreview, type Stroke } from "./FreeDrawPreview";
 import LabeledConnectorEdge from "@/components/edges/LabeledConnectorEdge";
 import { MindMapLayoutPanel } from "@/components/panels/MindMapLayoutPanel";
+import { MobileColorIndicator } from "@/components/panels/MobileColorIndicator";
 import { MindMapLayoutProvider } from "@/contexts/MindMapLayoutContext";
 
 const nodeTypes = {
@@ -669,6 +670,7 @@ export default function DiagramCanvas() {
             reactFlowRef.current?.fitView({ padding: 0.2, duration: 300 })
           }
         />
+        <MobileColorIndicator />
         <Panel position="bottom-right" className="flex flex-col gap-2 m-2">
           <span className="text-xs text-gray-500 px-2 py-1 bg-white/80 rounded shadow">
             Ctrl+A select all • Ctrl+Shift+A deselect • Ctrl+C/V copy/paste • Del delete • Esc deselect
