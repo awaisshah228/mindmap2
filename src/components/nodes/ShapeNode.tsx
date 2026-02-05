@@ -62,6 +62,7 @@ function ShapeNode({ id, data, selected }: NodeProps) {
               value={label}
               placeholder="Node"
               className="text-sm text-gray-800 truncate max-w-full mx-auto"
+              editOnlyViaToolbar
               {...formatProps}
             />
           </div>

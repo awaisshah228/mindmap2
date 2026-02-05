@@ -81,8 +81,29 @@ import {
   SiLinkedin,
   SiX,
   SiYoutube,
+  SiAngular,
+  SiVuedotjs,
+  SiSvelte,
+  SiDigitalocean,
+  SiMysql,
+  SiMariadb,
+  SiElasticsearch,
+  SiApachekafka,
+  SiRabbitmq,
+  SiGraphql,
+  SiOpenai,
+  SiLangchain,
+  SiTerraform,
+  SiPrometheus,
+  SiGrafana,
+  SiJenkins,
+  SiDatadog,
 } from "react-icons/si";
-import { FaAws, FaMicrosoft } from "react-icons/fa";
+import { FaAws, FaMicrosoft, FaCloudflare, FaGitAlt } from "react-icons/fa";
+// Generic developer-icons React components. Individual icons are referenced by name at usage time.
+// See https://xandemon.github.io/developer-icons/ for the full catalog.
+import * as DevIcons from "developer-icons";
+
 
 export type IconDefinition = {
   id: string;
@@ -104,6 +125,16 @@ const REACT_ICON = (
   label: string,
   category: string
 ): IconDefinition => ({ id: `si:${id}`, label, category, Icon });
+
+const DEV_ICON = (
+  iconName: keyof typeof DevIcons,
+  id: string,
+  label: string,
+  category: string
+): IconDefinition => {
+  const IconComp = DevIcons[iconName] as React.ComponentType<{ className?: string; size?: number }>;
+  return { id: `dev:${id}`, label, category, Icon: IconComp };
+};
 
 export const ICON_CATEGORIES: Record<string, string> = {
   arrows: "Arrows",
@@ -160,8 +191,35 @@ export const ICON_REGISTRY: IconDefinition[] = [
   REACT_ICON(SiGithub, "GitHub", "GitHub", "tech"),
   REACT_ICON(SiGitlab, "GitLab", "GitLab", "tech"),
   REACT_ICON(SiFigma, "Figma", "Figma", "tech"),
+  REACT_ICON(SiOpenai, "OpenAI", "OpenAI", "tech"),
+  REACT_ICON(SiLangchain, "LangChain", "LangChain", "tech"),
+  REACT_ICON(SiTerraform, "Terraform", "Terraform", "tech"),
+  REACT_ICON(SiPrometheus, "Prometheus", "Prometheus", "tech"),
+  REACT_ICON(SiGrafana, "Grafana", "Grafana", "tech"),
+  REACT_ICON(SiJenkins, "Jenkins", "Jenkins", "tech"),
+  REACT_ICON(SiDatadog, "Datadog", "Datadog", "tech"),
   REACT_ICON(FaAws, "AWS (alt)", "AWS", "tech"),
   REACT_ICON(FaMicrosoft, "Microsoft", "Microsoft", "tech"),
+  REACT_ICON(FaCloudflare, "Cloudflare", "Cloudflare", "tech"),
+  REACT_ICON(FaGitAlt, "Git", "Git", "tech"),
+  REACT_ICON(SiAngular, "Angular", "Angular", "tech"),
+  REACT_ICON(SiVuedotjs, "Vue.js", "Vue.js", "tech"),
+  REACT_ICON(SiSvelte, "Svelte", "Svelte", "tech"),
+  REACT_ICON(SiDigitalocean, "DigitalOcean", "DigitalOcean", "tech"),
+  REACT_ICON(SiMysql, "MySQL", "MySQL", "tech"),
+  REACT_ICON(SiMariadb, "MariaDB", "MariaDB", "tech"),
+  REACT_ICON(SiElasticsearch, "Elasticsearch", "Elasticsearch", "tech"),
+  REACT_ICON(SiApachekafka, "Kafka", "Kafka", "tech"),
+  REACT_ICON(SiRabbitmq, "RabbitMQ", "RabbitMQ", "tech"),
+  REACT_ICON(SiGraphql, "GraphQL", "GraphQL", "tech"),
+  // Additional tech icons from developer-icons (ids prefixed with "dev:")
+  DEV_ICON("AWS", "aws", "AWS (dev-icon)", "tech"),
+
+  DEV_ICON("Kubernetes", "kubernetes", "Kubernetes (dev-icon)", "tech"),
+  DEV_ICON("Docker", "docker-dev", "Docker (dev-icon)", "tech"),
+  DEV_ICON("PostgreSQL", "postgresql-dev", "PostgreSQL (dev-icon)", "tech"),
+  DEV_ICON("MongoDB", "mongodb-dev", "MongoDB (dev-icon)", "tech"),
+  DEV_ICON("Redis", "redis-dev", "Redis (dev-icon)", "tech"),
   LUCIDE(Briefcase, "Briefcase", "business", "briefcase"),
   LUCIDE(Building2, "Building", "business", "building"),
   LUCIDE(Users, "Users", "business", "users"),
@@ -198,7 +256,25 @@ export const ICON_REGISTRY: IconDefinition[] = [
   LUCIDE(HelpCircle, "Help", "alerts", "help-circle"),
 ];
 
+export { ICON_IDS_FOR_PROMPT } from "./icon-prompt-list";
+
+function normalizeIconId(id: string): string[] {
+  const trimmed = id.trim();
+  if (!trimmed) return [id];
+  const [lib, name] = trimmed.split(":");
+  const candidates: string[] = [trimmed];
+  if (lib && name) {
+    if (lib === "si" && name.startsWith("Si")) candidates.push(`${lib}:${name.slice(2)}`);
+    if (lib === "si") candidates.push(`${lib}:${name.charAt(0).toUpperCase()}${name.slice(1)}`);
+  }
+  return candidates;
+}
+
 export function getIconById(id: string | null | undefined): IconDefinition | null {
   if (!id) return null;
-  return ICON_REGISTRY.find((def) => def.id === id) ?? null;
+  for (const candidate of normalizeIconId(id)) {
+    const def = ICON_REGISTRY.find((d) => d.id === candidate);
+    if (def) return def;
+  }
+  return null;
 }

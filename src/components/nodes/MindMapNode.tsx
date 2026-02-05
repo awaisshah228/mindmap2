@@ -20,7 +20,9 @@ import {
   ChevronRight,
   GripVertical,
   Pencil,
+  Wand2,
 } from "lucide-react";
+import { useRouter } from "next/navigation";
 import { cn } from "@/lib/utils";
 import { getHandlePositions, getHandleIds } from "@/lib/layout-engine";
 import { getNodeBranchStyle } from "@/lib/branch-colors";
@@ -54,6 +56,7 @@ function MindMapNode({ id, data, selected }: NodeProps) {
   const customIcon = data.customIcon as string | undefined;
   const iconDef = getIconById(data.icon as string);
   const IconComponent = iconDef?.Icon;
+  const router = useRouter();
 
   const handleToggleCollapse = useCallback(
     (e: React.MouseEvent) => {
@@ -277,6 +280,7 @@ function MindMapNode({ id, data, selected }: NodeProps) {
             placeholder="Mind map"
             className="text-sm font-semibold flex-1 truncate min-w-0 outline-none [color:inherit]"
             editRef={editRef}
+            editOnlyViaToolbar
             formatting={{
               fontWeight: (data.fontWeight as "normal" | "bold") ?? "normal",
               fontStyle: (data.fontStyle as "normal" | "italic") ?? "normal",
@@ -329,6 +333,20 @@ function MindMapNode({ id, data, selected }: NodeProps) {
                     <ArrowRight className="w-4 h-4 shrink-0" />
                     Add child
                   </button>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      router.push(
+                        `/ai-diagram?mode=mindmap-refine&nodeId=${encodeURIComponent(
+                          id
+                        )}&label=${encodeURIComponent(label)}`
+                      )
+                    }
+                    className="w-full flex items-center gap-2 px-3 py-2 text-sm text-violet-700 hover:bg-violet-50 rounded-md text-left"
+                  >
+                    <Wand2 className="w-4 h-4 shrink-0" />
+                    AI refine this topic
+                  </button>
                 </>
               ) : (
                 <>
@@ -347,6 +365,20 @@ function MindMapNode({ id, data, selected }: NodeProps) {
                   >
                     <AlignHorizontalSpaceAround className="w-4 h-4 shrink-0" />
                     Add parallel
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      router.push(
+                        `/ai-diagram?mode=mindmap-refine&nodeId=${encodeURIComponent(
+                          id
+                        )}&label=${encodeURIComponent(label)}`
+                      )
+                    }
+                    className="w-full flex items-center gap-2 px-3 py-2 text-sm text-violet-700 hover:bg-violet-50 rounded-md text-left"
+                  >
+                    <Wand2 className="w-4 h-4 shrink-0" />
+                    AI refine this topic
                   </button>
                 </>
               )}

@@ -1,8 +1,9 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef } from "react";
 import { useReactFlow } from "@xyflow/react";
 import { cn } from "@/lib/utils";
+import { useCanvasStore } from "@/lib/store/canvas-store";
 
 export type FontSize = "xs" | "sm" | "base" | "lg" | "xl";
 
@@ -21,6 +22,10 @@ interface EditableNodeContentProps {
   onEditingChange?: (editing: boolean) => void;
   editRef?: React.RefObject<HTMLDivElement | null>;
   formatting?: NodeFormatting;
+  /** When set, called with final value on blur instead of updating node label (for use in custom nodes e.g. table cells). */
+  onCommit?: (value: string) => void;
+  /** When true, text is only editable after "Edit text" in the node toolbar; click on text does not focus. */
+  editOnlyViaToolbar?: boolean;
 }
 
 /**
@@ -43,16 +48,22 @@ export function EditableNodeContent({
   onEditingChange,
   editRef,
   formatting,
+  onCommit,
+  editOnlyViaToolbar = false,
 }: EditableNodeContentProps) {
   const { updateNodeData } = useReactFlow();
+  const editingNodeId = useCanvasStore((s) => s.editingNodeId);
+  const setEditingNodeId = useCanvasStore((s) => s.setEditingNodeId);
   const internalRef = useRef<HTMLDivElement>(null);
   const ref = editRef ?? internalRef;
+
+  const isEditing = !editOnlyViaToolbar || editingNodeId === nodeId;
 
   useEffect(() => {
     if (ref.current && ref.current.innerText !== value && !ref.current.matches(":focus")) {
       ref.current.innerText = value || "";
     }
-  }, [value]);
+  }, [value, isEditing]);
 
   useEffect(() => {
     if (ref.current && !ref.current.innerText) {
@@ -60,14 +71,23 @@ export function EditableNodeContent({
     }
   }, []);
 
+  useEffect(() => {
+    if (editOnlyViaToolbar && editingNodeId === nodeId && ref.current) {
+      ref.current.innerText = value || "";
+      ref.current.focus();
+    }
+  }, [editOnlyViaToolbar, editingNodeId, nodeId, value]);
+
   const handleBlur = useCallback(() => {
     onEditingChange?.(false);
+    if (editOnlyViaToolbar) setEditingNodeId(null);
     const text = ref.current?.innerText?.trim() ?? "";
     const final = text || placeholder;
     if (final !== value) {
-      updateNodeData(nodeId, { label: final });
+      if (onCommit) onCommit(final);
+      else updateNodeData(nodeId, { label: final });
     }
-  }, [nodeId, value, placeholder, updateNodeData, onEditingChange]);
+  }, [nodeId, value, placeholder, updateNodeData, onEditingChange, onCommit, editOnlyViaToolbar, setEditingNodeId]);
 
   const handleFocus = useCallback(() => {
     onEditingChange?.(true);
@@ -93,6 +113,22 @@ export function EditableNodeContent({
   if (formatting?.textDecoration) formatStyle.textDecoration = formatting.textDecoration;
 
   const fontSizeClass = formatting?.fontSize ? FONT_SIZE_CLASSES[formatting.fontSize] : undefined;
+
+  if (editOnlyViaToolbar && !isEditing) {
+    return (
+      <div
+        className={cn(
+          "nodrag nokey min-w-[1ch] truncate",
+          !value && "text-gray-400",
+          className,
+          fontSizeClass
+        )}
+        style={Object.keys(formatStyle).length > 0 ? formatStyle : undefined}
+      >
+        {value || placeholder}
+      </div>
+    );
+  }
 
   return (
     <div

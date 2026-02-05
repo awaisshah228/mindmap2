@@ -24,6 +24,7 @@ function TextNode({ id, data, selected }: NodeProps) {
         value={label}
         placeholder="Text"
         className="text-sm text-gray-800"
+        editOnlyViaToolbar
         formatting={{
           fontWeight: (data.fontWeight as "normal" | "bold") ?? "normal",
           fontStyle: (data.fontStyle as "normal" | "italic") ?? "normal",

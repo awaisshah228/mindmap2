@@ -28,9 +28,15 @@ export type NodeType =
   | "frame"
   | "list"
   | "freeDraw"
-  | "icon";
+  | "icon"
+  | "image"
+  | "databaseSchema"
+  | "service"
+  | "queue"
+  | "actor"
+  | "group";
 
-export type Tool = NodeType | "connector" | "pan" | "select" | "move" | "emoji" | "eraser" | "ai";
+export type Tool = NodeType | "connector" | "pan" | "select" | "selection" | "move" | "emoji" | "eraser" | "ai";
 
 /** Edge connector type for new edges (Bezier, Straight, Smooth step). */
 export type PendingEdgeType = "default" | "straight" | "smoothstep";
@@ -45,11 +51,26 @@ interface CanvasState {
   pendingShape: ShapeType | null;
   pendingEmoji: string | null;
   pendingIconId: string | null;
+  /** When set, next canvas click adds an image node with this URL and optional label. */
+  pendingImageUrl: string | null;
+  pendingImageLabel: string | null;
   /** Connector type for newly drawn edges when connector tool is used. */
   pendingEdgeType: PendingEdgeType;
   mindMapLayout: MindMapLayoutOptions;
   undoStack: { nodes: Node[]; edges: Edge[] }[];
   redoStack: { nodes: Node[]; edges: Edge[] }[];
+
+  /** When true, the canvas should call fitView on the next render (e.g. after AI adds a diagram). */
+  pendingFitView: boolean;
+
+  /** Last AI prompt used to generate/update the diagram (for refinement). */
+  lastAIPrompt: string | null;
+  /** Last AI-generated diagram (nodes + edges) stored for refinement context. */
+  lastAIDiagram: { nodes: Node[]; edges: Edge[] } | null;
+
+  /** When set, the node with this id should focus its main label for editing (toolbar "Edit text" button). */
+  editingNodeId: string | null;
+  setEditingNodeId: (id: string | null) => void;
 
   setHoveredNodeId: (id: string | null) => void;
   setMindMapLayout: (options: Partial<MindMapLayoutOptions>) => void;
@@ -61,7 +82,11 @@ interface CanvasState {
   setPendingShape: (shape: ShapeType | null) => void;
   setPendingEmoji: (emoji: string | null) => void;
   setPendingIconId: (id: string | null) => void;
+  setPendingImage: (url: string | null, label?: string | null) => void;
   setPendingEdgeType: (type: PendingEdgeType) => void;
+  setPendingFitView: (value: boolean) => void;
+  setLastAIPrompt: (prompt: string | null) => void;
+  setLastAIDiagram: (diagram: { nodes: Node[]; edges: Edge[] } | null) => void;
   addNode: (node: Node) => void;
   addNodes: (nodes: Node[]) => void;
   addEdge: (edge: Edge) => void;
@@ -80,15 +105,22 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
   selectedNodeIds: [],
   selectedEdgeIds: [],
   hoveredNodeId: null,
-  activeTool: "move",
+  activeTool: "select",
   pendingShape: null,
   pendingEmoji: null,
   pendingIconId: null,
+  pendingImageUrl: null,
+  pendingImageLabel: null,
   pendingEdgeType: "default",
   mindMapLayout: DEFAULT_MIND_MAP_LAYOUT,
   undoStack: [],
   redoStack: [],
+  pendingFitView: false,
+  lastAIPrompt: null,
+  lastAIDiagram: null,
+  editingNodeId: null,
 
+  setEditingNodeId: (id) => set({ editingNodeId: id }),
   setHoveredNodeId: (id) => set({ hoveredNodeId: id }),
   setMindMapLayout: (options) =>
     set((s) => ({
@@ -112,7 +144,12 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
   setPendingShape: (shape) => set({ pendingShape: shape }),
   setPendingEmoji: (emoji) => set({ pendingEmoji: emoji }),
   setPendingIconId: (id) => set({ pendingIconId: id }),
+  setPendingImage: (url, label) =>
+    set({ pendingImageUrl: url ?? null, pendingImageLabel: label ?? null }),
   setPendingEdgeType: (type) => set({ pendingEdgeType: type }),
+  setPendingFitView: (value) => set({ pendingFitView: value }),
+  setLastAIPrompt: (prompt) => set({ lastAIPrompt: prompt }),
+  setLastAIDiagram: (diagram) => set({ lastAIDiagram: diagram }),
 
   addNode: (node) =>
     set((state) => ({
@@ -120,19 +157,23 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
     })),
 
   addNodes: (nodes) =>
-    set((state) => ({
-      nodes: [...state.nodes, ...nodes],
-    })),
+    set((state) => {
+      const byId = new Map(state.nodes.map((n) => [n.id, n]));
+      nodes.forEach((n) => byId.set(n.id, n));
+      return { nodes: Array.from(byId.values()) };
+    }),
 
   addEdge: (edge) =>
     set((state) => ({
-      edges: [...state.edges, edge],
+      edges: [...state.edges.filter((e) => e.id !== edge.id), edge],
     })),
 
   addEdges: (edges) =>
-    set((state) => ({
-      edges: [...state.edges, ...edges],
-    })),
+    set((state) => {
+      const byId = new Map(state.edges.map((e) => [e.id, e]));
+      edges.forEach((e) => byId.set(e.id, e));
+      return { edges: Array.from(byId.values()) };
+    }),
 
   removeNodes: (ids) =>
     set((state) => ({

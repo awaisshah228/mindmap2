@@ -2,7 +2,6 @@
 
 import { useCallback, useRef } from "react";
 import type { Node, Edge } from "@xyflow/react";
-import { resolveCollisions } from "@/lib/resolve-collisions";
 
 export function useCopyPaste(
   getNodes: () => Node[],
@@ -81,13 +80,7 @@ export function useCopyPaste(
         })
         .filter(Boolean) as Edge[];
 
-      setNodes((nds) =>
-        resolveCollisions([...nds, ...newNodes], {
-          maxIterations: 100,
-          overlapThreshold: 0.5,
-          margin: 15,
-        })
-      );
+      setNodes((nds) => [...nds, ...newNodes]);
       setEdges((eds) => [...eds, ...newEdges]);
     },
     [screenToFlowPosition, setNodes, setEdges]

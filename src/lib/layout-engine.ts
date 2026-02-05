@@ -20,12 +20,58 @@ const DEFAULT_NODE_WIDTH = 150;
 const DEFAULT_NODE_HEIGHT = 50;
 const MIND_MAP_NODE_WIDTH = 170;
 const MIND_MAP_NODE_HEIGHT = 44;
+const IMAGE_NODE_WIDTH = 160;
+const IMAGE_NODE_HEIGHT = 120;
+const DATABASE_SCHEMA_WIDTH = 200;
+const DATABASE_SCHEMA_HEIGHT = 180;
+const SERVICE_NODE_WIDTH = 160;
+const SERVICE_NODE_HEIGHT = 72;
+const QUEUE_NODE_WIDTH = 140;
+const QUEUE_NODE_HEIGHT = 64;
+const ACTOR_NODE_WIDTH = 100;
+const ACTOR_NODE_HEIGHT = 100;
 const ROOT_LEFT_PADDING = 80;
+
+const GROUP_NODE_DEFAULT_WIDTH = 280;
+const GROUP_NODE_DEFAULT_HEIGHT = 200;
 
 function getNodeSize(node: Node) {
   const isMindMap = node.type === "mindMap";
-  const defW = isMindMap ? MIND_MAP_NODE_WIDTH : DEFAULT_NODE_WIDTH;
-  const defH = isMindMap ? MIND_MAP_NODE_HEIGHT : DEFAULT_NODE_HEIGHT;
+  const isImage = node.type === "image";
+  const isDatabaseSchema = node.type === "databaseSchema";
+  const isService = node.type === "service";
+  const isQueue = node.type === "queue";
+  const isActor = node.type === "actor";
+  const isGroup = node.type === "group";
+  let defW = DEFAULT_NODE_WIDTH;
+  let defH = DEFAULT_NODE_HEIGHT;
+  if (isMindMap) {
+    defW = MIND_MAP_NODE_WIDTH;
+    defH = MIND_MAP_NODE_HEIGHT;
+  } else if (isImage) {
+    defW = IMAGE_NODE_WIDTH;
+    defH = IMAGE_NODE_HEIGHT;
+  } else if (isDatabaseSchema) {
+    defW = DATABASE_SCHEMA_WIDTH;
+    defH = DATABASE_SCHEMA_HEIGHT;
+  } else if (isService) {
+    defW = SERVICE_NODE_WIDTH;
+    defH = SERVICE_NODE_HEIGHT;
+  } else if (isQueue) {
+    defW = QUEUE_NODE_WIDTH;
+    defH = QUEUE_NODE_HEIGHT;
+  } else if (isActor) {
+    defW = ACTOR_NODE_WIDTH;
+    defH = ACTOR_NODE_HEIGHT;
+  } else if (isGroup) {
+    defW = GROUP_NODE_DEFAULT_WIDTH;
+    defH = GROUP_NODE_DEFAULT_HEIGHT;
+  }
+  if (isGroup && node.style && (node.style.width != null || node.style.height != null)) {
+    const w = Number(node.style.width) || defW;
+    const h = Number(node.style.height) || defH;
+    return { width: w, height: h };
+  }
   const w = (node.measured?.width ?? defW) || defW;
   const h = (node.measured?.height ?? defH) || defH;
   return { width: Number(w) || defW, height: Number(h) || defH };
@@ -70,6 +116,12 @@ async function layoutWithElk(
 ): Promise<{ nodes: Node[]; edges: Edge[] }> {
   const ELK = (await import("elkjs")).default;
   const elk = new ELK();
+  const { target: targetPos, source: sourcePos } = getHandlePositions(direction);
+
+  // Subflows: only layout root nodes (no parentId) so group children stay inside their parent.
+  const rootNodes = nodes.filter((n) => !n.parentId);
+  const rootIds = new Set(rootNodes.map((n) => n.id));
+  const rootEdges = edges.filter((e) => rootIds.has(e.source) && rootIds.has(e.target));
 
   const graph = {
     id: "root",
@@ -79,15 +131,11 @@ async function layoutWithElk(
       "elk.spacing.nodeNode": String(spacing[0]),
       "elk.layered.spacing.nodeNodeBetweenLayers": String(spacing[1]),
     },
-    children: nodes.map((node) => {
+    children: rootNodes.map((node) => {
       const { width, height } = getNodeSize(node);
-      return {
-        id: node.id,
-        width,
-        height,
-      };
+      return { id: node.id, width, height };
     }),
-    edges: edges.map((e, i) => ({
+    edges: rootEdges.map((e, i) => ({
       id: e.id || `e${i}`,
       sources: [e.source],
       targets: [e.target],
@@ -95,25 +143,21 @@ async function layoutWithElk(
   };
 
   const layoutedGraph = await elk.layout(graph);
-  const { target: targetPos, source: sourcePos } = getHandlePositions(direction);
-
-  const layoutedNodes: Node[] = (layoutedGraph.children ?? []).map((child) => {
+  const layoutedRootNodes: Node[] = (layoutedGraph.children ?? []).map((child) => {
     const node = nodes.find((n) => n.id === child.id)!;
     const elkNode = child as { x?: number; y?: number };
     return {
       ...node,
       targetPosition: targetPos,
       sourcePosition: sourcePos,
-      position: {
-        x: elkNode.x ?? 0,
-        y: elkNode.y ?? 0,
-      },
+      position: { x: elkNode.x ?? 0, y: elkNode.y ?? 0 },
     };
   });
-
-  const shifted = shiftLayoutLeft(layoutedNodes, ROOT_LEFT_PADDING);
-  const normalizedEdges = normalizeMindMapEdgeHandles(shifted, edges, direction);
-  return { nodes: shifted, edges: normalizedEdges };
+  const shiftedRoots = shiftLayoutLeft(layoutedRootNodes, ROOT_LEFT_PADDING);
+  const byId = new Map(shiftedRoots.map((n) => [n.id, n]));
+  const allNodes = nodes.map((n) => (byId.has(n.id) ? byId.get(n.id)! : { ...n, targetPosition: targetPos, sourcePosition: sourcePos }));
+  const normalizedEdges = normalizeMindMapEdgeHandles(allNodes, edges, direction);
+  return { nodes: allNodes, edges: normalizedEdges };
 }
 
 /** Shift all nodes left so the leftmost node is at padding (root pulled back on x-axis). */

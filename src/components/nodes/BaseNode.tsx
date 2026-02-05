@@ -71,10 +71,9 @@ export function BaseNode({
         <div
           className={cn(
             "h-full w-full",
-            // Allow dragging from the whole body when:
-            // - Move tool is active
-            // - OR Select tool is active AND this node is already selected
-            !(activeTool === "move" || (activeTool === "select" && selected)) && "nodrag"
+            // Prevent drag only when drawing/connecting: freeDraw, connector, eraser.
+            // Select / move / pan: user can always drag node to move it (React Flow–style).
+            (activeTool === "freeDraw" || activeTool === "connector" || activeTool === "eraser") && "nodrag"
           )}
         >
           {children}

@@ -38,6 +38,7 @@ function StickyNoteNode({ id, data, selected }: NodeProps) {
         value={label}
         placeholder="Sticky note"
         className="text-sm font-medium text-gray-800 break-words whitespace-pre-wrap"
+        editOnlyViaToolbar
         formatting={{
           fontWeight: (data.fontWeight as "normal" | "bold") ?? "normal",
           fontStyle: (data.fontStyle as "normal" | "italic") ?? "normal",

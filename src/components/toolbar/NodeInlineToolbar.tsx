@@ -22,7 +22,10 @@ import {
   Minus,
   Rows3,
   Columns3,
+  Pencil,
+  LogOut,
 } from "lucide-react";
+import type { Node } from "@xyflow/react";
 import { cn } from "@/lib/utils";
 import { useCanvasStore } from "@/lib/store/canvas-store";
 import { PALETTE_COLORS } from "@/lib/branch-colors";
@@ -59,8 +62,10 @@ export function NodeInlineToolbar({ nodeId, selected = false }: NodeInlineToolba
   const [fontSizeOpen, setFontSizeOpen] = useState(false);
   const [shapeOpen, setShapeOpen] = useState(false);
   const hoveredNodeId = useCanvasStore((s) => s.hoveredNodeId);
-  const { getNode, setNodes, deleteElements, updateNodeData } = useReactFlow();
+  const { getNode, getNodes, setNodes, deleteElements, updateNodeData } = useReactFlow();
   const node = getNode(nodeId);
+  const pushUndo = useCanvasStore((s) => s.pushUndo);
+  const isInGroup = Boolean(node?.parentId);
   const nodeType = node?.type ?? "";
   const isMindMap = nodeType === "mindMap";
   const isShapeNode = SHAPE_NODE_TYPES.includes(nodeType);
@@ -85,11 +90,39 @@ export function NodeInlineToolbar({ nodeId, selected = false }: NodeInlineToolba
     setNodes((nds) => [...nds, newNode]);
   };
 
+  /** Get a node's position in flow coordinates (walk parent chain if it has parentId). */
+  function getFlowPosition(n: Node, allNodes: Node[]): { x: number; y: number } {
+    if (!n.parentId) return { ...n.position };
+    const parent = allNodes.find((nd) => nd.id === n.parentId);
+    if (!parent) return { ...n.position };
+    const parentFlow = getFlowPosition(parent, allNodes);
+    return {
+      x: parentFlow.x + n.position.x,
+      y: parentFlow.y + n.position.y,
+    };
+  }
+
+  const handleExitGroup = () => {
+    const n = getNode(nodeId);
+    if (!n?.parentId) return;
+    pushUndo();
+    const nodes = getNodes();
+    const flowPos = getFlowPosition(n, nodes);
+    setNodes((nds) =>
+      nds.map((nd) =>
+        nd.id !== nodeId ? nd : { ...nd, parentId: undefined, extent: undefined, position: flowPos }
+      )
+    );
+  };
+
   const handleDelete = () => {
     deleteElements({ nodes: [{ id: nodeId }] });
   };
 
   const handleAI = () => router.push("/ai-diagram");
+
+  const setEditingNodeId = useCanvasStore((s) => s.setEditingNodeId);
+  const handleEditText = () => setEditingNodeId(nodeId);
 
   const handleColorChange = (color: string) => {
     if (hasColorPicker) {
@@ -354,12 +387,20 @@ export function NodeInlineToolbar({ nodeId, selected = false }: NodeInlineToolba
           </>
         )}
         <ToolbarDivider />
+        <ToolbarButton title="Edit text" onClick={handleEditText}>
+          <Pencil className="w-3.5 h-3.5" />
+        </ToolbarButton>
         <ToolbarButton title="AI" onClick={handleAI}>
           <Wand2 className="w-3.5 h-3.5" />
         </ToolbarButton>
         <ToolbarButton title="Duplicate" onClick={handleDuplicate}>
           <Copy className="w-3.5 h-3.5" />
         </ToolbarButton>
+        {isInGroup && (
+          <ToolbarButton title="Exit group" onClick={handleExitGroup}>
+            <LogOut className="w-3.5 h-3.5" />
+          </ToolbarButton>
+        )}
         <ToolbarButton title="Comment">
           <MessageSquare className="w-3.5 h-3.5" />
         </ToolbarButton>

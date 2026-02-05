@@ -19,10 +19,11 @@ import {
   Panel,
   applyNodeChanges,
   applyEdgeChanges,
+  SelectionMode,
 } from "@xyflow/react";
 import { KeyboardHandler } from "./KeyboardHandler";
 import { HelperLines } from "./HelperLines";
-import { getLayoutedElements } from "@/lib/layout-engine";
+import { getLayoutedElements, type LayoutDirection } from "@/lib/layout-engine";
 import { resolveCollisions } from "@/lib/resolve-collisions";
 import { getHiddenNodeIds } from "@/lib/mindmap-utils";
 import "@xyflow/react/dist/style.css";
@@ -40,6 +41,12 @@ import {
   TableNode,
   EdgeAnchorNode,
   IconNode,
+  ImageNode,
+  DatabaseSchemaNode,
+  ServiceNode,
+  QueueNode,
+  ActorNode,
+  GroupNode,
 } from "@/components/nodes";
 import type { Stroke } from "./FreeDrawPreview";
 import { EdgeDrawPreview } from "./EdgeDrawPreview";
@@ -50,6 +57,7 @@ import { CustomConnectionLine } from "@/components/edges/CustomConnectionLine";
 import { MindMapLayoutPanel } from "@/components/panels/MindMapLayoutPanel";
 import { MobileColorIndicator } from "@/components/panels/MobileColorIndicator";
 import { MindMapLayoutProvider } from "@/contexts/MindMapLayoutContext";
+import { getDragPayload } from "@/lib/dnd-payload";
 
 const EDGE_ANCHOR_SIZE = 12;
 
@@ -65,6 +73,12 @@ const nodeTypes = {
   freeDraw: FreeDrawNode,
   edgeAnchor: EdgeAnchorNode,
   icon: IconNode,
+  image: ImageNode,
+  databaseSchema: DatabaseSchemaNode,
+  service: ServiceNode,
+  queue: QueueNode,
+  actor: ActorNode,
+  group: GroupNode,
 };
 
 const MIND_MAP_NODE_WIDTH = 170;
@@ -187,6 +201,9 @@ export default function DiagramCanvas() {
   const setPendingEmoji = useCanvasStore((s) => s.setPendingEmoji);
   const pendingIconId = useCanvasStore((s) => s.pendingIconId);
   const setPendingIconId = useCanvasStore((s) => s.setPendingIconId);
+  const pendingImageUrl = useCanvasStore((s) => s.pendingImageUrl);
+  const pendingImageLabel = useCanvasStore((s) => s.pendingImageLabel);
+  const setPendingImage = useCanvasStore((s) => s.setPendingImage);
   const addNode = useCanvasStore((s) => s.addNode);
   const addEdgeToStore = useCanvasStore((s) => s.addEdge);
   const setActiveTool = useCanvasStore((s) => s.setActiveTool);
@@ -194,6 +211,9 @@ export default function DiagramCanvas() {
   const undo = useCanvasStore((s) => s.undo);
   const redo = useCanvasStore((s) => s.redo);
   const mindMapLayout = useCanvasStore((s) => s.mindMapLayout);
+  const selectedNodeIds = useCanvasStore((s) => s.selectedNodeIds);
+  const pendingFitView = useCanvasStore((s) => (s as any).pendingFitView);
+  const setPendingFitView = useCanvasStore((s) => (s as any).setPendingFitView);
   const reactFlowRef = useRef<ReactFlowInstance | null>(null);
   const skipCanvasToStoreRef = useRef(false);
 
@@ -358,13 +378,36 @@ export default function DiagramCanvas() {
     pushUndo();
   }, [pushUndo]);
 
+  /** Get a node's position in flow coordinates (walk parent chain if it has parentId). */
+  const getFlowPosition = useCallback((node: Node, allNodes: Node[]): { x: number; y: number } => {
+    if (!node.parentId) return { ...node.position };
+    const parent = allNodes.find((n) => n.id === node.parentId);
+    if (!parent) return { ...node.position };
+    const parentFlow = getFlowPosition(parent, allNodes);
+    return {
+      x: parentFlow.x + node.position.x,
+      y: parentFlow.y + node.position.y,
+    };
+  }, []);
+
+  /** Return true if `group` is a descendant of `ofNode` (would create a cycle if ofNode became parent of group). */
+  const isDescendantOf = useCallback((group: Node, ofNode: Node, allNodes: Node[]): boolean => {
+    let current: Node | undefined = group;
+    while (current?.parentId) {
+      if (current.parentId === ofNode.id) return true;
+      current = allNodes.find((n) => n.id === current!.parentId);
+    }
+    return false;
+  }, []);
+
+  /** During drag: alignment snapping + group hover highlight (agentok-style). */
   const onNodeDrag = useCallback(
-    (_event: React.MouseEvent, node: Node) => {
-      const align = checkAlignment(node);
+    (_event: React.MouseEvent, draggedNode: Node, allNodes: Node[]) => {
+      const align = checkAlignment(draggedNode);
       if (align.x !== null || align.y !== null) {
         setNodes((nds) =>
           nds.map((n) =>
-            n.id === node.id
+            n.id === draggedNode.id
               ? {
                   ...n,
                   position: {
@@ -376,27 +419,125 @@ export default function DiagramCanvas() {
           )
         );
       }
+      if (draggedNode.type === "group" || draggedNode.type === "freeDraw") return;
+      const DEFAULT_GROUP_WIDTH = 280;
+      const DEFAULT_GROUP_HEIGHT = 200;
+      const flowPos = getFlowPosition(draggedNode, allNodes);
+      const nodeW = draggedNode.measured?.width ?? (draggedNode.width as number) ?? DEFAULT_NODE_WIDTH;
+      const nodeH = draggedNode.measured?.height ?? (draggedNode.height as number) ?? DEFAULT_NODE_HEIGHT;
+      const centerX = flowPos.x + (Number(nodeW) || DEFAULT_NODE_WIDTH) / 2;
+      const centerY = flowPos.y + (Number(nodeH) || DEFAULT_NODE_HEIGHT) / 2;
+      const groupNodes = allNodes.filter((n) => n.type === "group");
+      const groupsWithBounds = groupNodes.map((g) => ({
+        node: g,
+        flowPos: getFlowPosition(g, allNodes),
+        width: (g.style?.width as number) ?? DEFAULT_GROUP_WIDTH,
+        height: (g.style?.height as number) ?? DEFAULT_GROUP_HEIGHT,
+      }));
+      const pad = 8;
+      const containing = groupsWithBounds.find(
+        (g) =>
+          centerX >= g.flowPos.x - pad &&
+          centerX <= g.flowPos.x + g.width + pad &&
+          centerY >= g.flowPos.y - pad &&
+          centerY <= g.flowPos.y + g.height + pad
+      );
+      const hoveredGroupId = containing?.node.id ?? null;
+      setNodes((nds) =>
+        nds.map((n) =>
+          n.type === "group" ? { ...n, data: { ...n.data, hoveredGroupId } } : n
+        )
+      );
     },
-    [checkAlignment, setNodes]
+    [checkAlignment, getFlowPosition, setNodes]
   );
 
-  const onNodeDragStop = useCallback(() => {
-    setHelperLines({ horizontal: null, vertical: null });
-    setNodes((nds) => {
-      const movable = nds.filter((n) => n.type !== "freeDraw");
-      const freeDraw = nds.filter((n) => n.type === "freeDraw");
-      const resolved = resolveCollisions(movable, {
-        maxIterations: 100,
-        overlapThreshold: 0.5,
-        margin: 15,
-      });
-      return [...resolved, ...freeDraw];
-    });
-  }, [setNodes]);
+  const onNodeDragStop = useCallback(
+    (_event: React.MouseEvent, node: Node, allNodes: Node[]) => {
+      setHelperLines({ horizontal: null, vertical: null });
+
+      // Clear group hover state
+      setNodes((nds) =>
+        nds.map((n) =>
+          n.type === "group" ? { ...n, data: { ...n.data, hoveredGroupId: null } } : n
+        )
+      );
+
+      // Subflow: if dropped node is over a group, make it a child (parentId + extent: 'parent').
+      // Run after React Flow applies drag position (setTimeout) so our update isn't overwritten by onNodesChange.
+      if (node.type === "freeDraw") return;
+
+      const nodeId = node.id;
+      const DEFAULT_GROUP_WIDTH = 280;
+      const DEFAULT_GROUP_HEIGHT = 200;
+
+      setTimeout(() => {
+        const currentNodes = reactFlowRef.current?.getNodes() ?? allNodes;
+        const groupNodes = currentNodes.filter((n) => n.type === "group");
+        if (groupNodes.length === 0) return;
+
+        const droppedNode = currentNodes.find((n) => n.id === nodeId) ?? node;
+        const flowPos = getFlowPosition(droppedNode, currentNodes);
+        const nodeW = droppedNode.measured?.width ?? (droppedNode.width as number) ?? DEFAULT_NODE_WIDTH;
+        const nodeH = droppedNode.measured?.height ?? (droppedNode.height as number) ?? DEFAULT_NODE_HEIGHT;
+        const centerX = flowPos.x + (Number(nodeW) || DEFAULT_NODE_WIDTH) / 2;
+        const centerY = flowPos.y + (Number(nodeH) || DEFAULT_NODE_HEIGHT) / 2;
+
+        const groupsWithBounds = groupNodes.map((g) => ({
+          node: g,
+          flowPos: getFlowPosition(g, currentNodes),
+          width: (g.style?.width as number) ?? DEFAULT_GROUP_WIDTH,
+          height: (g.style?.height as number) ?? DEFAULT_GROUP_HEIGHT,
+        }));
+        const sortedByArea = [...groupsWithBounds].sort((a, b) => a.width * a.height - b.width * b.height);
+        const pad = 8; // slight padding so drop near group edge still attaches
+        const containing = sortedByArea.find(
+          (g) =>
+            centerX >= g.flowPos.x - pad &&
+            centerX <= g.flowPos.x + g.width + pad &&
+            centerY >= g.flowPos.y - pad &&
+            centerY <= g.flowPos.y + g.height + pad
+        );
+
+        setNodes((nds) =>
+          nds.map((n) => {
+            if (n.id !== nodeId) return n;
+            if (!containing || containing.node.id === nodeId || isDescendantOf(containing.node, droppedNode, currentNodes)) {
+              if (droppedNode.parentId) {
+                return { ...n, parentId: undefined, extent: undefined, position: { x: flowPos.x, y: flowPos.y } };
+              }
+              return n;
+            }
+            const parentFlow = containing.flowPos;
+            const relativePosition = {
+              x: centerX - parentFlow.x - (Number(nodeW) || DEFAULT_NODE_WIDTH) / 2,
+              y: centerY - parentFlow.y - (Number(nodeH) || DEFAULT_NODE_HEIGHT) / 2,
+            };
+            return { ...n, parentId: containing.node.id, extent: "parent" as const, position: relativePosition };
+          })
+        );
+      }, 0);
+    },
+    [getFlowPosition, isDescendantOf, setNodes]
+  );
 
   const onInit = useCallback((instance: ReactFlowInstance) => {
     reactFlowRef.current = instance;
   }, []);
+
+  // When external code (like the AI page) requests a fitView, run it once after
+  // the nodes/edges are synced and then clear the flag.
+  useEffect(() => {
+    if (!pendingFitView || !reactFlowRef.current) return;
+    const id = window.setTimeout(() => {
+      reactFlowRef.current?.fitView({
+        padding: 0.2,
+        duration: 300,
+      });
+      setPendingFitView(false);
+    }, 100);
+    return () => window.clearTimeout(id);
+  }, [pendingFitView, setPendingFitView]);
 
   // Sync canvas → store for persistence (skip when we just applied store → canvas to avoid loop)
   useEffect(() => {
@@ -736,6 +877,7 @@ export default function DiagramCanvas() {
     (event: React.MouseEvent) => {
       if (
         activeTool === "select" ||
+        activeTool === "selection" ||
         activeTool === "move" ||
         activeTool === "eraser" ||
         activeTool === "pan" ||
@@ -775,7 +917,7 @@ export default function DiagramCanvas() {
           };
           addNode(newNode);
           setNodes((nds) => [...nds, { ...newNode, selected: true }]);
-          setActiveTool("move");
+          setActiveTool("select");
           setPendingIconId(null);
         } else if (pendingEmoji) {
           pushUndo();
@@ -791,12 +933,30 @@ export default function DiagramCanvas() {
           };
           addNode(newNode);
           setNodes((nds) => [...nds, { ...newNode, selected: true }]);
-          setActiveTool("move");
+          setActiveTool("select");
           setPendingEmoji(null);
         }
         return;
       }
 
+      if (activeTool === "image" && pendingImageUrl) {
+        pushUndo();
+        const id = `image-${Date.now()}`;
+        const imageLabel = pendingImageLabel || "Image";
+        const newNode: Node = {
+          id,
+          type: "image",
+          position: { x: flowX - 100, y: flowY - 75 },
+          data: { label: imageLabel, imageUrl: pendingImageUrl },
+          width: 200,
+          height: 150,
+        };
+        addNode(newNode);
+        setNodes((nds) => [...nds, { ...newNode, selected: true }]);
+        setActiveTool("select");
+        setPendingImage(null);
+        return;
+      }
 
       const nodeTypesMap: Record<string, string> = {
         stickyNote: "stickyNote",
@@ -809,6 +969,11 @@ export default function DiagramCanvas() {
         mindMap: "mindMap",
         frame: "rectangle",
         list: "text",
+        databaseSchema: "databaseSchema",
+        service: "service",
+        queue: "queue",
+        actor: "actor",
+        group: "group",
       };
 
       const isShapeType = ["rectangle", "diamond", "circle", "document"].includes(activeTool);
@@ -833,25 +998,29 @@ export default function DiagramCanvas() {
 
       pushUndo();
 
+      const getDefaultData = () => {
+        if (type === "table") return { tableRows: 3, tableCols: 3, cells: {} };
+        if (type === "rectangle" || type === "diamond" || type === "circle" || type === "document")
+          return {
+            label: shape === "diamond" ? "Decision" : shape === "circle" ? "Process" : shape === "document" ? "Document" : "Node",
+            shape,
+          };
+        if (type === "databaseSchema")
+          return { label: "Table", columns: [{ name: "id", type: "uuid", key: "PK" }, { name: "created_at", type: "timestamp", key: "" }] };
+        if (type === "service") return { label: "Service", subtitle: "" };
+        if (type === "queue") return { label: "Queue" };
+        if (type === "actor") return { label: "Actor" };
+        if (type === "group") return { label: "Group" };
+        return { label: type === "mindMap" ? "Mind map" : "New node" };
+      };
+
       const newNode: Node = {
         id,
         type: type as keyof typeof nodeTypes,
         position: { x: flowX - 120, y: flowY - 80 },
-        data:
-          type === "table"
-            ? {
-                tableRows: 3,
-                tableCols: 3,
-                cells: {},
-              }
-            : type === "rectangle" || type === "diamond" || type === "circle" || type === "document"
-              ? {
-                  label:
-                    shape === "diamond" ? "Decision" : shape === "circle" ? "Process" : shape === "document" ? "Document" : "Node",
-                  shape,
-                }
-              : { label: type === "mindMap" ? "Mind map" : "New node" },
+        data: getDefaultData(),
         ...(type === "table" && { width: 240, height: 160 }),
+        ...(type === "group" && { style: { width: 280, height: 200 } }),
       };
 
       addNode(newNode);
@@ -867,11 +1036,154 @@ export default function DiagramCanvas() {
       setPendingEmoji,
       pendingIconId,
       setPendingIconId,
+      pendingImageUrl,
+      pendingImageLabel,
+      setPendingImage,
       addNode,
       setNodes,
       setActiveTool,
       pushUndo,
     ]
+  );
+
+  const onDragOver = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = "move";
+  }, []);
+
+  const onDrop = useCallback(
+    (e: React.DragEvent) => {
+      e.preventDefault();
+      const payload = getDragPayload(e.dataTransfer);
+      if (!payload || !reactFlowRef.current) return;
+      const position = reactFlowRef.current.screenToFlowPosition({
+        x: e.clientX,
+        y: e.clientY,
+      });
+      const flowX = position.x;
+      const flowY = position.y;
+
+      const id = payload.type === "icon" ? `icon-${Date.now()}` : payload.type === "image" ? `image-${Date.now()}` : `node-${Date.now()}`;
+
+      let newNode: Node;
+
+      if (payload.type === "icon" && payload.data) {
+        const size = 64;
+        newNode = {
+          id,
+          type: "icon",
+          position: { x: flowX - size / 2, y: flowY - size / 2 },
+          data: payload.data.iconId ? { iconId: payload.data.iconId } : { emoji: payload.data.emoji ?? "" },
+          width: size,
+          height: size,
+        };
+      } else if (payload.type === "image" && payload.data) {
+        newNode = {
+          id,
+          type: "image",
+          position: { x: flowX - 100, y: flowY - 75 },
+          data: { label: payload.data.label, imageUrl: payload.data.imageUrl },
+          width: 200,
+          height: 150,
+        };
+      } else {
+        const typeMap: Record<string, string> = {
+          rectangle: "rectangle",
+          stickyNote: "stickyNote",
+          text: "text",
+          mindMap: "mindMap",
+          databaseSchema: "databaseSchema",
+          service: "service",
+          queue: "queue",
+          actor: "actor",
+          group: "group",
+        };
+        const shape = payload.type === "rectangle" ? (payload.shape ?? "rectangle") : null;
+        const isTable = shape === "table";
+        const type = isTable ? "table" : (typeMap[payload.type] ?? "rectangle");
+        const getDefaultData = (): Record<string, unknown> => {
+          if (type === "table") return { tableRows: 3, tableCols: 3, cells: {} };
+          if (type === "databaseSchema") return { label: "Table", columns: [{ name: "id", type: "uuid", key: "PK" }, { name: "created_at", type: "timestamp", key: "" }] };
+          if (type === "service") return { label: "Service", subtitle: "" };
+          if (type === "queue") return { label: "Queue" };
+          if (type === "actor") return { label: "Actor" };
+          if (type === "group") return { label: "Group" };
+          if (type === "rectangle" && shape) {
+            const label = shape === "diamond" ? "Decision" : shape === "circle" ? "Process" : shape === "document" ? "Document" : "Node";
+            return { label, shape };
+          }
+          if (type === "stickyNote") return { label: "Note" };
+          if (type === "text") return { label: "Text" };
+          if (type === "mindMap") return { label: "Mind map" };
+          return { label: "Node", shape: "rectangle" };
+        };
+        newNode = {
+          id,
+          type: type as keyof typeof nodeTypes,
+          position: { x: flowX - 120, y: flowY - 80 },
+          data: getDefaultData(),
+          ...(type === "table" && { width: 240, height: 160 }),
+          ...(type === "group" && { style: { width: 280, height: 200 } }),
+        };
+      }
+
+      // If drop is inside a group, make this node a child (any node type can be in a group).
+      const currentNodes = reactFlowRef.current.getNodes();
+      const groupNodes = currentNodes.filter((n) => n.type === "group");
+      const DEFAULT_GROUP_WIDTH = 280;
+      const DEFAULT_GROUP_HEIGHT = 200;
+      const nodeW = (newNode.width as number) ?? DEFAULT_NODE_WIDTH;
+      const nodeH = (newNode.height as number) ?? DEFAULT_NODE_HEIGHT;
+      const centerX = newNode.position.x + nodeW / 2;
+      const centerY = newNode.position.y + nodeH / 2;
+
+      if (groupNodes.length > 0) {
+        const groupsWithBounds = groupNodes.map((g) => ({
+          node: g,
+          flowPos: getFlowPosition(g, currentNodes),
+          width: (g.style?.width as number) ?? DEFAULT_GROUP_WIDTH,
+          height: (g.style?.height as number) ?? DEFAULT_GROUP_HEIGHT,
+        }));
+        const sortedByArea = [...groupsWithBounds].sort((a, b) => a.width * a.height - b.width * b.height);
+        const pad = 8;
+        const containing = sortedByArea.find(
+          (g) =>
+            centerX >= g.flowPos.x - pad &&
+            centerX <= g.flowPos.x + g.width + pad &&
+            centerY >= g.flowPos.y - pad &&
+            centerY <= g.flowPos.y + g.height + pad
+        );
+        if (containing && containing.node.id !== id) {
+          const parentFlow = containing.flowPos;
+          newNode = {
+            ...newNode,
+            parentId: containing.node.id,
+            extent: "parent",
+            position: {
+              x: centerX - parentFlow.x - nodeW / 2,
+              y: centerY - parentFlow.y - nodeH / 2,
+            },
+          };
+        }
+      }
+
+      pushUndo();
+      addNode(newNode);
+      const nodeToAdd = { ...newNode, selected: true };
+      setNodes((nds) => {
+        if (nodeToAdd.parentId) {
+          const groupIndex = nds.findIndex((n) => n.id === nodeToAdd.parentId);
+          if (groupIndex !== -1) {
+            const next = [...nds];
+            next.splice(groupIndex + 1, 0, nodeToAdd);
+            return next;
+          }
+        }
+        return [...nds, nodeToAdd];
+      });
+      setActiveTool("select");
+    },
+    [addNode, setNodes, setActiveTool, pushUndo, getFlowPosition]
   );
 
   useEffect(() => {
@@ -932,6 +1244,96 @@ export default function DiagramCanvas() {
     [createFreeDrawNode]
   );
 
+  // --- Local storage persistence for diagrams ---
+  // On mount, try to hydrate from localStorage (if present). Dedupe by id to avoid React key errors.
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    try {
+      const raw = window.localStorage.getItem("ai-diagram-state-v1");
+      if (!raw) return;
+      const parsed = JSON.parse(raw) as { nodes?: Node[]; edges?: Edge[] };
+      if (Array.isArray(parsed.nodes) && Array.isArray(parsed.edges)) {
+        const nodeById = new Map<string, Node>();
+        parsed.nodes.forEach((n) => nodeById.set(n.id, n));
+        const edgeById = new Map<string, Edge>();
+        parsed.edges.forEach((e) => edgeById.set(e.id, e));
+        setStoreNodes(Array.from(nodeById.values()));
+        setStoreEdges(Array.from(edgeById.values()));
+      }
+    } catch {
+      // Ignore malformed localStorage; fall back to default behavior.
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Whenever store-backed nodes/edges change, persist to localStorage.
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    try {
+      const payload = JSON.stringify({ nodes: storeNodes, edges: storeEdges });
+      window.localStorage.setItem("ai-diagram-state-v1", payload);
+    } catch {
+      // Swallow quota/serialization errors; persistence is best-effort.
+    }
+  }, [storeNodes, storeEdges]);
+
+  const handleLayoutSelectedNodes = useCallback(async () => {
+    if (selectedNodeIds.length < 2) return;
+
+    const selectedSet = new Set(selectedNodeIds);
+    const subNodes = nodes.filter((n) => selectedSet.has(n.id));
+    const subEdges = edges.filter(
+      (e) => selectedSet.has(e.source) && selectedSet.has(e.target)
+    );
+
+    if (subNodes.length < 2) return;
+
+    // Use a left-to-right layered layout for arbitrary diagrams.
+    const direction: LayoutDirection = "LR";
+    const { nodes: layoutedNodes, edges: layoutedEdges } =
+      await getLayoutedElements(subNodes, subEdges, direction, [140, 120], "elk-layered");
+
+    // Merge layouted positions/handles back into the full graph.
+    setNodes((all) =>
+      all.map((n) => {
+        const ln = layoutedNodes.find((x) => x.id === n.id);
+        return ln ? { ...n, position: ln.position } : n;
+      })
+    );
+    setEdges((all) =>
+      all.map((e) => {
+        const le = layoutedEdges.find((x) => x.id === e.id);
+        return le
+          ? {
+              ...e,
+              sourceHandle: le.sourceHandle ?? e.sourceHandle,
+              targetHandle: le.targetHandle ?? e.targetHandle,
+            }
+          : e;
+      })
+    );
+  }, [selectedNodeIds, nodes, edges, setNodes, setEdges]);
+
+  const handleLayoutAllNodes = useCallback(async () => {
+    if (nodes.length < 2) return;
+    // Record state so user can undo a full-layout operation.
+    pushUndo();
+
+    const direction: LayoutDirection = mindMapLayout.direction;
+    const spacing: [number, number] = [mindMapLayout.spacingX, mindMapLayout.spacingY];
+
+    const { nodes: layoutedNodes, edges: layoutedEdges } = await getLayoutedElements(
+      nodes,
+      edges,
+      direction,
+      spacing,
+      mindMapLayout.algorithm
+    );
+
+    setNodes(layoutedNodes);
+    setEdges(layoutedEdges);
+  }, [nodes, edges, mindMapLayout, setNodes, setEdges, pushUndo]);
+
   return (
     <MindMapLayoutProvider
       onAddAndLayout={handleAddMindMapNode}
@@ -943,9 +1345,12 @@ export default function DiagramCanvas() {
           cursor:
             activeTool === "freeDraw" || activeTool === "connector"
               ? "crosshair"
-              : activeTool === "pan"
-                ? "grab"
-                : undefined,
+              : (activeTool === "emoji" && (pendingIconId || pendingEmoji)) ||
+                  (activeTool === "image" && pendingImageUrl)
+                ? "crosshair"
+                : activeTool === "pan"
+                  ? "grab"
+                  : undefined,
         }}
         onPointerDown={onPointerDown}
         onPointerMove={onPointerMove}
@@ -985,6 +1390,8 @@ export default function DiagramCanvas() {
           onConnect={onConnect}
           onConnectEnd={onConnectEnd}
           onPaneClick={onPaneClick}
+          onDrop={onDrop}
+          onDragOver={onDragOver}
           onNodeDragStart={onNodeDragStart}
           onNodeDrag={onNodeDrag}
           onNodeDragStop={onNodeDragStop}
@@ -998,9 +1405,10 @@ export default function DiagramCanvas() {
           zoomOnScroll
           zoomOnPinch
           zoomOnDoubleClick
-          panOnDrag={activeTool === "pan"}
-          selectionOnDrag={activeTool === "select"}
-          selectionMode="partial"
+          panOnDrag={activeTool === "select"}
+          panActivationKeyCode="Space"
+          selectionOnDrag={activeTool === "selection"}
+          selectionMode={SelectionMode.Partial}
           minZoom={0.1}
           maxZoom={4}
           connectionLineType={
@@ -1044,9 +1452,26 @@ export default function DiagramCanvas() {
         />
         <MobileColorIndicator />
         <Panel position="bottom-right" className="flex flex-col gap-2 m-2">
-          <span className="text-xs text-gray-500 px-2 py-1 bg-white/80 rounded shadow">
-            Ctrl/Cmd+Z undo • Ctrl/Cmd+Shift+Z or Ctrl/Cmd+Y redo • Ctrl+A select all • Ctrl+C/V copy/paste • Del delete • Esc deselect
-          </span>
+          <div className="flex items-center gap-2 bg-white/80 rounded shadow px-2 py-1">
+            <button
+              type="button"
+              onClick={handleLayoutSelectedNodes}
+              className="text-xs px-2 py-1 rounded bg-violet-100 text-violet-700 hover:bg-violet-200 disabled:opacity-50"
+              disabled={selectedNodeIds.length < 2}
+            >
+              Layout selection
+            </button>
+            <button
+              type="button"
+              onClick={handleLayoutAllNodes}
+              className="text-xs px-2 py-1 rounded bg-slate-100 text-slate-700 hover:bg-slate-200"
+            >
+              Layout all
+            </button>
+            <span className="text-[11px] text-gray-500">
+              Ctrl/Cmd+Z undo • Ctrl/Cmd+Shift+Z or Ctrl/Cmd+Y redo • Ctrl+A select all • Esc deselect
+            </span>
+          </div>
         </Panel>
       </ReactFlow>
       </div>
