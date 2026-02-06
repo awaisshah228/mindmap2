@@ -50,29 +50,6 @@ export type PresetOption = {
   targetCanvas?: "reactflow" | "excalidraw" | "drawio";
 };
 
-const DEFAULT_PRESET_OPTIONS: PresetOption[] = [
-  { value: "none", label: "None (default)", prompt: "" },
-];
-
-/** Draw.io prompt presets (client-side; no pre-built diagram). */
-const DRAWIO_PRESETS: PresetOption[] = [
-  { value: "drawio-microservices-aws-kafka", label: "Draw.io: Microservices + AWS + Kafka", prompt: "Create a complete microservices architecture diagram on AWS with Kafka. Include: User/Browser, CDN/CloudFront, Next.js frontend, API Gateway, Auth service, User service, Product Catalog, Order service, Payment (Stripe), Kafka message broker, PostgreSQL, Redis, S3. Show data flow with arrows: static assets through CDN, API requests through gateway to services, events published to Kafka, services consuming from Kafka. Use AWS colors: orange (#ff9900) for compute, green (#569a31) for storage, blue (#527bbb) for database. Left-to-right flow. Group by tier (frontend, API, services, data).", targetCanvas: "drawio" },
-  { value: "drawio-flowchart", label: "Draw.io: Flowchart", prompt: "Create a flowchart for a typical user login process: start, input credentials, validate, success or error, redirect.", targetCanvas: "drawio" },
-  { value: "drawio-architecture", label: "Draw.io: System architecture", prompt: "Create a system architecture diagram: client, API gateway, backend services, database. Use clear boxes and arrows.", targetCanvas: "drawio" },
-  { value: "drawio-process-flow", label: "Draw.io: Process flow", prompt: "Create a business process flow: receive order, validate, payment, fulfillment, shipping, delivery.", targetCanvas: "drawio" },
-  { value: "drawio-uml", label: "Draw.io: UML class diagram", prompt: "Create a UML class diagram for an e-commerce domain: User, Order, Product, Cart, Payment classes with relationships.", targetCanvas: "drawio" },
-  { value: "drawio-network", label: "Draw.io: Network diagram", prompt: "Create a network diagram: router, switches, servers, firewall. Show connections and subnets.", targetCanvas: "drawio" },
-];
-
-/** Excalidraw prompt presets (client-side; no pre-built diagram). */
-const EXCALIDRAW_PRESETS: PresetOption[] = [
-  { value: "excalidraw-flowchart", label: "Excalidraw: Flowchart", prompt: "Create a simple flowchart: start, steps, decision diamond, end. Use boxes and arrows.", targetCanvas: "excalidraw" },
-  { value: "excalidraw-architecture", label: "Excalidraw: Architecture", prompt: "Create an architecture diagram: Frontend, API, Database, Cache. Use rectangles and connecting arrows.", targetCanvas: "excalidraw" },
-  { value: "excalidraw-mindmap", label: "Excalidraw: Mind map", prompt: "Create a mind map with a central topic and 4-6 branches. Use boxes and curved connectors.", targetCanvas: "excalidraw" },
-  { value: "excalidraw-wireframe", label: "Excalidraw: Wireframe", prompt: "Create a simple app wireframe: header, sidebar, main content area, footer.", targetCanvas: "excalidraw" },
-  { value: "excalidraw-sequence", label: "Excalidraw: Sequence", prompt: "Create a sequence diagram: User, Frontend, API, Database. Show request/response arrows.", targetCanvas: "excalidraw" },
-];
-
 /** Small badge showing current model + API key status below the prompt textarea. */
 function ModelStatusBadge() {
   const llmProvider = useCanvasStore((s) => s.llmProvider);
@@ -144,22 +121,37 @@ function AIDiagramPage() {
   const router = useRouter();
 
   useEffect(() => {
-    fetch("/api/presets")
+    const url = `/api/presets?targetCanvas=${targetCanvas}`;
+    fetch(url)
       .then((r) => r.ok ? r.json() : [])
-      .then((list: { id: string; label: string; prompt?: string; previewImageUrl?: string }[]) => {
-        setApiPresets(
-          list.map((p) => ({ value: p.id, label: p.label, prompt: p.prompt ?? "", previewImageUrl: p.previewImageUrl }))
-        );
-      })
+      .then(
+        (
+          list: {
+            id: string;
+            label: string;
+            prompt?: string;
+            previewImageUrl?: string;
+            targetCanvas?: string;
+          }[]
+        ) => {
+          setApiPresets(
+            list.map((p) => ({
+              value: p.id,
+              label: p.label,
+              prompt: p.prompt ?? "",
+              previewImageUrl: p.previewImageUrl,
+              targetCanvas: (p.targetCanvas as "reactflow" | "excalidraw" | "drawio") ?? "reactflow",
+            }))
+          );
+        }
+      )
       .catch(() => {});
-  }, []);
+  }, [targetCanvas]);
 
-  const presetOptions: PresetOption[] =
-    targetCanvas === "drawio"
-      ? [{ value: "none", label: "None (default)", prompt: "" }, ...DRAWIO_PRESETS]
-      : targetCanvas === "excalidraw"
-        ? [{ value: "none", label: "None (default)", prompt: "" }, ...EXCALIDRAW_PRESETS]
-        : [{ value: "none", label: "None (default)", prompt: "" }, ...apiPresets];
+  const presetOptions: PresetOption[] = [
+    { value: "none", label: "None (default)", prompt: "" },
+    ...apiPresets,
+  ];
 
   const searchParams = useSearchParams();
   const mode = searchParams.get("mode") || "diagram";
@@ -243,9 +235,8 @@ function AIDiagramPage() {
 
   const handleGenerate = async () => {
     const selectedPreset = presetOptions.find((p) => p.value === preset);
-    const effectivePrompt = preset !== "none"
-      ? (selectedPreset?.prompt ?? prompt)
-      : prompt;
+    const effectivePrompt =
+      preset !== "none" ? (selectedPreset?.prompt ?? prompt) : prompt;
     if (!effectivePrompt.trim()) return;
     setLoading(true);
     setError(null);
@@ -258,6 +249,53 @@ function AIDiagramPage() {
     const targetCanvasMode = effectiveTarget;
 
     try {
+      // ─── Preset: try load from DB first (skip AI if diagram already saved) ───
+      if (preset !== "none" && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(preset)) {
+        const presetRes = await fetch(
+          `/api/diagrams/preset?preset=${encodeURIComponent(preset)}`,
+          { credentials: "include" }
+        );
+        if (presetRes.ok) {
+          const data = await presetRes.json();
+          if (data.drawioData) {
+            setDrawioData(data.drawioData);
+            setCanvasMode("drawio");
+            setHasUnsavedChanges(true);
+            setLastAIPrompt(effectivePrompt.trim());
+            setLastAIDiagram(null);
+            saveNow();
+            setPendingFitView(true);
+            setLoading(false);
+            return;
+          }
+          if (data.excalidrawData) {
+            setExcalidrawData(data.excalidrawData);
+            setCanvasMode("excalidraw");
+            setHasUnsavedChanges(true);
+            setLastAIPrompt(effectivePrompt.trim());
+            setLastAIDiagram(null);
+            saveNow();
+            setPendingFitView(true);
+            setLoading(false);
+            return;
+          }
+          if (Array.isArray(data.nodes) && data.nodes.length > 0) {
+            const nodes = data.nodes as Node[];
+            const edges = (data.edges ?? []) as Edge[];
+            await applyNodesAndEdgesInChunks(setNodes, setEdges, nodes, edges);
+            setCanvasMode("reactflow");
+            setHasUnsavedChanges(true);
+            setLastAIPrompt(effectivePrompt.trim());
+            setLastAIDiagram(null);
+            saveNow();
+            setPendingFitView(true);
+            setPendingFitViewNodeIds(nodes.map((n) => n.id));
+            setLoading(false);
+            return;
+          }
+        }
+      }
+
       // Read LLM settings from store
       const { llmProvider, llmModel, llmApiKey, llmBaseUrl } = useCanvasStore.getState();
 
@@ -321,6 +359,15 @@ function AIDiagramPage() {
         setHasUnsavedChanges(true);
         setLastAIPrompt(effectivePrompt.trim());
         setLastAIDiagram(null);
+        // Save generated diagram to preset in DB for future loads
+        if (preset !== "none" && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(preset)) {
+          fetch(`/api/presets/${preset}`, {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            credentials: "include",
+            body: JSON.stringify({ drawioData: xml }),
+          }).catch(() => {});
+        }
         saveNow();
         setPendingFitView(true);
         setLoading(false);
@@ -379,11 +426,21 @@ function AIDiagramPage() {
         }
         const normalized = normalizeSkeletons(finalParsed.elements);
         const elements = convertToExcalidrawElements(normalized as never[], { regenerateIds: false });
-        setExcalidrawData({ elements, appState: {} });
+        const excalidrawPayload = { elements, appState: {} };
+        setExcalidrawData(excalidrawPayload);
         setCanvasMode("excalidraw");
         setHasUnsavedChanges(true);
         setLastAIPrompt(effectivePrompt.trim());
         setLastAIDiagram(null);
+        // Save generated diagram to preset in DB for future loads
+        if (preset !== "none" && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(preset)) {
+          fetch(`/api/presets/${preset}`, {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            credentials: "include",
+            body: JSON.stringify({ excalidrawData: excalidrawPayload }),
+          }).catch(() => {});
+        }
         saveNow();
         setPendingFitView(true);
         setLoading(false);
@@ -421,27 +478,17 @@ function AIDiagramPage() {
       const isNewDiagram = mode !== "mindmap-refine";
       const refId = isNewDiagram ? `ref-${Date.now()}-${Math.random().toString(36).slice(2, 9)}` : null;
 
-      // ─── Preset: stream response so we render nodes/edges in sequence (in chunks) ──
+      // ─── Preset (React Flow): stream nodes/edges from DB, or fall through to AI if no data yet ──
       const nodeIdMap = new Map<string, string>();
-      if (preset !== "none") {
+      if (preset !== "none" && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(preset)) {
         const presetRes = await fetch(
           `/api/diagrams/preset/stream?preset=${encodeURIComponent(preset)}`,
           { credentials: "include" }
         );
         if (!presetRes.ok || !presetRes.body) {
-          const errBody = await presetRes.text().catch(() => "");
-          let errMsg = "Failed to load preset";
-          try {
-            const j = JSON.parse(errBody);
-            if (j?.error) errMsg = String(j.error);
-          } catch {
-            if (presetRes.status === 404) errMsg = "Preset not found";
-          }
-          setError(errMsg);
-          setLoading(false);
-          return;
-        }
-        {
+          // 404 = preset has no nodes yet (first-time); fall through to AI generation
+          parsed = null;
+        } else {
           let full = "";
           let streamBuffer = "";
           let streamedNodeCount = 0;
@@ -493,7 +540,7 @@ function AIDiagramPage() {
             streamedEdgeCount = res.edges.length;
           };
 
-          const reader = presetRes.body.getReader();
+          const reader = presetRes.body!.getReader();
           const decoder = new TextDecoder();
           while (true) {
             const { value, done } = await reader.read();
@@ -1019,6 +1066,28 @@ function AIDiagramPage() {
 
       setLastAIPrompt(effectivePrompt.trim());
       setLastAIDiagram({ nodes: layoutedNodes, edges: layoutedEdges });
+
+      // Save generated React Flow diagram to preset in DB for future loads
+      if (preset !== "none" && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(preset)) {
+        const stripRefId = (id: string) => (refId && id.startsWith(`${refId}-`) ? id.slice(refId.length + 1) : id);
+        const nodesForPreset = layoutedNodes.map((n: { id: string; [k: string]: unknown }) => ({
+          ...n,
+          id: stripRefId(n.id),
+          parentId: n.parentId ? stripRefId(String(n.parentId)) : undefined,
+        }));
+        const edgesForPreset = layoutedEdges.map((e: { id: string; source: string; target: string; [k: string]: unknown }) => ({
+          ...e,
+          id: stripRefId(e.id),
+          source: stripRefId(e.source),
+          target: stripRefId(e.target),
+        }));
+        fetch(`/api/presets/${preset}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          credentials: "include",
+          body: JSON.stringify({ nodes: nodesForPreset, edges: edgesForPreset }),
+        }).catch(() => {});
+      }
 
       // Persist so the canvas shows the generated diagram (both Diagram and Excalidraw canvases).
       saveNow();

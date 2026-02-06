@@ -18,11 +18,12 @@ import {
 } from "lucide-react";
 import * as Popover from "@radix-ui/react-popover";
 import { cn } from "@/lib/utils";
+import { useAuth } from "@clerk/nextjs";
 import { useCanvasStore, type Project } from "@/lib/store/canvas-store";
 import { applyNodesAndEdgesInChunks } from "@/lib/chunked-nodes";
 import { parseStreamingDiagramBuffer } from "@/lib/ai/streaming-json-parser";
 import { getLayoutedElements } from "@/lib/layout-engine";
-import { saveNow } from "@/lib/store/project-storage";
+import { saveNow, createProjectApi, renameProjectApi, deleteProjectApi, duplicateProjectApi } from "@/lib/store/project-storage";
 
 interface AppSidebarProps {
   isOpen?: boolean;
@@ -46,14 +47,12 @@ function timeAgo(ts: number): string {
 type TemplateItem = { id: string; label: string; level: string; description?: string; previewImageUrl?: string };
 
 export default function AppSidebar({ isOpen = true, onClose, isMobile }: AppSidebarProps) {
+  const { isSignedIn } = useAuth();
+  const persistenceSource = useCanvasStore((s) => s.persistenceSource);
   const projects = useCanvasStore((s) => s.projects);
   const activeProjectId = useCanvasStore((s) => s.activeProjectId);
-  const createProject = useCanvasStore((s) => s.createProject);
   const switchProject = useCanvasStore((s) => s.switchProject);
   const setHasUnsavedChanges = useCanvasStore((s) => s.setHasUnsavedChanges);
-  const renameProject = useCanvasStore((s) => s.renameProject);
-  const deleteProject = useCanvasStore((s) => s.deleteProject);
-  const duplicateProject = useCanvasStore((s) => s.duplicateProject);
   const toggleFavorite = useCanvasStore((s) => s.toggleFavorite);
   const setNodes = useCanvasStore((s) => s.setNodes);
   const setEdges = useCanvasStore((s) => s.setEdges);
@@ -85,7 +84,7 @@ export default function AppSidebar({ isOpen = true, onClose, isMobile }: AppSide
         setTemplatesLoading(false);
         return;
       }
-      if (!activeProjectId) createProject(label || "From template");
+      if (!activeProjectId) await createProjectApi(!!isSignedIn || persistenceSource === "cloud", label || "From template");
       const nodeIdMap = new Map<string, string>();
       let streamBuffer = "";
       let streamedNodeCount = 0;
@@ -189,8 +188,9 @@ export default function AppSidebar({ isOpen = true, onClose, isMobile }: AppSide
   const recent = useMemo(() => [...projects].sort((a, b) => b.updatedAt - a.updatedAt).slice(0, 5), [projects]);
   const allProjects = useMemo(() => [...projects].sort((a, b) => b.updatedAt - a.updatedAt), [projects]);
 
-  const handleCreate = () => {
-    createProject("Untitled");
+  const handleCreate = async () => {
+    const useApi = !!isSignedIn || persistenceSource === "cloud";
+    await createProjectApi(useApi, "Untitled");
   };
 
   if (!isMobile && !isOpen) return null;
@@ -290,9 +290,9 @@ export default function AppSidebar({ isOpen = true, onClose, isMobile }: AppSide
                 project={p}
                 isActive={p.id === activeProjectId}
                 onSwitch={() => switchProject(p.id)}
-                onRename={(name) => renameProject(p.id, name)}
-                onDelete={() => deleteProject(p.id)}
-                onDuplicate={() => duplicateProject(p.id)}
+                onRename={(name) => renameProjectApi(p.id, name)}
+                onDelete={() => deleteProjectApi(p.id)}
+                onDuplicate={() => duplicateProjectApi(p.id)}
                 onToggleFavorite={() => toggleFavorite(p.id)}
               />
             ))}
@@ -310,9 +310,9 @@ export default function AppSidebar({ isOpen = true, onClose, isMobile }: AppSide
                 project={p}
                 isActive={p.id === activeProjectId}
                 onSwitch={() => switchProject(p.id)}
-                onRename={(name) => renameProject(p.id, name)}
-                onDelete={() => deleteProject(p.id)}
-                onDuplicate={() => duplicateProject(p.id)}
+                onRename={(name) => renameProjectApi(p.id, name)}
+                onDelete={() => deleteProjectApi(p.id)}
+                onDuplicate={() => duplicateProjectApi(p.id)}
                 onToggleFavorite={() => toggleFavorite(p.id)}
                 showTime
               />
@@ -331,9 +331,9 @@ export default function AppSidebar({ isOpen = true, onClose, isMobile }: AppSide
                 project={p}
                 isActive={p.id === activeProjectId}
                 onSwitch={() => switchProject(p.id)}
-                onRename={(name) => renameProject(p.id, name)}
-                onDelete={() => deleteProject(p.id)}
-                onDuplicate={() => duplicateProject(p.id)}
+                onRename={(name) => renameProjectApi(p.id, name)}
+                onDelete={() => deleteProjectApi(p.id)}
+                onDuplicate={() => duplicateProjectApi(p.id)}
                 onToggleFavorite={() => toggleFavorite(p.id)}
                 showTime
               />

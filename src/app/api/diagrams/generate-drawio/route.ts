@@ -6,6 +6,8 @@ import {
   getOpenRouterHttpReferer,
   getOpenRouterAppTitle,
   getOpenAiApiKey,
+  getAnthropicApiKey,
+  getGoogleApiKey,
 } from "@/lib/env";
 import { getAuthUserId } from "@/lib/auth";
 import { isAdmin } from "@/lib/admin";
@@ -14,6 +16,12 @@ import {
   getDrawioGenerateSystemPrompt,
   buildDrawioGenerateUserMessage,
 } from "@/lib/ai/drawio-generate-prompt";
+import {
+  getCacheKey,
+  getCached,
+  setCached,
+  cachedStreamResponse,
+} from "@/lib/ai-response-cache";
 import { detectLibraryFromPrompt, loadShapeLibrary } from "@/lib/shape-library";
 
 export const runtime = "nodejs";
@@ -69,9 +77,12 @@ export async function POST(req: NextRequest) {
     } else if (provider === "openai") {
       apiKey = llmApiKey || openAiKey;
       baseURL = PROVIDER_BASE_URLS.openai;
-    } else if (provider === "anthropic" || provider === "google") {
-      apiKey = llmApiKey || openRouterKey || openAiKey;
-      baseURL = provider === "anthropic" ? PROVIDER_BASE_URLS.anthropic : PROVIDER_BASE_URLS.google;
+    } else if (provider === "anthropic") {
+      apiKey = llmApiKey || getAnthropicApiKey() || openRouterKey || openAiKey;
+      baseURL = PROVIDER_BASE_URLS.anthropic;
+    } else if (provider === "google") {
+      apiKey = llmApiKey || getGoogleApiKey() || openRouterKey || openAiKey;
+      baseURL = PROVIDER_BASE_URLS.google;
     } else {
       apiKey = llmApiKey || openAiKey;
       baseURL = PROVIDER_BASE_URLS.openai;
@@ -85,6 +96,13 @@ export async function POST(req: NextRequest) {
     }
 
     const effectiveModel = resolveModelName(provider, llmModel);
+
+    // Check cache for identical prompt + model + provider (saves API cost)
+    const cacheKey = getCacheKey("drawio", prompt.trim(), effectiveModel, provider);
+    const cached = getCached(cacheKey);
+    if (cached) {
+      return cachedStreamResponse(cached);
+    }
 
     // Inject shape library doc when prompt suggests a specific diagram type (matches next-ai-draw-io get_shape_library)
     const detectedLib = detectLibraryFromPrompt(prompt.trim());
@@ -111,6 +129,7 @@ export async function POST(req: NextRequest) {
 
     const encoder = new TextEncoder();
 
+    let fullText = "";
     const readable = new ReadableStream<Uint8Array>({
       async start(controller) {
         try {
@@ -124,11 +143,13 @@ export async function POST(req: NextRequest) {
                       .join("")
                   : String(chunk.content ?? "");
             if (text) {
+              fullText += text;
               controller.enqueue(encoder.encode(text));
             }
           }
           controller.close();
-          // Deduct credits after stream completes successfully
+          if (fullText) setCached(cacheKey, fullText);
+          // Deduct credits after stream completes successfully (not on cache hit)
           if (userId && !admin && !llmApiKey) {
             await deductCredits(userId);
           }

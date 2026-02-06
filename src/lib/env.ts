@@ -32,6 +32,16 @@ export function getOpenAiApiKey(): string {
   return process.env.OPENAI_API_KEY ?? "";
 }
 
+/** Anthropic API key for direct Claude API calls. */
+export function getAnthropicApiKey(): string {
+  return process.env.ANTHROPIC_API_KEY ?? "";
+}
+
+/** Google API key for Gemini / Generative AI. */
+export function getGoogleApiKey(): string {
+  return process.env.GOOGLE_API_KEY ?? process.env.GOOGLE_GENERATIVE_AI_API_KEY ?? "";
+}
+
 /** Database URL — only call from server. Set in .env to your Neon URL (e.g. from https://neon.tech). No fallback so missing/invalid URL is caught and routes can return fallbacks. */
 export function getDatabaseUrl(): string {
   return process.env.DATABASE_URL ?? "";

@@ -9,13 +9,15 @@ import {
   ZoomOut,
   Maximize,
   Save,
+  Cloud,
+  CloudOff,
   Check,
   Circle,
   LayoutTemplate,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useCanvasStore } from "@/lib/store/canvas-store";
-import { saveNow } from "@/lib/store/project-storage";
+import { saveNow, isApiProjectId } from "@/lib/store/project-storage";
 
 interface CanvasBottomBarProps {
   selectedNodeCount: number;
@@ -45,8 +47,16 @@ function CanvasBottomBarInner({
   const undoStack = useCanvasStore((s) => s.undoStack);
   const redoStack = useCanvasStore((s) => s.redoStack);
   const lastSavedAt = useCanvasStore((s) => s.lastSavedAt);
+  const lastSyncedToCloudAt = useCanvasStore((s) => s.lastSyncedToCloudAt);
   const hasUnsavedChanges = useCanvasStore((s) => s.hasUnsavedChanges);
+  const persistenceSource = useCanvasStore((s) => s.persistenceSource);
+  const activeProjectId = useCanvasStore((s) => s.activeProjectId);
   const showSaveLayoutLabel = useCanvasStore((s) => s.showSaveLayoutLabel);
+
+  const isCloudProject = Boolean(
+    persistenceSource === "cloud" && activeProjectId && isApiProjectId(activeProjectId)
+  );
+  const isSyncedToCloud = Boolean(lastSyncedToCloudAt && !hasUnsavedChanges);
   const setShowSaveLayoutLabel = useCanvasStore((s) => s.setShowSaveLayoutLabel);
   const applyLayoutAtStart = useCanvasStore((s) => s.applyLayoutAtStart);
   const setApplyLayoutAtStart = useCanvasStore((s) => s.setApplyLayoutAtStart);
@@ -81,8 +91,8 @@ function CanvasBottomBarInner({
   return (
     <Panel position="bottom-center" className="!mb-3">
       <div className="flex items-center gap-1 bg-white dark:bg-gray-800 rounded-xl shadow-lg border border-gray-200 dark:border-gray-700 px-2 py-1.5">
-        {/* Save status */}
-        <div className="flex items-center gap-1.5 px-2 min-w-[100px]">
+        {/* Save status: Unsaved | Saved locally | Synced to cloud */}
+        <div className="flex items-center gap-1.5 px-2 min-w-[140px]">
           {hasUnsavedChanges ? (
             <>
               <Circle className="w-2.5 h-2.5 fill-amber-400 text-amber-400" />
@@ -90,8 +100,25 @@ function CanvasBottomBarInner({
             </>
           ) : lastSavedAt ? (
             <>
-              <Check className="w-3.5 h-3.5 text-green-500" />
-              <span className="text-[11px] text-gray-500 dark:text-gray-400">Saved {timeAgo(lastSavedAt)}</span>
+              {isCloudProject && isSyncedToCloud ? (
+                <>
+                  <Cloud className="w-3.5 h-3.5 text-green-500" />
+                  <span className="text-[11px] text-gray-500 dark:text-gray-400">Synced to cloud {timeAgo(lastSyncedToCloudAt)}</span>
+                </>
+              ) : (
+                <>
+                  {isCloudProject ? (
+                    <span title="Saved locally; press Sync to save to cloud">
+                      <CloudOff className="w-3.5 h-3.5 text-amber-500" />
+                    </span>
+                  ) : (
+                    <Check className="w-3.5 h-3.5 text-green-500" />
+                  )}
+                  <span className="text-[11px] text-gray-500 dark:text-gray-400">
+                    Saved locally {timeAgo(lastSavedAt)}
+                  </span>
+                </>
+              )}
             </>
           ) : (
             <span className="text-[11px] text-gray-400">Not saved</span>
@@ -103,14 +130,27 @@ function CanvasBottomBarInner({
           onClick={handleSave}
           className={cn(
             "p-1.5 rounded-lg transition-colors flex items-center gap-1",
-            hasUnsavedChanges
+            hasUnsavedChanges || (isCloudProject && !isSyncedToCloud)
               ? "bg-violet-100 dark:bg-violet-900/30 text-violet-600 dark:text-violet-400 hover:bg-violet-200 dark:hover:bg-violet-900/50"
               : "text-gray-400 dark:text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-700"
           )}
-          title={showSaveLayoutLabel ? "Save positions (Ctrl/Cmd+S)" : "Save (Ctrl/Cmd+S)"}
+          title={
+            isCloudProject
+              ? "Sync to cloud (Ctrl/Cmd+S)"
+              : showSaveLayoutLabel
+                ? "Save positions (Ctrl/Cmd+S)"
+                : "Save to local storage (Ctrl/Cmd+S)"
+          }
         >
-          <Save className="w-4 h-4 shrink-0" />
-          {showSaveLayoutLabel && <span className="text-[11px] font-medium whitespace-nowrap">Save layout</span>}
+          {isCloudProject ? (
+            <Cloud className="w-4 h-4 shrink-0" />
+          ) : (
+            <Save className="w-4 h-4 shrink-0" />
+          )}
+          {showSaveLayoutLabel && !isCloudProject && (
+            <span className="text-[11px] font-medium whitespace-nowrap">Save layout</span>
+          )}
+          {isCloudProject && <span className="text-[11px] font-medium whitespace-nowrap">Sync to cloud</span>}
         </button>
 
         <div className="w-px h-5 bg-gray-200 dark:bg-gray-600 mx-1" />

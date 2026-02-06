@@ -12,6 +12,12 @@ import { useAuth } from "@clerk/nextjs";
 import { useCanvasStore, DEFAULT_MIND_MAP_LAYOUT, type Project, type SavedLayout, type ExcalidrawScene } from "./canvas-store";
 import type { Node, Edge } from "@xyflow/react";
 import { applyNodesAndEdgesInChunks } from "@/lib/chunked-nodes";
+import {
+  fitGroupBoundsAndCenterChildren,
+  ensureExtentForGroupedNodes,
+  normalizeMindMapEdgeHandles,
+  type LayoutDirection,
+} from "@/lib/layout-engine";
 import { parseStreamingDiagramBuffer } from "@/lib/ai/streaming-json-parser";
 
 /** Module-level refs so loadProjectContentFromStream and saveNow can sync with auto-save. */
@@ -32,30 +38,102 @@ async function applyLoadedProjectData(
     nodeAttachments?: Record<string, unknown>;
     excalidrawData?: unknown;
     drawioData?: string | null;
-  }
+  },
+  opts?: { fromCloud?: boolean }
 ): Promise<void> {
   const { setNodes, setEdges, setNodeNote, setNodeTasks } = useCanvasStore.getState();
   const nodes = Array.isArray(data.nodes) ? data.nodes : [];
   const edges = Array.isArray(data.edges) ? data.edges : [];
-  const flatNodes = (nodes as { id: string; type?: string; position?: { x: number; y: number }; data?: Record<string, unknown>; parentId?: string }[])
-    .filter((n) => n.type !== "group")
+  const rawNodes = nodes as { id: string; type?: string; position?: { x: number; y: number }; data?: Record<string, unknown>; parentId?: string; style?: Record<string, unknown> }[];
+  const flatNodes = rawNodes
     .map((n) => ({
       id: n.id,
       type: (n.type as string) || "rectangle",
       position: n.position ?? { x: 0, y: 0 },
       data: n.data ?? {},
+      ...(n.style && { style: n.style }),
       ...(n.parentId && { parentId: n.parentId, extent: "parent" as const }),
     })) as Node[];
   const nodeIds = new Set(flatNodes.map((n) => n.id));
-  const validEdges = (edges as { id?: string; source: string; target: string; data?: Record<string, unknown> }[])
-    .filter((e) => e && nodeIds.has(e.source) && nodeIds.has(e.target))
+  // Strip parentId from nodes whose parent doesn't exist (avoids React Flow "parent.measured undefined" crash)
+  const safeNodes = flatNodes.map((n) => {
+    if (n.parentId && !nodeIds.has(n.parentId)) {
+      const { parentId, extent, ...rest } = n;
+      void parentId;
+      void extent;
+      return rest as Node;
+    }
+    return n;
+  });
+  // Apply same grouping logic as AI diagram page: ensure extent and fit group bounds to children
+  let processedNodes = ensureExtentForGroupedNodes(safeNodes);
+  if (processedNodes.some((n) => n.type === "group")) {
+    processedNodes = fitGroupBoundsAndCenterChildren(processedNodes);
+  }
+
+  const validNodeIds = new Set(processedNodes.map((n) => n.id));
+  type RawEdge = { id?: string; source: string; target: string; sourceHandle?: string; targetHandle?: string; data?: Record<string, unknown> };
+  let validEdges = (edges as RawEdge[])
+    .filter((e) => e && validNodeIds.has(e.source) && validNodeIds.has(e.target))
     .map((e, i) => ({
       id: e.id || `e-${e.source}-${e.target}-${i}`,
       source: e.source,
       target: e.target,
+      sourceHandle: e.sourceHandle,
+      targetHandle: e.targetHandle,
       ...(e.data && { data: e.data }),
     })) as Edge[];
-  applyNodesAndEdgesInChunks(setNodes, setEdges, flatNodes, validEdges);
+
+  // Same logic as AI generation: normalize edge handles based on node positions when missing
+  const nodeById = new Map(processedNodes.map((n) => [n.id, n]));
+  validEdges = validEdges.map((e) => {
+    let sourceHandle = e.sourceHandle;
+    let targetHandle = e.targetHandle;
+    const sourceNode = nodeById.get(e.source);
+    const targetNode = nodeById.get(e.target);
+    if (sourceNode && targetNode && (!sourceHandle || !targetHandle)) {
+      const sx = sourceNode.position?.x ?? 0;
+      const sy = sourceNode.position?.y ?? 0;
+      const tx = targetNode.position?.x ?? 0;
+      const ty = targetNode.position?.y ?? 0;
+      const dx = tx - sx;
+      const dy = ty - sy;
+      if (Math.abs(dx) >= Math.abs(dy)) {
+        sourceHandle = sourceHandle ?? (dx >= 0 ? "right" : "left");
+        targetHandle = targetHandle ?? (dx >= 0 ? "left" : "right");
+      } else {
+        sourceHandle = sourceHandle ?? (dy >= 0 ? "bottom" : "top");
+        targetHandle = targetHandle ?? (dy >= 0 ? "top" : "bottom");
+      }
+    }
+    return { ...e, sourceHandle, targetHandle };
+  });
+
+  // Same logic as AI generation: for mind map diagrams, normalize handles by direction + use labeledConnector
+  const isMindMapDiagram =
+    processedNodes.length > 0 &&
+    processedNodes.every((n) => n.type === "mindMap");
+  if (isMindMapDiagram) {
+    const savedLayout = data.savedLayout;
+    const mindMapLayout = useCanvasStore.getState().mindMapLayout;
+    const direction: LayoutDirection =
+      (savedLayout?.direction as LayoutDirection) ?? mindMapLayout?.direction ?? "LR";
+    validEdges = normalizeMindMapEdgeHandles(processedNodes, validEdges, direction);
+    validEdges = validEdges.map((edge) => {
+      const srcNode = processedNodes.find((n) => n.id === edge.source);
+      const tgtNode = processedNodes.find((n) => n.id === edge.target);
+      const isMindMapEdge = srcNode?.type === "mindMap" && tgtNode?.type === "mindMap";
+      return {
+        ...edge,
+        type: isMindMapEdge ? "labeledConnector" : edge.type,
+        data: { ...edge.data, connectorType: "default" } as Record<string, unknown>,
+      };
+    }) as Edge[];
+  }
+
+  await applyNodesAndEdgesInChunks(setNodes, setEdges, processedNodes, validEdges);
+  useCanvasStore.getState().setPendingFitView(true);
+  useCanvasStore.getState().setPendingFitViewNodeIds(processedNodes.map((n) => n.id));
   if (data.nodeNotes && typeof data.nodeNotes === "object") {
     Object.entries(data.nodeNotes).forEach(([id, note]) => setNodeNote(id, note));
   }
@@ -82,11 +160,12 @@ async function applyLoadedProjectData(
   }
   useCanvasStore.setState((s) => ({
     projects: s.projects.map((p) =>
-      p.id === projectId ? { ...p, nodes: flatNodes, edges: validEdges } : p
+      p.id === projectId ? { ...p, nodes: processedNodes, edges: validEdges } : p
     ),
   }));
   const s = useCanvasStore.getState();
   const active = s.projects.find((p) => p.id === projectId);
+  if (opts?.fromCloud !== false) s.setLastSyncedToCloudAt(Date.now());
   lastSavedPayloadRef.current = JSON.stringify({
     name: active?.name,
     nodes: s.nodes,
@@ -105,7 +184,9 @@ async function loadProjectContentRegular(projectId: string): Promise<void> {
   const res = await fetch(`/api/projects/${projectId}`, { credentials: "include" });
   if (!res.ok) return;
   const data = await res.json();
-  applyLoadedProjectData(projectId, data);
+  await applyLoadedProjectData(projectId, data, { fromCloud: true });
+  const proj = useCanvasStore.getState().projects.find((p) => p.id === projectId);
+  if (proj && (Array.isArray(proj.nodes) ? proj.nodes.length > 0 : false)) setCachedProject(proj);
 }
 
 /** Load one project's diagram from GET /api/projects/[id]?stream=1 and apply to canvas in chunks. */
@@ -121,15 +202,15 @@ async function loadProjectContentFromStream(projectId: string): Promise<void> {
     streamBuffer += delta;
     const parsed = parseStreamingDiagramBuffer(streamBuffer);
     for (let i = streamedNodeCount; i < parsed.nodes.length; i++) {
-      const raw = parsed.nodes[i] as { id: string; type?: string; parentId?: string; [k: string]: unknown };
-      if (raw.type === "group") continue;
+      const raw = parsed.nodes[i] as { id: string; type?: string; parentId?: string; style?: Record<string, unknown>; [k: string]: unknown };
       nodeIdMap.set(raw.id, raw.id);
       const node: Node = {
         id: raw.id,
         type: (raw.type as string) || "rectangle",
         position: (raw.position as { x: number; y: number }) ?? { x: 0, y: 0 },
         data: (raw.data as Record<string, unknown>) ?? {},
-        ...(raw.parentId && { parentId: raw.parentId as string, extent: "parent" as const }),
+        ...(raw.style && { style: raw.style }),
+        ...(raw.parentId && nodeIdMap.has(raw.parentId as string) && { parentId: raw.parentId as string, extent: "parent" as const }),
       };
       if (streamedNodeCount === 0 && i === 0) {
         setNodes([node]);
@@ -169,7 +250,9 @@ async function loadProjectContentFromStream(projectId: string): Promise<void> {
   }
   try {
     const data = JSON.parse(full.trim()) as Parameters<typeof applyLoadedProjectData>[1];
-    applyLoadedProjectData(projectId, data);
+    await applyLoadedProjectData(projectId, data, { fromCloud: true });
+    const proj = useCanvasStore.getState().projects.find((p) => p.id === projectId);
+    if (proj && (Array.isArray(proj.nodes) ? proj.nodes.length > 0 : false)) setCachedProject(proj);
   } catch {
     // keep streamed state if final parse fails
   }
@@ -185,11 +268,13 @@ async function loadProjectContent(projectId: string, nodeCount: number): Promise
 }
 
 const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-function isApiProjectId(id: string) {
+export function isApiProjectId(id: string) {
   return UUID_REGEX.test(id);
 }
 
 const PROJECTS_KEY = "ai-diagram-projects-v1";
+const PROJECT_CACHE_KEY = "ai-diagram-project-cache-v1";
+const MAX_CACHED_PROJECTS = 100;
 const SETTINGS_KEY = "ai-diagram-settings-v1";
 const LEGACY_KEY = "ai-diagram-state-v1";
 
@@ -212,6 +297,53 @@ function saveProjects(projects: Project[]) {
     window.localStorage.setItem(PROJECTS_KEY, JSON.stringify(projects));
   } catch {
     // quota exceeded — best effort
+  }
+}
+
+/** Project content cache (for localStorage-first loading). Keyed by project ID; evicts oldest when over limit. */
+function getCachedProject(projectId: string): Project | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = window.localStorage.getItem(PROJECT_CACHE_KEY);
+    if (!raw) return null;
+    const cache = JSON.parse(raw) as Record<string, { project: Project; updatedAt: number }>;
+    const entry = cache[projectId];
+    return entry?.project ?? null;
+  } catch {
+    return null;
+  }
+}
+
+function setCachedProject(project: Project) {
+  if (typeof window === "undefined") return;
+  try {
+    const raw = window.localStorage.getItem(PROJECT_CACHE_KEY);
+    const cache: Record<string, { project: Project; updatedAt: number }> = raw ? JSON.parse(raw) : {};
+    const now = Date.now();
+    cache[project.id] = { project: { ...project, updatedAt: now }, updatedAt: now };
+
+    const entries = Object.entries(cache);
+    if (entries.length > MAX_CACHED_PROJECTS) {
+      const sorted = [...entries].sort((a, b) => a[1].updatedAt - b[1].updatedAt);
+      const toRemove = sorted.length - MAX_CACHED_PROJECTS;
+      for (let i = 0; i < toRemove; i++) delete cache[sorted[i]![0]];
+    }
+    window.localStorage.setItem(PROJECT_CACHE_KEY, JSON.stringify(cache));
+  } catch {
+    // best effort
+  }
+}
+
+function removeCachedProject(projectId: string) {
+  if (typeof window === "undefined") return;
+  try {
+    const raw = window.localStorage.getItem(PROJECT_CACHE_KEY);
+    if (!raw) return;
+    const cache = JSON.parse(raw) as Record<string, { project: Project; updatedAt: number }>;
+    delete cache[projectId];
+    window.localStorage.setItem(PROJECT_CACHE_KEY, JSON.stringify(cache));
+  } catch {
+    // best effort
   }
 }
 
@@ -400,6 +532,8 @@ export function useProjectPersistence() {
                 });
                 const { setNodes, setEdges } = useCanvasStore.getState();
                 applyNodesAndEdgesInChunks(setNodes, setEdges, p.nodes, p.edges);
+                saveProjects([p]);
+                setCachedProject(p);
               })
               .catch(() => {
                 const localId = `proj-local-${now}-${Math.random().toString(36).slice(2, 9)}`;
@@ -525,7 +659,7 @@ export function useProjectPersistence() {
     applyNodesAndEdgesInChunks(setNodes, setEdges, active.nodes, active.edges);
   }, [sessionStatus, userId]);
 
-  // When on cloud and active project has no diagram data (metadata-only list), load it once (GET only on first open).
+  // When on cloud and active project has no diagram data (metadata-only list), load from localStorage cache first; only call API on cache miss.
   const loadedProjectIds = useRef<Set<string>>(new Set());
   const persistenceSource = useCanvasStore((s) => s.persistenceSource);
   const activeProjectId = useCanvasStore((s) => s.activeProjectId);
@@ -536,13 +670,20 @@ export function useProjectPersistence() {
     const active = projects.find((p) => p.id === activeProjectId);
     if (!active || (Array.isArray(active.nodes) && active.nodes.length > 0)) return;
     loadedProjectIds.current.add(activeProjectId);
+    const cached = getCachedProject(activeProjectId);
+    const hasCachedContent =
+      cached &&
+      ((Array.isArray(cached.nodes) && cached.nodes.length > 0) || !!cached.drawioData || !!cached.excalidrawData);
+    if (hasCachedContent && cached) {
+      applyLoadedProjectData(activeProjectId, cached, { fromCloud: false });
+      return;
+    }
     const nodeCount = active.nodeCount ?? (Array.isArray(active.nodes) ? active.nodes.length : 0);
     loadProjectContent(activeProjectId, nodeCount);
   }, [persistenceSource, activeProjectId, projects]);
 
-  // Auto-save: keep edits in local storage, debounce cloud PATCH. Only PATCH when data changed.
-  const LOCAL_SAVE_DEBOUNCE_MS = 2000; // Update in-memory + localStorage every 2s after last change
-  const CLOUD_PATCH_INTERVAL_MS = 10000; // PATCH to API at most every 10s (don't fetch on edit; only save)
+  // Auto-save: localStorage only (larger interval to reduce writes). API PATCH only on manual Ctrl+S.
+  const LOCAL_SAVE_DEBOUNCE_MS = 8000; // Update in-memory + localStorage every 8s after last change
   const saveTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
   const lastActiveProjectIdRef = useRef<string>("");
   const initialSave = useRef(true);
@@ -603,62 +744,14 @@ export function useProjectPersistence() {
       useCanvasStore.setState({ projects: updatedProjects, lastSavedAt: now, hasUnsavedChanges: false });
       lastSavedPayloadRef.current = payloadStr;
 
-      if (s.persistenceSource === "cloud" && s.activeProjectId && isApiProjectId(s.activeProjectId)) {
-        const elapsed = now - lastPatchAtRef.current;
-        if (elapsed < CLOUD_PATCH_INTERVAL_MS) {
-          // Reschedule PATCH after min interval; use fresh state when it runs
-          const pid = s.activeProjectId;
-          saveTimer.current = setTimeout(() => {
-            const fresh = useCanvasStore.getState();
-            if (fresh.activeProjectId !== pid) return; // Switched project
-            const freshActive = fresh.projects.find((p) => p.id === pid);
-            const freshPayload = {
-              name: freshActive?.name,
-              nodes: fresh.nodes,
-              edges: fresh.edges,
-              viewport: freshActive?.viewport,
-              savedLayout: freshActive?.savedLayout,
-              nodeNotes: fresh.nodeNotes,
-              nodeTasks: fresh.nodeTasks,
-              nodeAttachments: fresh.nodeAttachments,
-              excalidrawData: fresh.excalidrawData ?? undefined,
-              drawioData: fresh.drawioData ?? undefined,
-            };
-            const freshStr = JSON.stringify(freshPayload);
-            if (freshStr === lastSavedPayloadRef.current) return;
-            lastSavedPayloadRef.current = freshStr;
-            lastPatchAtRef.current = Date.now();
-            fetch(`/api/projects/${pid}`, {
-              method: "PATCH",
-              headers: { "Content-Type": "application/json" },
-              credentials: "include",
-              body: JSON.stringify(freshPayload),
-            })
-              .then((r) => { if (!r.ok) throw new Error("Save failed"); })
-              .catch(() => {
-                useCanvasStore.setState({ persistenceSource: "local" });
-                saveProjects(fresh.projects);
-                lastSavedPayloadRef.current = "";
-              });
-          }, CLOUD_PATCH_INTERVAL_MS - elapsed);
-          return;
-        }
-        lastPatchAtRef.current = now;
-        fetch(`/api/projects/${s.activeProjectId}`, {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json" },
-          credentials: "include",
-          body: JSON.stringify(payload),
-        })
-          .then((r) => { if (!r.ok) throw new Error("Save failed"); })
-          .catch(() => {
-            useCanvasStore.setState({ persistenceSource: "local" });
-            saveProjects(updatedProjects);
-            lastSavedPayloadRef.current = "";
-          });
-      } else {
-        saveProjects(updatedProjects);
-      }
+      // Auto-save writes only to localStorage (reduce server cost). API PATCH happens only on manual Ctrl+S.
+      saveProjects(updatedProjects);
+      const activeProj = updatedProjects.find((p) => p.id === s.activeProjectId);
+      if (
+        activeProj &&
+        ((Array.isArray(activeProj.nodes) && activeProj.nodes.length > 0) || activeProj.drawioData || activeProj.excalidrawData)
+      )
+        setCachedProject(activeProj);
     }, LOCAL_SAVE_DEBOUNCE_MS);
     return () => clearTimeout(saveTimer.current);
   }, [nodes, edges, nodeNotes, nodeTasks, nodeAttachments, activeProjectId, persistenceSource, excalidrawData, drawioData]);
@@ -735,6 +828,7 @@ export function saveNow() {
         if (!r.ok) throw new Error("Save failed");
         lastSavedPayloadRef.current = JSON.stringify(payload);
         lastPatchAtRef.current = now;
+        useCanvasStore.getState().setLastSyncedToCloudAt(now);
       })
       .catch(() => {
         useCanvasStore.setState({ persistenceSource: "local" });
@@ -755,4 +849,215 @@ export function saveNow() {
     });
     saveProjects(updatedProjects);
   }
+  const activeProj = updatedProjects.find((x) => x.id === s.activeProjectId);
+  if (activeProj) setCachedProject(activeProj);
+}
+
+// ─── API-aware CRUD for authenticated users (syncs API + localStorage) ───
+
+/** Create project: POST to API when authenticated or in cloud mode, else local only. Updates store + localStorage. */
+export async function createProjectApi(isAuthenticated: boolean, name: string): Promise<string> {
+  const store = useCanvasStore.getState();
+  const shouldUseApi = isAuthenticated || store.persistenceSource === "cloud";
+  if (shouldUseApi) {
+    try {
+      const res = await fetch("/api/projects", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({
+          name,
+          nodes: [],
+          edges: [],
+          nodeNotes: {},
+          nodeTasks: {},
+          nodeAttachments: {},
+        }),
+      });
+      if (!res.ok) throw new Error("Create failed");
+      const created = (await res.json()) as { id: string; name?: string; createdAt?: number; updatedAt?: number };
+      const now = Date.now();
+      const p: Project = {
+        id: created.id,
+        name: created.name ?? name,
+        createdAt: created.createdAt ?? now,
+        updatedAt: created.updatedAt ?? now,
+        isFavorite: false,
+        nodes: [],
+        edges: [],
+        nodeNotes: {},
+        nodeTasks: {},
+        nodeAttachments: {},
+      };
+      const nextProjects = [p, ...store.projects];
+      useCanvasStore.setState({
+        projects: nextProjects,
+        activeProjectId: p.id,
+        nodes: [],
+        edges: [],
+        nodeNotes: {},
+        nodeTasks: {},
+        nodeAttachments: {},
+        excalidrawData: null,
+        drawioData: null,
+        persistenceSource: "cloud",
+      });
+      const { setNodes, setEdges } = useCanvasStore.getState();
+      applyNodesAndEdgesInChunks(setNodes, setEdges, p.nodes, p.edges);
+      saveProjects(nextProjects);
+      setCachedProject(p);
+      return p.id;
+    } catch {
+      // API failed — fall through to local
+    }
+  }
+  const id = store.createProject(name);
+  const nextProjects = useCanvasStore.getState().projects;
+  saveProjects(nextProjects);
+  const proj = nextProjects.find((x) => x.id === id);
+  if (proj) setCachedProject(proj);
+  return id;
+}
+
+/** Rename project: PATCH API when authenticated + API project, else local only. Updates store + localStorage. */
+export async function renameProjectApi(projectId: string, name: string): Promise<void> {
+  const s = useCanvasStore.getState();
+  if (s.persistenceSource === "cloud" && isApiProjectId(projectId)) {
+    try {
+      const res = await fetch(`/api/projects/${projectId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ name }),
+      });
+      if (!res.ok) throw new Error("Rename failed");
+    } catch {
+      // Proceed with local update on API failure
+    }
+  }
+  useCanvasStore.setState((state) => ({
+    projects: state.projects.map((p) => (p.id === projectId ? { ...p, name, updatedAt: Date.now() } : p)),
+  }));
+  const nextProjects = useCanvasStore.getState().projects;
+  saveProjects(nextProjects);
+  const proj = nextProjects.find((p) => p.id === projectId);
+  if (proj) setCachedProject(proj);
+}
+
+/** Delete project: DELETE API when authenticated + API project, else local only. Updates store + localStorage. */
+export async function deleteProjectApi(projectId: string): Promise<void> {
+  const s = useCanvasStore.getState();
+  if (s.persistenceSource === "cloud" && isApiProjectId(projectId)) {
+    try {
+      const res = await fetch(`/api/projects/${projectId}`, { method: "DELETE", credentials: "include" });
+      if (!res.ok) throw new Error("Delete failed");
+    } catch {
+      // Proceed with local delete on API failure
+    }
+  }
+  removeCachedProject(projectId);
+  const remaining = s.projects.filter((p) => p.id !== projectId);
+  if (s.activeProjectId === projectId) {
+    const next = remaining[0];
+    if (next) {
+      useCanvasStore.setState({
+        projects: remaining,
+        activeProjectId: next.id,
+        nodes: next.nodes,
+        edges: next.edges,
+        nodeNotes: next.nodeNotes,
+        nodeTasks: next.nodeTasks,
+        nodeAttachments: next.nodeAttachments,
+        excalidrawData: next.excalidrawData ?? null,
+        drawioData: next.drawioData ?? null,
+      });
+      const { setNodes, setEdges } = useCanvasStore.getState();
+      applyNodesAndEdgesInChunks(setNodes, setEdges, next.nodes, next.edges);
+    } else {
+      useCanvasStore.setState({
+        projects: remaining,
+        activeProjectId: null,
+        nodes: [],
+        edges: [],
+        nodeNotes: {},
+        nodeTasks: {},
+        nodeAttachments: {},
+        excalidrawData: null,
+        drawioData: null,
+      });
+    }
+  } else {
+    useCanvasStore.setState({ projects: remaining });
+  }
+  saveProjects(remaining);
+}
+
+/** Duplicate project: POST to API when authenticated + API project, else local only. Updates store + localStorage. */
+export async function duplicateProjectApi(projectId: string): Promise<void> {
+  const s = useCanvasStore.getState();
+  const src = s.projects.find((p) => p.id === projectId);
+  if (!src) return;
+  const dupContent = {
+    name: `${src.name} (copy)`,
+    nodes: JSON.parse(JSON.stringify(src.nodes)),
+    edges: JSON.parse(JSON.stringify(src.edges)),
+    nodeNotes: { ...src.nodeNotes },
+    nodeTasks: JSON.parse(JSON.stringify(src.nodeTasks)),
+    nodeAttachments: { ...src.nodeAttachments },
+    excalidrawData: src.excalidrawData ?? undefined,
+    drawioData: src.drawioData ?? undefined,
+  };
+  if (s.persistenceSource === "cloud" && isApiProjectId(projectId)) {
+    try {
+      const res = await fetch("/api/projects", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify(dupContent),
+      });
+      if (!res.ok) throw new Error("Duplicate failed");
+      const created = (await res.json()) as { id: string; name?: string; createdAt?: number; updatedAt?: number };
+      const now = Date.now();
+      const p: Project = {
+        id: created.id,
+        name: created.name ?? dupContent.name,
+        createdAt: created.createdAt ?? now,
+        updatedAt: created.updatedAt ?? now,
+        isFavorite: false,
+        nodes: dupContent.nodes,
+        edges: dupContent.edges,
+        nodeNotes: dupContent.nodeNotes,
+        nodeTasks: dupContent.nodeTasks,
+        nodeAttachments: dupContent.nodeAttachments,
+        excalidrawData: dupContent.excalidrawData,
+        drawioData: dupContent.drawioData,
+      };
+      const nextProjects = [p, ...s.projects];
+      useCanvasStore.setState({
+        projects: nextProjects,
+        activeProjectId: p.id,
+        nodes: p.nodes,
+        edges: p.edges,
+        nodeNotes: p.nodeNotes,
+        nodeTasks: p.nodeTasks,
+        nodeAttachments: p.nodeAttachments,
+        excalidrawData: p.excalidrawData ?? null,
+        drawioData: p.drawioData ?? null,
+      });
+      const { setNodes, setEdges } = useCanvasStore.getState();
+      applyNodesAndEdgesInChunks(setNodes, setEdges, p.nodes, p.edges);
+      saveProjects(nextProjects);
+      setCachedProject(p);
+      useCanvasStore.getState().setPendingFitView(true);
+      useCanvasStore.getState().setPendingFitViewNodeIds(null);
+      return;
+    } catch {
+      // Fallback to local
+    }
+  }
+  s.duplicateProject(projectId);
+  const nextProjects = useCanvasStore.getState().projects;
+  saveProjects(nextProjects);
+  const dup = nextProjects[0];
+  if (dup) setCachedProject(dup);
 }

@@ -3,7 +3,7 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import dynamic from "next/dynamic";
 import { useCanvasStore } from "@/lib/store/canvas-store";
-import { useProjectPersistence } from "@/lib/store/project-storage";
+import { useProjectPersistence, renameProjectApi } from "@/lib/store/project-storage";
 import AppSidebar from "@/components/sidebar/AppSidebar";
 import CanvasToolbar from "@/components/toolbar/CanvasToolbar";
 import DiagramCanvas from "@/components/canvas/DiagramCanvas";
@@ -84,7 +84,6 @@ export default function EditorLayout() {
   const setPresentationEditorOpen = useCanvasStore((s) => s.setPresentationEditorOpen);
   const activeProjectId = useCanvasStore((s) => s.activeProjectId);
   const projects = useCanvasStore((s) => s.projects);
-  const renameProject = useCanvasStore((s) => s.renameProject);
   const llmApiKey = useCanvasStore((s) => s.llmApiKey);
   const canvasMode = useCanvasStore((s) => s.canvasMode);
   const setCanvasMode = useCanvasStore((s) => s.setCanvasMode);
@@ -420,7 +419,7 @@ export default function EditorLayout() {
   const handleTitleSubmit = () => {
     const val = titleInputRef.current?.value.trim();
     if (val && val !== activeProjectName && activeProjectId) {
-      renameProject(activeProjectId, val);
+      renameProjectApi(activeProjectId, val);
     }
     setEditingTitle(false);
   };

@@ -57,6 +57,7 @@ import { FreehandOverlay } from "./FreehandOverlay";
 import LabeledConnectorEdge from "@/components/edges/LabeledConnectorEdge";
 import { CustomConnectionLine } from "@/components/edges/CustomConnectionLine";
 import { MindMapLayoutPanel } from "@/components/panels/MindMapLayoutPanel";
+import { saveNow } from "@/lib/store/project-storage";
 import { MobileColorIndicator } from "@/components/panels/MobileColorIndicator";
 import { MindMapLayoutProvider } from "@/contexts/MindMapLayoutContext";
 import { getDragPayload } from "@/lib/dnd-payload";
@@ -462,7 +463,12 @@ export default function DiagramCanvas() {
       setTimeout(() => {
         const currentNodes = reactFlowRef.current?.getNodes() ?? allNodes;
         const groupNodes = currentNodes.filter((n) => n.type === "group");
-        if (groupNodes.length === 0) return;
+
+        if (groupNodes.length === 0) {
+          // No groups: persist positions to DB/localStorage after drag stop
+          setTimeout(() => saveNow(), 200);
+          return;
+        }
 
         const droppedNode = currentNodes.find((n) => n.id === nodeId) ?? node;
         const flowPos = getFlowPosition(droppedNode, currentNodes);
@@ -504,6 +510,8 @@ export default function DiagramCanvas() {
             return { ...n, parentId: containing.node.id, extent: "parent" as const, position: relativePosition };
           })
         );
+        // Persist positions to DB/localStorage after drag stop (store is updated via onNodesChange)
+        setTimeout(() => saveNow(), 200);
       }, 0);
     },
     [getFlowPosition, isDescendantOf, setNodes]

@@ -2,8 +2,6 @@ import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/db";
 import { diagramPresets } from "@/db/schema";
 import { eq } from "drizzle-orm";
-import { getPresetDiagram } from "@/lib/diagram-presets-data";
-
 const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 /** Chunk size when streaming the JSON body (so client can parse incrementally). */
@@ -20,31 +18,21 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: "Preset required" }, { status: 400 });
   }
 
-  let payload: { nodes: unknown[]; edges: unknown[]; layoutDirection: string; groups: unknown[] };
-
-  if (UUID_REGEX.test(preset)) {
-    const [row] = await db.select().from(diagramPresets).where(eq(diagramPresets.id, preset));
-    if (!row || !Array.isArray(row.nodes)) {
-      return NextResponse.json({ error: "Preset not found" }, { status: 404 });
-    }
-    payload = {
-      nodes: row.nodes,
-      edges: row.edges ?? [],
-      layoutDirection: "horizontal",
-      groups: [],
-    };
-  } else {
-    const diagram = getPresetDiagram(preset);
-    if (!diagram) {
-      return NextResponse.json({ error: "Preset not found" }, { status: 404 });
-    }
-    payload = {
-      nodes: diagram.nodes,
-      edges: diagram.edges,
-      layoutDirection: "horizontal",
-      groups: [],
-    };
+  if (!UUID_REGEX.test(preset)) {
+    return NextResponse.json({ error: "Invalid preset id" }, { status: 400 });
   }
+
+  const [row] = await db.select().from(diagramPresets).where(eq(diagramPresets.id, preset));
+  if (!row || !Array.isArray(row.nodes) || row.nodes.length === 0) {
+    return NextResponse.json({ error: "Preset not found or has no nodes" }, { status: 404 });
+  }
+
+  const payload: { nodes: unknown[]; edges: unknown[]; layoutDirection: string; groups: unknown[] } = {
+    nodes: row.nodes,
+    edges: row.edges ?? [],
+    layoutDirection: "horizontal",
+    groups: [],
+  };
 
   const jsonStr = JSON.stringify(payload);
   const encoder = new TextEncoder();

@@ -122,6 +122,7 @@ export const PRESET_LEVELS = [
   "mindmap",
 ] as const;
 
+/** Target canvas: reactflow, excalidraw, or drawio. Null = legacy (assume reactflow). */
 export const diagramPresets = pgTable("diagram_presets", {
   id: uuid("id").primaryKey().defaultRandom(),
   name: text("name").notNull(),
@@ -132,6 +133,12 @@ export const diagramPresets = pgTable("diagram_presets", {
   nodes: jsonb("nodes").$type<object[]>().default([]),
   edges: jsonb("edges").$type<object[]>().default([]),
   prompt: text("prompt"),
+  /** Draw.io XML; populated on first AI generation for drawio presets */
+  drawioData: text("drawio_data"),
+  /** Excalidraw JSON; populated on first AI generation for excalidraw presets */
+  excalidrawData: jsonb("excalidraw_data").$type<{ elements: unknown[]; appState?: Record<string, unknown> }>(),
+  /** Target canvas: reactflow | excalidraw | drawio. Null = reactflow. */
+  targetCanvas: text("target_canvas"),
   isTemplate: boolean("is_template").notNull().default(false),
   sortOrder: integer("sort_order").notNull().default(0),
   previewImageUrl: text("preview_image_url"),

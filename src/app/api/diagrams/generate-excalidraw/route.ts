@@ -6,6 +6,8 @@ import {
   getOpenRouterHttpReferer,
   getOpenRouterAppTitle,
   getOpenAiApiKey,
+  getAnthropicApiKey,
+  getGoogleApiKey,
 } from "@/lib/env";
 import { getAuthUserId } from "@/lib/auth";
 import { isAdmin } from "@/lib/admin";
@@ -14,6 +16,12 @@ import {
   getExcalidrawGenerateSystemPrompt,
   buildExcalidrawGenerateUserMessage,
 } from "@/lib/ai/excalidraw-generate-prompt";
+import {
+  getCacheKey,
+  getCached,
+  setCached,
+  cachedStreamResponse,
+} from "@/lib/ai-response-cache";
 
 export const runtime = "nodejs";
 
@@ -68,9 +76,12 @@ export async function POST(req: NextRequest) {
     } else if (provider === "openai") {
       apiKey = llmApiKey || openAiKey;
       baseURL = PROVIDER_BASE_URLS.openai;
-    } else if (provider === "anthropic" || provider === "google") {
-      apiKey = llmApiKey || openRouterKey || openAiKey;
-      baseURL = provider === "anthropic" ? PROVIDER_BASE_URLS.anthropic : PROVIDER_BASE_URLS.google;
+    } else if (provider === "anthropic") {
+      apiKey = llmApiKey || getAnthropicApiKey() || openRouterKey || openAiKey;
+      baseURL = PROVIDER_BASE_URLS.anthropic;
+    } else if (provider === "google") {
+      apiKey = llmApiKey || getGoogleApiKey() || openRouterKey || openAiKey;
+      baseURL = PROVIDER_BASE_URLS.google;
     } else {
       apiKey = llmApiKey || openAiKey;
       baseURL = PROVIDER_BASE_URLS.openai;
@@ -84,6 +95,13 @@ export async function POST(req: NextRequest) {
     }
 
     const effectiveModel = resolveModelName(provider, llmModel);
+
+    const cacheKey = getCacheKey("excalidraw", prompt.trim(), effectiveModel, provider);
+    const cached = getCached(cacheKey);
+    if (cached) {
+      return cachedStreamResponse(cached);
+    }
+
     const systemPrompt = getExcalidrawGenerateSystemPrompt();
     const userMessage = buildExcalidrawGenerateUserMessage(prompt.trim());
 
@@ -104,6 +122,7 @@ export async function POST(req: NextRequest) {
     ]);
 
     const encoder = new TextEncoder();
+    let fullText = "";
 
     const readable = new ReadableStream<Uint8Array>({
       async start(controller) {
@@ -118,10 +137,12 @@ export async function POST(req: NextRequest) {
                       .join("")
                   : String(chunk.content ?? "");
             if (text) {
+              fullText += text;
               controller.enqueue(encoder.encode(text));
             }
           }
           controller.close();
+          if (fullText) setCached(cacheKey, fullText);
           if (userId && !admin && !llmApiKey) {
             await deductCredits(userId);
           }

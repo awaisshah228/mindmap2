@@ -244,8 +244,11 @@ interface CanvasState {
   // ─── Save status ───────────────────────────────────────────────────
   lastSavedAt: number | null;
   hasUnsavedChanges: boolean;
+  /** When we last successfully synced to cloud (PATCH). Null = never or local-only. */
+  lastSyncedToCloudAt: number | null;
   setLastSavedAt: (ts: number) => void;
   setHasUnsavedChanges: (v: boolean) => void;
+  setLastSyncedToCloudAt: (ts: number | null) => void;
   /** When true, bottom bar Save button shows "Save layout" (set after Layout all/selection). */
   showSaveLayoutLabel: boolean;
   setShowSaveLayoutLabel: (v: boolean) => void;
@@ -385,7 +388,7 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
   searchOpen: false,
   searchQuery: "",
   theme: "light",
-  applyLayoutAtStart: true,
+  applyLayoutAtStart: false,
   canvasBackgroundVariant: "dots",
   focusedBranchNodeId: null,
   shortcutsOpen: false,
@@ -406,8 +409,10 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
   // ─── Save status ───────────────────────────────────────────────────
   lastSavedAt: null,
   hasUnsavedChanges: false,
+  lastSyncedToCloudAt: null,
   setLastSavedAt: (ts) => set({ lastSavedAt: ts }),
   setHasUnsavedChanges: (v) => set({ hasUnsavedChanges: v }),
+  setLastSyncedToCloudAt: (ts) => set({ lastSyncedToCloudAt: ts }),
   showSaveLayoutLabel: false,
   setShowSaveLayoutLabel: (v) => set({ showSaveLayoutLabel: v }),
 

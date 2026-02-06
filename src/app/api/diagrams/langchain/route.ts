@@ -2,11 +2,19 @@ import { NextRequest, NextResponse } from "next/server";
 import { ChatOpenAI } from "@langchain/openai";
 import { buildSystemPrompt, buildUserMessage } from "@/lib/ai/prompt-builder";
 import {
+  getCacheKey,
+  getCached,
+  setCached,
+  cachedStreamResponse,
+} from "@/lib/ai-response-cache";
+import {
   getOpenRouterApiKey,
   getOpenRouterBaseUrl,
   getOpenRouterHttpReferer,
   getOpenRouterAppTitle,
   getOpenAiApiKey,
+  getAnthropicApiKey,
+  getGoogleApiKey,
 } from "@/lib/env";
 
 export const runtime = "nodejs";
@@ -90,10 +98,10 @@ export async function POST(req: NextRequest) {
       apiKey = llmApiKey || openAiKey;
       baseURL = PROVIDER_BASE_URLS.openai;
     } else if (provider === "anthropic") {
-      apiKey = llmApiKey || "";
+      apiKey = llmApiKey || getAnthropicApiKey();
       baseURL = PROVIDER_BASE_URLS.anthropic;
     } else if (provider === "google") {
-      apiKey = llmApiKey || "";
+      apiKey = llmApiKey || getGoogleApiKey();
       baseURL = PROVIDER_BASE_URLS.google;
     } else {
       // custom — user must supply key; baseURL is OpenAI-compatible by default
@@ -122,6 +130,13 @@ export async function POST(req: NextRequest) {
     }
 
     console.log(`[AI Route] provider=${usingOpenRouterFallback ? "openrouter(fallback)" : provider}, model=${effectiveModel}`);
+
+    const cacheExtra = [layoutDirection, mode, diagramType].filter(Boolean).join(":");
+    const cacheKey = getCacheKey("langchain", prompt.trim(), effectiveModel, provider, cacheExtra);
+    const cached = getCached(cacheKey);
+    if (cached) {
+      return cachedStreamResponse(cached);
+    }
 
     const llm = new ChatOpenAI({
       model: effectiveModel,
@@ -153,12 +168,12 @@ export async function POST(req: NextRequest) {
     ]);
 
     const encoder = new TextEncoder();
+    let fullText = "";
 
     const readable = new ReadableStream<Uint8Array>({
       async start(controller) {
         try {
           for await (const chunk of stream) {
-            // Each chunk is an AIMessageChunk; get its content as string.
             const text =
               typeof chunk.content === "string"
                 ? chunk.content
@@ -169,9 +184,11 @@ export async function POST(req: NextRequest) {
                   : String(chunk.content ?? "");
 
             if (text) {
+              fullText += text;
               controller.enqueue(encoder.encode(text));
             }
           }
+          if (fullText) setCached(cacheKey, fullText);
         } catch (err) {
           console.error("LangChain stream error:", err);
           controller.error(err);

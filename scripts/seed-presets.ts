@@ -1,14 +1,12 @@
 /**
- * Seed diagram_presets from hardcoded list + diagram-presets-data (nodes/edges).
+ * Seed diagram_presets with prompts only. Diagram data is generated on first use via AI and saved to preset.
  * Uses the same db as the app (src/db — Neon serverless).
- * @see https://orm.drizzle.team/docs/get-started/neon-new
  *
  * Run: yarn seed   or   yarn db:seed   or   npx tsx scripts/seed-presets.ts
  */
 import "dotenv/config";
 import { diagramPresets } from "../src/db/schema";
 import { eq } from "drizzle-orm";
-import { getPresetDiagram } from "../src/lib/diagram-presets-data";
 import { getPresetPreviewUrl } from "../src/lib/preset-icons";
 
 type PresetDef = {
@@ -20,6 +18,7 @@ type PresetDef = {
   prompt: string;
   isTemplate: boolean;
   sortOrder: number;
+  targetCanvas?: "reactflow" | "excalidraw" | "drawio";
 };
 
 const PRESETS: PresetDef[] = [
@@ -134,7 +133,26 @@ const PRESETS: PresetDef[] = [
   { name: "serverless-api", label: "Serverless API architecture", diagramType: "architecture", level: "high-level-system-design", prompt: "Serverless: Client → CloudFront → API Gateway → Lambda → DynamoDB.", isTemplate: false, sortOrder: 23 },
 ];
 
-/** Templates for sidebar: use existing diagram data where slug matches, else empty; prompt can be empty (user refines). */
+/** Draw.io presets: first use generates via AI, then saved to preset. */
+const DRAWIO_PRESETS: PresetDef[] = [
+  { name: "drawio-microservices-aws-kafka", label: "Draw.io: Microservices + AWS + Kafka", diagramType: "architecture", level: "high-level-system-design", prompt: "Create a complete microservices architecture diagram on AWS with Kafka. Include: User/Browser, CDN/CloudFront, Next.js frontend, API Gateway, Auth service, User service, Product Catalog, Order service, Payment (Stripe), Kafka message broker, PostgreSQL, Redis, S3. Show data flow with arrows: static assets through CDN, API requests through gateway to services, events published to Kafka, services consuming from Kafka. Use AWS colors: orange (#ff9900) for compute, green (#569a31) for storage, blue (#527bbb) for database. Left-to-right flow. Group by tier (frontend, API, services, data).", isTemplate: false, sortOrder: 100, targetCanvas: "drawio" },
+  { name: "drawio-flowchart", label: "Draw.io: Flowchart", diagramType: "flowchart", level: "flows", prompt: "Create a flowchart for a typical user login process: start, input credentials, validate, success or error, redirect.", isTemplate: false, sortOrder: 101, targetCanvas: "drawio" },
+  { name: "drawio-architecture", label: "Draw.io: System architecture", diagramType: "architecture", level: "high-level-diagram", prompt: "Create a system architecture diagram: client, API gateway, backend services, database. Use clear boxes and arrows.", isTemplate: false, sortOrder: 102, targetCanvas: "drawio" },
+  { name: "drawio-process-flow", label: "Draw.io: Process flow", diagramType: "flowchart", level: "flows", prompt: "Create a business process flow: receive order, validate, payment, fulfillment, shipping, delivery.", isTemplate: false, sortOrder: 103, targetCanvas: "drawio" },
+  { name: "drawio-uml", label: "Draw.io: UML class diagram", diagramType: "entity-relationship", level: "entity-relationship", prompt: "Create a UML class diagram for an e-commerce domain: User, Order, Product, Cart, Payment classes with relationships.", isTemplate: false, sortOrder: 104, targetCanvas: "drawio" },
+  { name: "drawio-network", label: "Draw.io: Network diagram", diagramType: "architecture", level: "high-level-diagram", prompt: "Create a network diagram: router, switches, servers, firewall. Show connections and subnets.", isTemplate: false, sortOrder: 105, targetCanvas: "drawio" },
+];
+
+/** Excalidraw presets: first use generates via AI, then saved to preset. */
+const EXCALIDRAW_PRESETS: PresetDef[] = [
+  { name: "excalidraw-flowchart", label: "Excalidraw: Flowchart", diagramType: "flowchart", level: "flows", prompt: "Create a simple flowchart: start, steps, decision diamond, end. Use boxes and arrows.", isTemplate: false, sortOrder: 200, targetCanvas: "excalidraw" },
+  { name: "excalidraw-architecture", label: "Excalidraw: Architecture", diagramType: "architecture", level: "high-level-diagram", prompt: "Create an architecture diagram: Frontend, API, Database, Cache. Use rectangles and connecting arrows.", isTemplate: false, sortOrder: 201, targetCanvas: "excalidraw" },
+  { name: "excalidraw-mindmap", label: "Excalidraw: Mind map", diagramType: "mindmap", level: "mindmap", prompt: "Create a mind map with a central topic and 4-6 branches. Use boxes and curved connectors.", isTemplate: false, sortOrder: 202, targetCanvas: "excalidraw" },
+  { name: "excalidraw-wireframe", label: "Excalidraw: Wireframe", diagramType: "architecture", level: "high-level-diagram", prompt: "Create a simple app wireframe: header, sidebar, main content area, footer.", isTemplate: false, sortOrder: 203, targetCanvas: "excalidraw" },
+  { name: "excalidraw-sequence", label: "Excalidraw: Sequence", diagramType: "sequence", level: "sequence", prompt: "Create a sequence diagram: User, Frontend, API, Database. Show request/response arrows.", isTemplate: false, sortOrder: 204, targetCanvas: "excalidraw" },
+];
+
+/** Templates for sidebar: prompt-only; first use generates via AI. */
 const TEMPLATES: PresetDef[] = [
   { name: "template-ecommerce-full-scale", label: "E-commerce full system", diagramType: "architecture", level: "high-level-system-design", prompt: "Full-scale e-commerce: microservices, Kafka, S3, auth, DevOps.", isTemplate: true, sortOrder: 1 },
   { name: "template-auth-oauth2-jwt-full", label: "OAuth2/JWT auth flow", diagramType: "flowchart", level: "flows", prompt: "OAuth2/JWT auth: login, tokens, refresh, validation.", isTemplate: true, sortOrder: 2 },
@@ -164,19 +182,18 @@ async function main() {
   const existing = await db.select({ id: diagramPresets.id, name: diagramPresets.name }).from(diagramPresets);
   const byName = new Map(existing.map((r) => [r.name, r.id]));
 
-  for (const p of PRESETS) {
-    const diagram = getPresetDiagram(p.name);
-    const nodes = diagram?.nodes ?? [];
-    const edges = diagram?.edges ?? [];
+  const allPresets = [...PRESETS, ...DRAWIO_PRESETS, ...EXCALIDRAW_PRESETS];
+  for (const p of allPresets) {
     const row = {
       name: p.name,
       label: p.label,
       description: p.description ?? null,
       diagramType: p.diagramType,
       level: p.level,
-      nodes,
-      edges,
+      nodes: [],
+      edges: [],
       prompt: p.prompt,
+      targetCanvas: p.targetCanvas ?? "reactflow",
       isTemplate: false,
       sortOrder: p.sortOrder,
       previewImageUrl: getPresetPreviewUrl(p.name, p.label),
@@ -189,19 +206,16 @@ async function main() {
     }
   }
   for (const t of TEMPLATES) {
-    const slug = t.name.replace("template-", "");
-    const diagram = getPresetDiagram(slug);
-    const nodes = diagram?.nodes ?? [];
-    const edges = diagram?.edges ?? [];
     const row = {
       name: t.name,
       label: t.label,
       description: t.description ?? null,
       diagramType: t.diagramType,
       level: t.level,
-      nodes,
-      edges,
+      nodes: [],
+      edges: [],
       prompt: t.prompt || null,
+      targetCanvas: "reactflow",
       isTemplate: true,
       sortOrder: t.sortOrder,
       previewImageUrl: getPresetPreviewUrl(t.name, t.label),
