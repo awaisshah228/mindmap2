@@ -14,6 +14,7 @@ import {
   getDrawioGenerateSystemPrompt,
   buildDrawioGenerateUserMessage,
 } from "@/lib/ai/drawio-generate-prompt";
+import { detectLibraryFromPrompt, loadShapeLibrary } from "@/lib/shape-library";
 
 export const runtime = "nodejs";
 
@@ -84,7 +85,12 @@ export async function POST(req: NextRequest) {
     }
 
     const effectiveModel = resolveModelName(provider, llmModel);
-    const systemPrompt = getDrawioGenerateSystemPrompt();
+
+    // Inject shape library doc when prompt suggests a specific diagram type (matches next-ai-draw-io get_shape_library)
+    const detectedLib = detectLibraryFromPrompt(prompt.trim());
+    const libraryDoc = detectedLib ? await loadShapeLibrary(detectedLib) : null;
+    const systemPrompt = getDrawioGenerateSystemPrompt(libraryDoc ?? undefined);
+
     const userMessage = buildDrawioGenerateUserMessage(prompt.trim());
 
     const llm = new ChatOpenAI({

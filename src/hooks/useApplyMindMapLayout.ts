@@ -1,6 +1,6 @@
 import { useCallback } from "react";
 import { useStore } from "@xyflow/react";
-import { useCanvasStore } from "@/lib/store/canvas-store";
+import { useCanvasStore, type SavedLayout } from "@/lib/store/canvas-store";
 import { getLayoutedElements, type LayoutDirection } from "@/lib/layout-engine";
 import { resolveCollisions } from "@/lib/resolve-collisions";
 import type { Node, Edge } from "@xyflow/react";
@@ -65,9 +65,24 @@ export function useApplyMindMapLayout({
   const setMindMapLayout = useCanvasStore((s) => s.setMindMapLayout);
 
   const applyLayout = useCallback(
-    async (directionOverride?: LayoutDirection) => {
-      const direction = directionOverride ?? mindMapLayout.direction;
-      const spacing: [number, number] = [mindMapLayout.spacingX, mindMapLayout.spacingY];
+    async (directionOrLayout?: LayoutDirection | SavedLayout) => {
+      let direction: LayoutDirection;
+      let spacing: [number, number];
+      let algorithm: string;
+      if (directionOrLayout && typeof directionOrLayout === "object" && "algorithm" in directionOrLayout) {
+        const layout = directionOrLayout as SavedLayout;
+        direction = layout.direction;
+        spacing = [layout.spacingX, layout.spacingY];
+        algorithm = layout.algorithm;
+        setMindMapLayout(layout);
+      } else {
+        direction = (directionOrLayout as LayoutDirection | undefined) ?? mindMapLayout.direction;
+        spacing = [mindMapLayout.spacingX, mindMapLayout.spacingY];
+        algorithm = mindMapLayout.algorithm;
+        if (directionOrLayout && typeof directionOrLayout === "string") {
+          setMindMapLayout({ direction: directionOrLayout });
+        }
+      }
 
       const layoutableNodes = nodes.filter((n) => !LAYOUT_EXCLUDED_TYPES.has(n.type ?? ""));
       const layoutableIds = new Set(layoutableNodes.map((n) => n.id));
@@ -81,14 +96,11 @@ export function useApplyMindMapLayout({
           layoutableEdges,
           direction,
           spacing,
-          mindMapLayout.algorithm,
+          algorithm,
           setNodes,
           setEdges,
           fitView
         );
-        if (directionOverride) {
-          setMindMapLayout({ direction: directionOverride });
-        }
       } catch {
         fitView?.();
       }

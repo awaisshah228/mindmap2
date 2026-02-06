@@ -1477,31 +1477,34 @@ export default function DiagramCanvas() {
 
   // Note: localStorage persistence is now handled by useProjectPersistence() in EditorLayout.
 
+  const setNodesWithStoreSync = useCallback(
+    (updater: Node[] | ((prev: Node[]) => Node[])) => {
+      setNodes((prev) => {
+        const next = typeof updater === "function" ? updater(prev) : updater;
+        fromCanvasRef.current++;
+        queueMicrotask(() => setStoreNodes(next));
+        return next;
+      });
+    },
+    [setNodes, setStoreNodes]
+  );
+  const setEdgesWithStoreSync = useCallback(
+    (updater: Edge[] | ((prev: Edge[]) => Edge[])) => {
+      setEdges((prev) => {
+        const next = typeof updater === "function" ? updater(prev) : updater;
+        fromCanvasRef.current++;
+        queueMicrotask(() => setStoreEdges(next));
+        return next;
+      });
+    },
+    [setEdges, setStoreEdges]
+  );
+
   const { layoutAll, layoutSelection } = useAutoLayout({
     nodes,
     edges,
-    setNodes: useCallback(
-      (updater) => {
-        setNodes((prev) => {
-          const next = typeof updater === "function" ? updater(prev) : updater;
-          fromCanvasRef.current++;
-          queueMicrotask(() => setStoreNodes(next));
-          return next;
-        });
-      },
-      [setNodes, setStoreNodes]
-    ),
-    setEdges: useCallback(
-      (updater) => {
-        setEdges((prev) => {
-          const next = typeof updater === "function" ? updater(prev) : updater;
-          fromCanvasRef.current++;
-          queueMicrotask(() => setStoreEdges(next));
-          return next;
-        });
-      },
-      [setEdges, setStoreEdges]
-    ),
+    setNodes: setNodesWithStoreSync,
+    setEdges: setEdgesWithStoreSync,
     fitView: useCallback(
       () => reactFlowRef.current?.fitView({ padding: 0.2, duration: 300 }),
       []
@@ -1661,8 +1664,8 @@ export default function DiagramCanvas() {
         )}
         {!presentationMode && (
           <MindMapLayoutPanel
-            setNodes={setNodes}
-            setEdges={setEdges}
+            setNodes={setNodesWithStoreSync}
+            setEdges={setEdgesWithStoreSync}
             fitView={() =>
               reactFlowRef.current?.fitView({ padding: 0.2, duration: 300 })
             }

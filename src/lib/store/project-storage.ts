@@ -9,7 +9,7 @@
 
 import { useEffect, useRef } from "react";
 import { useAuth } from "@clerk/nextjs";
-import { useCanvasStore, DEFAULT_MIND_MAP_LAYOUT, type Project } from "./canvas-store";
+import { useCanvasStore, DEFAULT_MIND_MAP_LAYOUT, type Project, type SavedLayout, type ExcalidrawScene } from "./canvas-store";
 import type { Node, Edge } from "@xyflow/react";
 import { applyNodesAndEdgesInChunks } from "@/lib/chunked-nodes";
 import { parseStreamingDiagramBuffer } from "@/lib/ai/streaming-json-parser";
@@ -17,6 +17,96 @@ import { parseStreamingDiagramBuffer } from "@/lib/ai/streaming-json-parser";
 /** Module-level refs so loadProjectContentFromStream and saveNow can sync with auto-save. */
 const lastSavedPayloadRef = { current: "" };
 const lastPatchAtRef = { current: 0 };
+
+const STREAM_NODE_THRESHOLD = 100; // Use stream API only when project has >= 100 nodes; use regular GET for smaller projects
+
+/** Apply loaded project data to store in chunks (shared by regular GET and stream). Waits for chunks to finish before resolving. */
+async function applyLoadedProjectData(
+  projectId: string,
+  data: {
+    nodes?: unknown[];
+    edges?: unknown[];
+    savedLayout?: { direction: string; algorithm: string; spacingX: number; spacingY: number };
+    nodeNotes?: Record<string, string>;
+    nodeTasks?: Record<string, unknown>;
+    nodeAttachments?: Record<string, unknown>;
+    excalidrawData?: unknown;
+    drawioData?: string | null;
+  }
+): void {
+  const { setNodes, setEdges, setNodeNote, setNodeTasks } = useCanvasStore.getState();
+  const nodes = Array.isArray(data.nodes) ? data.nodes : [];
+  const edges = Array.isArray(data.edges) ? data.edges : [];
+  const flatNodes = (nodes as { id: string; type?: string; position?: { x: number; y: number }; data?: Record<string, unknown>; parentId?: string }[])
+    .filter((n) => n.type !== "group")
+    .map((n) => ({
+      id: n.id,
+      type: (n.type as string) || "rectangle",
+      position: n.position ?? { x: 0, y: 0 },
+      data: n.data ?? {},
+      ...(n.parentId && { parentId: n.parentId, extent: "parent" as const }),
+    })) as Node[];
+  const nodeIds = new Set(flatNodes.map((n) => n.id));
+  const validEdges = (edges as { id?: string; source: string; target: string; data?: Record<string, unknown> }[])
+    .filter((e) => e && nodeIds.has(e.source) && nodeIds.has(e.target))
+    .map((e, i) => ({
+      id: e.id || `e-${e.source}-${e.target}-${i}`,
+      source: e.source,
+      target: e.target,
+      ...(e.data && { data: e.data }),
+    })) as Edge[];
+  applyNodesAndEdgesInChunks(setNodes, setEdges, flatNodes, validEdges);
+  if (data.nodeNotes && typeof data.nodeNotes === "object") {
+    Object.entries(data.nodeNotes).forEach(([id, note]) => setNodeNote(id, note));
+  }
+  if (data.nodeTasks && typeof data.nodeTasks === "object") {
+    Object.entries(data.nodeTasks).forEach(([id, tasks]) => setNodeTasks(id, tasks as Project["nodeTasks"][string]));
+  }
+  if (data.nodeAttachments && typeof data.nodeAttachments === "object") {
+    useCanvasStore.setState({ nodeAttachments: data.nodeAttachments as Project["nodeAttachments"] });
+  }
+  if (data.excalidrawData !== undefined) {
+    const scene = data.excalidrawData == null ? null : (data.excalidrawData as ExcalidrawScene);
+    useCanvasStore.getState().setExcalidrawData(scene);
+  }
+  if (data.drawioData !== undefined) {
+    useCanvasStore.getState().setDrawioData(data.drawioData ?? null);
+  }
+  if (data.savedLayout != null) {
+    const layout = data.savedLayout as SavedLayout;
+    useCanvasStore.setState((s) => ({
+      projects: s.projects.map((p) =>
+        p.id === projectId ? { ...p, savedLayout: layout } : p
+      ),
+    }));
+  }
+  useCanvasStore.setState((s) => ({
+    projects: s.projects.map((p) =>
+      p.id === projectId ? { ...p, nodes: flatNodes, edges: validEdges } : p
+    ),
+  }));
+  const s = useCanvasStore.getState();
+  const active = s.projects.find((p) => p.id === projectId);
+  lastSavedPayloadRef.current = JSON.stringify({
+    name: active?.name,
+    nodes: s.nodes,
+    edges: s.edges,
+    viewport: active?.viewport,
+    nodeNotes: s.nodeNotes,
+    nodeTasks: s.nodeTasks,
+    nodeAttachments: s.nodeAttachments,
+    excalidrawData: s.excalidrawData ?? undefined,
+    drawioData: s.drawioData ?? undefined,
+  });
+}
+
+/** Load project via regular GET (for small projects < 50 nodes). */
+async function loadProjectContentRegular(projectId: string): Promise<void> {
+  const res = await fetch(`/api/projects/${projectId}`, { credentials: "include" });
+  if (!res.ok) return;
+  const data = await res.json();
+  applyLoadedProjectData(projectId, data);
+}
 
 /** Load one project's diagram from GET /api/projects/[id]?stream=1 and apply to canvas in chunks. */
 async function loadProjectContentFromStream(projectId: string): Promise<void> {
@@ -78,68 +168,19 @@ async function loadProjectContentFromStream(projectId: string): Promise<void> {
     }
   }
   try {
-    const data = JSON.parse(full.trim()) as {
-      nodes?: unknown[];
-      edges?: unknown[];
-      nodeNotes?: Record<string, string>;
-      nodeTasks?: Record<string, unknown>;
-      nodeAttachments?: Record<string, unknown>;
-      excalidrawData?: unknown;
-      drawioData?: string | null;
-    };
-    const nodes = Array.isArray(data.nodes) ? data.nodes : [];
-    const edges = Array.isArray(data.edges) ? data.edges : [];
-    const flatNodes = (nodes as { id: string; type?: string; position?: { x: number; y: number }; data?: Record<string, unknown>; parentId?: string }[])
-      .filter((n) => n.type !== "group")
-      .map((n) => ({
-        id: n.id,
-        type: (n.type as string) || "rectangle",
-        position: n.position ?? { x: 0, y: 0 },
-        data: n.data ?? {},
-        ...(n.parentId && { parentId: n.parentId, extent: "parent" as const }),
-      })) as Node[];
-    const nodeIds = new Set(flatNodes.map((n) => n.id));
-    const validEdges = (edges as { id?: string; source: string; target: string; data?: Record<string, unknown> }[])
-      .filter((e) => e && nodeIds.has(e.source) && nodeIds.has(e.target))
-      .map((e, i) => ({
-        id: e.id || `e-${e.source}-${e.target}-${i}`,
-        source: e.source,
-        target: e.target,
-        ...(e.data && { data: e.data }),
-      })) as Edge[];
-    applyNodesAndEdgesInChunks(setNodes, setEdges, flatNodes, validEdges);
-    if (data.nodeNotes && typeof data.nodeNotes === "object") {
-      Object.entries(data.nodeNotes).forEach(([id, note]) => setNodeNote(id, note));
-    }
-    if (data.nodeTasks && typeof data.nodeTasks === "object") {
-      Object.entries(data.nodeTasks).forEach(([id, tasks]) => setNodeTasks(id, tasks as Project["nodeTasks"][string]));
-    }
-    if (data.nodeAttachments && typeof data.nodeAttachments === "object") {
-      useCanvasStore.setState({ nodeAttachments: data.nodeAttachments as Project["nodeAttachments"] });
-    }
-    if (data.excalidrawData !== undefined) {
-      useCanvasStore.getState().setExcalidrawData(data.excalidrawData ?? null);
-    }
-    if (data.drawioData !== undefined) {
-      useCanvasStore.getState().setDrawioData(data.drawioData ?? null);
-    }
-    // Mark as "already saved" so save effect skips redundant PATCH right after load
-    const s = useCanvasStore.getState();
-    const active = s.projects.find((p) => p.id === projectId);
-    const payload = {
-      name: active?.name,
-      nodes: s.nodes,
-      edges: s.edges,
-      viewport: active?.viewport,
-      nodeNotes: s.nodeNotes,
-      nodeTasks: s.nodeTasks,
-      nodeAttachments: s.nodeAttachments,
-      excalidrawData: s.excalidrawData ?? undefined,
-      drawioData: s.drawioData ?? undefined,
-    };
-    lastSavedPayloadRef.current = JSON.stringify(payload);
+    const data = JSON.parse(full.trim()) as Parameters<typeof applyLoadedProjectData>[1];
+    applyLoadedProjectData(projectId, data);
   } catch {
     // keep streamed state if final parse fails
+  }
+}
+
+/** Load project content: regular GET if < 50 nodes, stream if >= 50. Called only when opening a project for the first time. */
+async function loadProjectContent(projectId: string, nodeCount: number): Promise<void> {
+  if (nodeCount >= STREAM_NODE_THRESHOLD) {
+    await loadProjectContentFromStream(projectId);
+  } else {
+    await loadProjectContentRegular(projectId);
   }
 }
 
@@ -182,6 +223,7 @@ interface PersistedSettings {
   llmBaseUrl?: string;
   aiPrompts?: unknown[];
   dailyNotes?: Record<string, string>;
+  applyLayoutAtStart?: boolean;
 }
 
 function loadSettings(): PersistedSettings {
@@ -292,6 +334,7 @@ export function useProjectPersistence() {
     if (settings.llmApiKey) store.setLLMApiKey(settings.llmApiKey);
     if (settings.llmBaseUrl) store.setLLMBaseUrl(settings.llmBaseUrl);
     if (settings.aiPrompts) store.setAIPrompts(settings.aiPrompts as typeof store.aiPrompts);
+    if (typeof settings.applyLayoutAtStart === "boolean") store.setApplyLayoutAtStart(settings.applyLayoutAtStart);
     if (settings.dailyNotes) {
       Object.entries(settings.dailyNotes).forEach(([date, note]) => {
         store.setDailyNote(date, note);
@@ -482,23 +525,24 @@ export function useProjectPersistence() {
     applyNodesAndEdgesInChunks(setNodes, setEdges, active.nodes, active.edges);
   }, [sessionStatus, userId]);
 
-  // When on cloud and active project has no diagram data (metadata-only list), stream load it once.
-  const streamLoadedIds = useRef<Set<string>>(new Set());
+  // When on cloud and active project has no diagram data (metadata-only list), load it once (GET only on first open).
+  const loadedProjectIds = useRef<Set<string>>(new Set());
   const persistenceSource = useCanvasStore((s) => s.persistenceSource);
   const activeProjectId = useCanvasStore((s) => s.activeProjectId);
   const projects = useCanvasStore((s) => s.projects);
   useEffect(() => {
     if (persistenceSource !== "cloud" || !activeProjectId || !isApiProjectId(activeProjectId)) return;
-    if (streamLoadedIds.current.has(activeProjectId)) return;
+    if (loadedProjectIds.current.has(activeProjectId)) return;
     const active = projects.find((p) => p.id === activeProjectId);
     if (!active || (Array.isArray(active.nodes) && active.nodes.length > 0)) return;
-    streamLoadedIds.current.add(activeProjectId);
-    loadProjectContentFromStream(activeProjectId);
+    loadedProjectIds.current.add(activeProjectId);
+    const nodeCount = active.nodeCount ?? (Array.isArray(active.nodes) ? active.nodes.length : 0);
+    loadProjectContent(activeProjectId, nodeCount);
   }, [persistenceSource, activeProjectId, projects]);
 
-  // Auto-save: frequent local updates, infrequent cloud PATCH. Only PATCH when data changed.
+  // Auto-save: keep edits in local storage, debounce cloud PATCH. Only PATCH when data changed.
   const LOCAL_SAVE_DEBOUNCE_MS = 2000; // Update in-memory + localStorage every 2s after last change
-  const CLOUD_PATCH_INTERVAL_MS = 30000; // PATCH to API at most every 30s
+  const CLOUD_PATCH_INTERVAL_MS = 10000; // PATCH to API at most every 10s (don't fetch on edit; only save)
   const saveTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
   const lastActiveProjectIdRef = useRef<string>("");
   const initialSave = useRef(true);
@@ -536,6 +580,7 @@ export function useProjectPersistence() {
         nodes: s.nodes,
         edges: s.edges,
         viewport: active?.viewport,
+        savedLayout: active?.savedLayout,
         nodeNotes: s.nodeNotes,
         nodeTasks: s.nodeTasks,
         nodeAttachments: s.nodeAttachments,
@@ -572,6 +617,7 @@ export function useProjectPersistence() {
               nodes: fresh.nodes,
               edges: fresh.edges,
               viewport: freshActive?.viewport,
+              savedLayout: freshActive?.savedLayout,
               nodeNotes: fresh.nodeNotes,
               nodeTasks: fresh.nodeTasks,
               nodeAttachments: fresh.nodeAttachments,
@@ -625,11 +671,12 @@ export function useProjectPersistence() {
   const llmBaseUrl = useCanvasStore((s) => s.llmBaseUrl);
   const aiPrompts = useCanvasStore((s) => s.aiPrompts);
   const dailyNotes = useCanvasStore((s) => s.dailyNotes);
+  const applyLayoutAtStart = useCanvasStore((s) => s.applyLayoutAtStart);
 
   useEffect(() => {
     if (!hydrated.current) return;
-    saveSettings({ theme, llmProvider, llmModel, llmApiKey, llmBaseUrl, aiPrompts, dailyNotes });
-  }, [theme, llmProvider, llmModel, llmApiKey, llmBaseUrl, aiPrompts, dailyNotes]);
+    saveSettings({ theme, llmProvider, llmModel, llmApiKey, llmBaseUrl, aiPrompts, dailyNotes, applyLayoutAtStart });
+  }, [theme, llmProvider, llmModel, llmApiKey, llmBaseUrl, aiPrompts, dailyNotes, applyLayoutAtStart]);
 
   // Force-save before the page unloads (localStorage only; cloud relies on debounced save)
   useEffect(() => {
@@ -659,7 +706,7 @@ export function saveNow() {
   const now = Date.now();
   const updatedProjects = s.projects.map((p) =>
     p.id === s.activeProjectId
-          ? { ...p, nodes: s.nodes, edges: s.edges, nodeNotes: s.nodeNotes, nodeTasks: s.nodeTasks, nodeAttachments: s.nodeAttachments, excalidrawData: s.excalidrawData ?? undefined, drawioData: s.drawioData ?? undefined, updatedAt: now }
+          ? { ...p, nodes: s.nodes, edges: s.edges, savedLayout: p.savedLayout, nodeNotes: s.nodeNotes, nodeTasks: s.nodeTasks, nodeAttachments: s.nodeAttachments, excalidrawData: s.excalidrawData ?? undefined, drawioData: s.drawioData ?? undefined, updatedAt: now }
       : p
   );
   useCanvasStore.setState({ projects: updatedProjects, lastSavedAt: now, hasUnsavedChanges: false });
@@ -671,6 +718,7 @@ export function saveNow() {
       nodes: s.nodes,
       edges: s.edges,
       viewport: active?.viewport,
+      savedLayout: active?.savedLayout,
       nodeNotes: s.nodeNotes,
       nodeTasks: s.nodeTasks,
       nodeAttachments: s.nodeAttachments,
@@ -698,6 +746,7 @@ export function saveNow() {
       nodes: s.nodes,
       edges: s.edges,
       viewport: updatedProjects.find((x) => x.id === s.activeProjectId)?.viewport,
+      savedLayout: updatedProjects.find((x) => x.id === s.activeProjectId)?.savedLayout,
       nodeNotes: s.nodeNotes,
       nodeTasks: s.nodeTasks,
       nodeAttachments: s.nodeAttachments,

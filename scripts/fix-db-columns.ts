@@ -18,6 +18,8 @@ async function main() {
     console.log("Added excalidraw_data column (or already exists).");
     await sql`ALTER TABLE documents ADD COLUMN IF NOT EXISTS drawio_data text`;
     console.log("Added drawio_data column (or already exists).");
+    await sql`ALTER TABLE documents ADD COLUMN IF NOT EXISTS saved_layout jsonb`;
+    console.log("Added saved_layout column (or already exists).");
     console.log("Done. Database is ready.");
   } catch (err) {
     console.error("Error:", err);

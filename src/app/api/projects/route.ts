@@ -17,13 +17,15 @@ export async function GET(request: NextRequest) {
       .orderBy(desc(documents.updatedAt));
 
     const metadataOnly = request.nextUrl.searchParams.get("metadataOnly") === "1";
-    const projects = list.map((doc) =>
-      metadataOnly
+    const projects = list.map((doc) => {
+      const nodeCount = Array.isArray(doc.nodes) ? doc.nodes.length : 0;
+      return metadataOnly
         ? {
             id: doc.id,
             name: doc.name,
             nodes: [] as unknown[],
             edges: [] as unknown[],
+            nodeCount,
             nodeNotes: {} as Record<string, string>,
             nodeTasks: {} as Record<string, unknown>,
             nodeAttachments: {} as Record<string, unknown>,
@@ -36,15 +38,17 @@ export async function GET(request: NextRequest) {
             name: doc.name,
             nodes: doc.nodes ?? [],
             edges: doc.edges ?? [],
+            nodeCount,
             viewport: doc.viewport ?? undefined,
+            savedLayout: doc.savedLayout ?? undefined,
             nodeNotes: doc.nodeNotes ?? {},
             nodeTasks: doc.nodeTasks ?? {},
             nodeAttachments: doc.nodeAttachments ?? {},
             isFavorite: doc.isFavorite ?? false,
             createdAt: doc.createdAt ? new Date(doc.createdAt).getTime() : Date.now(),
             updatedAt: doc.updatedAt ? new Date(doc.updatedAt).getTime() : Date.now(),
-          }
-    );
+          };
+    });
     return NextResponse.json(projects);
   } catch {
     return NextResponse.json([]);

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, Suspense, useEffect } from "react";
+import { useState, Suspense, useEffect, useRef } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useAuth } from "@clerk/nextjs";
 import Link from "next/link";
@@ -40,10 +40,35 @@ export const DIAGRAM_TYPE_OPTIONS = [
 export type DiagramTypeValue = (typeof DIAGRAM_TYPE_OPTIONS)[number]["value"];
 
 /** Preset option for dropdown (value is "none" or preset id from API). */
-export type PresetOption = { value: string; label: string; prompt: string; previewImageUrl?: string };
+export type PresetOption = {
+  value: string;
+  label: string;
+  prompt: string;
+  previewImageUrl?: string;
+  /** Target canvas for this preset; if set, overrides targetCanvas when preset is selected. */
+  targetCanvas?: "reactflow" | "excalidraw" | "drawio";
+};
 
 const DEFAULT_PRESET_OPTIONS: PresetOption[] = [
   { value: "none", label: "None (default)", prompt: "" },
+];
+
+/** Draw.io prompt presets (client-side; no pre-built diagram). */
+const DRAWIO_PRESETS: PresetOption[] = [
+  { value: "drawio-flowchart", label: "Draw.io: Flowchart", prompt: "Create a flowchart for a typical user login process: start, input credentials, validate, success or error, redirect.", targetCanvas: "drawio" },
+  { value: "drawio-architecture", label: "Draw.io: System architecture", prompt: "Create a system architecture diagram: client, API gateway, backend services, database. Use clear boxes and arrows.", targetCanvas: "drawio" },
+  { value: "drawio-process-flow", label: "Draw.io: Process flow", prompt: "Create a business process flow: receive order, validate, payment, fulfillment, shipping, delivery.", targetCanvas: "drawio" },
+  { value: "drawio-uml", label: "Draw.io: UML class diagram", prompt: "Create a UML class diagram for an e-commerce domain: User, Order, Product, Cart, Payment classes with relationships.", targetCanvas: "drawio" },
+  { value: "drawio-network", label: "Draw.io: Network diagram", prompt: "Create a network diagram: router, switches, servers, firewall. Show connections and subnets.", targetCanvas: "drawio" },
+];
+
+/** Excalidraw prompt presets (client-side; no pre-built diagram). */
+const EXCALIDRAW_PRESETS: PresetOption[] = [
+  { value: "excalidraw-flowchart", label: "Excalidraw: Flowchart", prompt: "Create a simple flowchart: start, steps, decision diamond, end. Use boxes and arrows.", targetCanvas: "excalidraw" },
+  { value: "excalidraw-architecture", label: "Excalidraw: Architecture", prompt: "Create an architecture diagram: Frontend, API, Database, Cache. Use rectangles and connecting arrows.", targetCanvas: "excalidraw" },
+  { value: "excalidraw-mindmap", label: "Excalidraw: Mind map", prompt: "Create a mind map with a central topic and 4-6 branches. Use boxes and curved connectors.", targetCanvas: "excalidraw" },
+  { value: "excalidraw-wireframe", label: "Excalidraw: Wireframe", prompt: "Create a simple app wireframe: header, sidebar, main content area, footer.", targetCanvas: "excalidraw" },
+  { value: "excalidraw-sequence", label: "Excalidraw: Sequence", prompt: "Create a sequence diagram: User, Frontend, API, Database. Show request/response arrows.", targetCanvas: "excalidraw" },
 ];
 
 /** Small badge showing current model + API key status below the prompt textarea. */
@@ -111,7 +136,7 @@ function AIDiagramPage() {
   const [error, setError] = useState<string | null>(null);
   const [diagramType, setDiagramType] = useState<DiagramTypeValue>("auto");
   const [preset, setPreset] = useState<string>("none");
-  const [presetOptions, setPresetOptions] = useState<PresetOption[]>(DEFAULT_PRESET_OPTIONS);
+  const [apiPresets, setApiPresets] = useState<PresetOption[]>([]);
   /** Target canvas for AI generation: diagram (React Flow), excalidraw, or drawio. */
   const [targetCanvas, setTargetCanvas] = useState<"reactflow" | "excalidraw" | "drawio">("reactflow");
   const router = useRouter();
@@ -120,14 +145,19 @@ function AIDiagramPage() {
     fetch("/api/presets")
       .then((r) => r.ok ? r.json() : [])
       .then((list: { id: string; label: string; prompt?: string; previewImageUrl?: string }[]) => {
-        const opts: PresetOption[] = [
-          { value: "none", label: "None (default)", prompt: "" },
-          ...list.map((p) => ({ value: p.id, label: p.label, prompt: p.prompt ?? "", previewImageUrl: p.previewImageUrl })),
-        ];
-        setPresetOptions(opts);
+        setApiPresets(
+          list.map((p) => ({ value: p.id, label: p.label, prompt: p.prompt ?? "", previewImageUrl: p.previewImageUrl }))
+        );
       })
       .catch(() => {});
   }, []);
+
+  const presetOptions: PresetOption[] =
+    targetCanvas === "drawio"
+      ? [{ value: "none", label: "None (default)", prompt: "" }, ...DRAWIO_PRESETS]
+      : targetCanvas === "excalidraw"
+        ? [{ value: "none", label: "None (default)", prompt: "" }, ...EXCALIDRAW_PRESETS]
+        : [{ value: "none", label: "None (default)", prompt: "" }, ...apiPresets];
 
   const searchParams = useSearchParams();
   const mode = searchParams.get("mode") || "diagram";
@@ -161,6 +191,15 @@ function AIDiagramPage() {
   useEffect(() => {
     setTargetCanvas(canvasMode);
   }, [canvasMode]);
+
+  // Reset preset when target canvas changes (preset options differ per canvas)
+  const prevTargetCanvas = useRef<"reactflow" | "excalidraw" | "drawio">(targetCanvas);
+  useEffect(() => {
+    if (prevTargetCanvas.current !== targetCanvas) {
+      prevTargetCanvas.current = targetCanvas;
+      setPreset("none");
+    }
+  }, [targetCanvas]);
 
   // Initialize from URL when redirected from AI sidebar or other entry points
   useEffect(() => {
@@ -201,13 +240,19 @@ function AIDiagramPage() {
   };
 
   const handleGenerate = async () => {
+    const selectedPreset = presetOptions.find((p) => p.value === preset);
     const effectivePrompt = preset !== "none"
-      ? (presetOptions.find((p) => p.value === preset)?.prompt ?? prompt)
+      ? (selectedPreset?.prompt ?? prompt)
       : prompt;
     if (!effectivePrompt.trim()) return;
     setLoading(true);
     setError(null);
-    const effectiveTarget = preset !== "none" ? "reactflow" : targetCanvas;
+    const effectiveTarget =
+      preset !== "none" && selectedPreset?.targetCanvas
+        ? selectedPreset.targetCanvas
+        : preset !== "none"
+          ? "reactflow"
+          : targetCanvas;
     const targetCanvasMode = effectiveTarget;
 
     try {
@@ -1073,7 +1118,7 @@ function AIDiagramPage() {
                 </select>
               </div>
             )}
-            {mode !== "mindmap-refine" && targetCanvas === "reactflow" && (
+            {mode !== "mindmap-refine" && (
               <>
                 <div className="space-y-1">
                   <label className="text-[11px] font-semibold text-gray-700 block">
@@ -1114,7 +1159,7 @@ function AIDiagramPage() {
                     })()}
                   </div>
                 </div>
-                {targetCanvas === "reactflow" && (
+                {targetCanvas === "reactflow" && mode !== "mindmap-refine" && (
                   <div className="space-y-1">
                     <label className="text-[11px] font-semibold text-gray-700 block">
                       Diagram type

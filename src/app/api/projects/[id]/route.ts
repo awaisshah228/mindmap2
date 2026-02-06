@@ -29,6 +29,7 @@ export async function GET(request: NextRequest, { params }: Params) {
     nodes: doc.nodes ?? [],
     edges: doc.edges ?? [],
     viewport: doc.viewport ?? undefined,
+    savedLayout: doc.savedLayout ?? undefined,
     nodeNotes: doc.nodeNotes ?? {},
     nodeTasks: doc.nodeTasks ?? {},
     nodeAttachments: doc.nodeAttachments ?? {},
@@ -73,6 +74,7 @@ export async function PATCH(request: Request, { params }: Params) {
     nodes?: object[];
     edges?: object[];
     viewport?: { x: number; y: number; zoom: number };
+    savedLayout?: { direction: string; algorithm: string; spacingX: number; spacingY: number };
     nodeNotes?: Record<string, string>;
     nodeTasks?: Record<string, unknown>;
     nodeAttachments?: Record<string, unknown>;
@@ -93,6 +95,7 @@ export async function PATCH(request: Request, { params }: Params) {
       ...(body.nodes !== undefined && { nodes: body.nodes }),
       ...(body.edges !== undefined && { edges: body.edges }),
       ...(body.viewport !== undefined && { viewport: body.viewport }),
+      ...(body.savedLayout !== undefined && { savedLayout: body.savedLayout }),
       ...(body.nodeNotes !== undefined && { nodeNotes: body.nodeNotes }),
       ...(body.nodeTasks !== undefined && { nodeTasks: body.nodeTasks }),
       ...(body.nodeAttachments !== undefined && { nodeAttachments: body.nodeAttachments }),
@@ -114,6 +117,7 @@ export async function PATCH(request: Request, { params }: Params) {
     nodes: updated.nodes ?? [],
     edges: updated.edges ?? [],
     viewport: updated.viewport ?? undefined,
+    savedLayout: updated.savedLayout ?? undefined,
     nodeNotes: updated.nodeNotes ?? {},
     nodeTasks: updated.nodeTasks ?? {},
     nodeAttachments: updated.nodeAttachments ?? {},

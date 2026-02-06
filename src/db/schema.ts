@@ -84,6 +84,7 @@ export const documents = pgTable("documents", {
   nodes: jsonb("nodes").$type<object[]>().default([]),
   edges: jsonb("edges").$type<object[]>().default([]),
   viewport: jsonb("viewport").$type<{ x: number; y: number; zoom: number }>(),
+  savedLayout: jsonb("saved_layout").$type<{ direction: string; algorithm: string; spacingX: number; spacingY: number }>(),
   nodeNotes: jsonb("node_notes").$type<Record<string, string>>().default({}),
   nodeTasks: jsonb("node_tasks").$type<Record<string, unknown>>().default({}),
   nodeAttachments: jsonb("node_attachments").$type<Record<string, unknown>>().default({}),

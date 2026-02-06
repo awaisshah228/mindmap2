@@ -1,7 +1,10 @@
 /**
  * Convert Excalidraw skeleton elements to Draw.io mxGraph XML.
  * Maps rectangle, diamond, ellipse, text, arrow to mxCell elements.
+ * Centers the diagram in the canvas with padding and fits page size to content.
  */
+
+const CANVAS_PADDING = 80;
 
 type ExcalidrawSkeleton = {
   type: string;
@@ -51,6 +54,30 @@ export function excalidrawToDrawioXml(
     else shapes.push(el);
   }
 
+  // Compute bounding box of all shapes (including dimensions)
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  for (const s of shapes) {
+    const w = Math.max(Number(s.width) || 120, 40);
+    const h = Math.max(Number(s.height) || 40, 24);
+    minX = Math.min(minX, s.x);
+    minY = Math.min(minY, s.y);
+    maxX = Math.max(maxX, s.x + w);
+    maxY = Math.max(maxY, s.y + h);
+  }
+
+  // If no shapes, use defaults
+  if (shapes.length === 0) {
+    minX = 0; minY = 0;
+    maxX = 400; maxY = 300;
+  }
+
+  const diagramWidth = maxX - minX;
+  const diagramHeight = maxY - minY;
+  const pageWidth = Math.round(diagramWidth + 2 * CANVAS_PADDING);
+  const pageHeight = Math.round(diagramHeight + 2 * CANVAS_PADDING);
+  const offsetX = CANVAS_PADDING - minX;
+  const offsetY = CANVAS_PADDING - minY;
+
   const cells: string[] = [];
   cells.push('<mxCell id="0" />');
   cells.push('<mxCell id="1" parent="0" />');
@@ -60,11 +87,13 @@ export function excalidrawToDrawioXml(
     idMap.set(s.id || id, id);
     const w = Math.max(Number(s.width) || 120, 40);
     const h = Math.max(Number(s.height) || 40, 24);
+    const x = Math.round(s.x + offsetX);
+    const y = Math.round(s.y + offsetY);
     const label = (s.label?.text ?? s.text ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
     const bg = s.backgroundColor || "#e7f5ff";
     const stroke = s.strokeColor || "#1971c2";
     const style = getShapeStyle(s.type, bg, stroke);
-    cells.push(`<mxCell id="${id}" value="${label}" style="${style}" vertex="1" parent="1"><mxGeometry x="${s.x}" y="${s.y}" width="${w}" height="${h}" as="geometry"/></mxCell>`);
+    cells.push(`<mxCell id="${id}" value="${label}" style="${style}" vertex="1" parent="1"><mxGeometry x="${x}" y="${y}" width="${w}" height="${h}" as="geometry"/></mxCell>`);
   }
 
   for (const a of arrows) {
@@ -86,7 +115,7 @@ export function excalidrawToDrawioXml(
   return `<?xml version="1.0" encoding="UTF-8"?>
 <mxfile host="app.diagrams.net">
   <diagram name="Diagram" id="${nextId()}">
-    <mxGraphModel dx="1434" dy="780" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="827" pageHeight="1169" math="0" shadow="0">
+    <mxGraphModel dx="1434" dy="780" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="${pageWidth}" pageHeight="${pageHeight}" math="0" shadow="0">
       <root>
         ${cells.join("\n        ")}
       </root>
@@ -101,5 +130,6 @@ function getShapeStyle(type: string, bg: string, stroke: string): string {
   if (t === "diamond") return `rhombus;${base}`;
   if (t === "ellipse" || t === "circle") return `ellipse;${base}`;
   if (t === "text") return `text;html=1;align=left;verticalAlign=top;fillColor=${bg};strokeColor=${stroke};`;
+  if (t === "swimlane") return `swimlane;horizontal=1;startSize=30;${base}`;
   return base;
 }

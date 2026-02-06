@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Panel, useStore, useStoreApi } from "@xyflow/react";
+import { Panel, useStoreApi } from "@xyflow/react";
 import { Settings2, ArrowRight, ArrowDown, ArrowLeft, ArrowUp, Layout, PanelRight, Save, Check, Minimize2 } from "lucide-react";
 import { useCanvasStore } from "@/lib/store/canvas-store";
 import {
@@ -25,6 +25,8 @@ const DIRECTIONS: { value: LayoutDirection; label: string; icon: React.ReactNode
   { value: "BT", label: "Up", icon: <ArrowUp className="w-4 h-4" /> },
 ];
 
+const DEFAULT_TEMPLATE_IDS = new Set(["mind-root", "mind-goals", "mind-tasks", "mind-stakeholders", "mind-task-ideas", "mind-task-next"]);
+
 interface MindMapLayoutPanelProps {
   setNodes: (nodes: Node[] | ((prev: Node[]) => Node[])) => void;
   setEdges: (edges: Edge[] | ((prev: Edge[]) => Edge[])) => void;
@@ -43,6 +45,13 @@ export function MindMapLayoutPanel({
   });
   const mindMapLayout = useCanvasStore((s) => s.mindMapLayout);
   const setMindMapLayout = useCanvasStore((s) => s.setMindMapLayout);
+  const setActiveProjectSavedLayout = useCanvasStore((s) => s.setActiveProjectSavedLayout);
+  const activeProjectId = useCanvasStore((s) => s.activeProjectId);
+  const applyLayoutAtStart = useCanvasStore((s) => s.applyLayoutAtStart);
+  const savedLayout = useCanvasStore((s) => {
+    const p = s.projects.find((pr) => pr.id === s.activeProjectId);
+    return p?.savedLayout;
+  });
   const pushUndo = useCanvasStore((s) => s.pushUndo);
   const setActiveTool = useCanvasStore((s) => s.setActiveTool);
 
@@ -54,19 +63,31 @@ export function MindMapLayoutPanel({
     if (isMobile) setPanelVisible(false);
   }, [isMobile]);
 
+  const LAYOUT_EXCLUDED = new Set(["freeDraw", "edgeAnchor", "group"]);
   const hasMindMapNodes = useMemo(() => {
     return nodes.some(
       (n) => n.type === "mindMap" && !edges.some((e) => e.target === n.id)
     );
   }, [nodes, edges]);
+  const hasLayoutableNodes = useMemo(() => {
+    return nodes.filter((n) => !LAYOUT_EXCLUDED.has(n.type ?? "")).length >= 2;
+  }, [nodes]);
 
-  // Normalize mind map edge handles when direction changes (top/bottom vs left/right).
-  // Only run on direction change - not on nodes change - to avoid update loops when adding nodes.
+  // Normalize mind map edge handles when user CHANGES direction — not on mount.
+  // On mount, preserve saved edge handles so the layout doesn't "jump" or get messed up.
   const storeApi = useStoreApi();
+  const prevDirectionRef = useRef<LayoutDirection | null>(null);
   useEffect(() => {
     const { nodes } = storeApi.getState();
     const mindMapIds = new Set(nodes.filter((n) => n.type === "mindMap").map((n) => n.id));
     if (mindMapIds.size === 0) return;
+    // Skip on initial mount — keep saved handles so edges render correctly
+    if (prevDirectionRef.current === null) {
+      prevDirectionRef.current = mindMapLayout.direction;
+      return;
+    }
+    if (prevDirectionRef.current === mindMapLayout.direction) return;
+    prevDirectionRef.current = mindMapLayout.direction;
     setEdges((prev) => normalizeMindMapEdgeHandles(nodes, prev, mindMapLayout.direction));
   }, [mindMapLayout.direction, setEdges, storeApi]);
 
@@ -83,23 +104,38 @@ export function MindMapLayoutPanel({
     setActiveTool("select");
   }, [setNodes, setActiveTool, pushUndo]);
 
-  // Run layout on first load ONLY for the default mind-map template (exact 6 nodes from project-storage).
-  // Skip for AI-generated, user-edited, or any diagram that's already been layouted and saved.
-  const DEFAULT_TEMPLATE_IDS = new Set(["mind-root", "mind-goals", "mind-tasks", "mind-stakeholders", "mind-task-ideas", "mind-task-next"]);
-  const hasRunInitialLayout = useRef(false);
+  // On first load: if applyLayoutAtStart is checked, apply saved layout or default template layout.
+  // Wait for nodes to be fully loaded and rendered (chunked apply + React Flow measurement) before running layout.
+  const hasAppliedLayoutForProjectRef = useRef<string | null>(null);
+  const prevNodesLengthRef = useRef(0);
   useEffect(() => {
-    if (hasRunInitialLayout.current) return;
+    if (hasAppliedLayoutForProjectRef.current && hasAppliedLayoutForProjectRef.current !== activeProjectId) {
+      hasAppliedLayoutForProjectRef.current = null;
+    }
+    if (!applyLayoutAtStart || !activeProjectId || hasAppliedLayoutForProjectRef.current === activeProjectId)
+      return;
+    if (nodes.length < 2) return;
     const nodeIds = new Set(nodes.map((n) => n.id));
     const isDefaultTemplate =
       nodeIds.size === DEFAULT_TEMPLATE_IDS.size &&
       [...DEFAULT_TEMPLATE_IDS].every((id) => nodeIds.has(id));
-    if (!isDefaultTemplate || edges.length === 0) return;
+    const shouldApplySaved = savedLayout != null;
+    const shouldApplyDefault = !shouldApplySaved && isDefaultTemplate && edges.length > 0;
+    if (!shouldApplySaved && !shouldApplyDefault) return;
+
+    // Wait for nodes to be fully loaded (chunked apply) and React Flow to render/measure before layout
+    prevNodesLengthRef.current = nodes.length;
+    const waitMs = shouldApplySaved ? 800 : 600;
     const t = setTimeout(() => {
-      hasRunInitialLayout.current = true;
-      applyLayout();
-    }, 100);
+      hasAppliedLayoutForProjectRef.current = activeProjectId;
+      if (shouldApplySaved) {
+        applyLayout(savedLayout);
+      } else {
+        applyLayout();
+      }
+    }, waitMs);
     return () => clearTimeout(t);
-  }, [nodes, edges, applyLayout]);
+  }, [applyLayoutAtStart, activeProjectId, nodes, edges, savedLayout, applyLayout]);
 
   // After AI (or other source) renders all nodes: apply auto layout once after an interval (same as first-time canvas open).
   // Use a generous delay so store→canvas sync and node measurement are done before layout runs.
@@ -260,7 +296,7 @@ export function MindMapLayoutPanel({
               Apply to selected ({selectedCount})
             </button>
           )}
-          {hasMindMapNodes ? (
+          {hasLayoutableNodes && (
             <button
               type="button"
               onClick={() => applyLayout()}
@@ -269,7 +305,8 @@ export function MindMapLayoutPanel({
               <Layout className="w-4 h-4" />
               Layout all
             </button>
-          ) : (
+          )}
+          {!hasMindMapNodes && (
             <button
               type="button"
               onClick={handleAddRoot}
@@ -281,6 +318,12 @@ export function MindMapLayoutPanel({
           <button
             type="button"
             onClick={() => {
+              setActiveProjectSavedLayout({
+                direction: mindMapLayout.direction,
+                algorithm: mindMapLayout.algorithm,
+                spacingX: mindMapLayout.spacingX,
+                spacingY: mindMapLayout.spacingY,
+              });
               saveNow();
               setSavedFeedback(true);
               window.setTimeout(() => setSavedFeedback(false), 2000);

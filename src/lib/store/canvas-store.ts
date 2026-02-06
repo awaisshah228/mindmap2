@@ -96,6 +96,14 @@ export interface ExcalidrawScene {
   files?: Record<string, { mimeType: string; id: string; dataURL: string }>;
 }
 
+/** Layout config saved with a project so it can be re-applied on load. */
+export type SavedLayout = {
+  direction: LayoutDirection;
+  algorithm: LayoutAlgorithm;
+  spacingX: number;
+  spacingY: number;
+};
+
 /** A saved project (diagram + metadata) */
 export interface Project {
   id: string;
@@ -105,10 +113,14 @@ export interface Project {
   isFavorite: boolean;
   nodes: Node[];
   edges: Edge[];
+  /** From API metadataOnly response — used to decide stream vs regular GET. */
+  nodeCount?: number;
   nodeNotes: Record<string, string>;
   nodeTasks: Record<string, NodeTask[]>;
   nodeAttachments: Record<string, NodeAttachment[]>;
   viewport?: { x: number; y: number; zoom: number };
+  /** Layout applied when user saved; re-apply on first render after load. */
+  savedLayout?: SavedLayout;
   /** When set, Excalidraw canvas has content; load when switching to Excalidraw mode. */
   excalidrawData?: ExcalidrawScene | null;
   /** Draw.io diagram XML; load when switching to Draw.io mode. */
@@ -193,6 +205,10 @@ interface CanvasState {
   /** Theme */
   theme: ThemeMode;
 
+  /** When true, apply saved/default layout at first render when opening a project. When false, skip auto-layout on load. */
+  applyLayoutAtStart: boolean;
+  setApplyLayoutAtStart: (v: boolean) => void;
+
   /** React Flow canvas background: dots, lines, cross, or none */
   canvasBackgroundVariant: "dots" | "lines" | "cross" | "none";
   setCanvasBackgroundVariant: (v: "dots" | "lines" | "cross" | "none") => void;
@@ -255,6 +271,8 @@ interface CanvasState {
   toggleFavorite: (id: string) => void;
   /** Persist current canvas state into the active project. */
   saveCurrentProject: () => void;
+  /** Store the current layout config on the active project (used when user clicks "Save layout"). */
+  setActiveProjectSavedLayout: (layout: SavedLayout) => void;
 
   // ─── Notemap actions ─────────────────────────────────────────────
 
@@ -367,6 +385,7 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
   searchOpen: false,
   searchQuery: "",
   theme: "light",
+  applyLayoutAtStart: true,
   canvasBackgroundVariant: "dots",
   focusedBranchNodeId: null,
   shortcutsOpen: false,
@@ -542,6 +561,16 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
     });
   },
 
+  setActiveProjectSavedLayout: (layout) => {
+    const s = get();
+    if (!s.activeProjectId) return;
+    set({
+      projects: s.projects.map((p) =>
+        p.id === s.activeProjectId ? { ...p, savedLayout: layout, updatedAt: Date.now() } : p
+      ),
+    });
+  },
+
   // ─── Notemap actions ─────────────────────────────────────────────
   setNodeNote: (nodeId, note) =>
     set((s) => ({ nodeNotes: { ...s.nodeNotes, [nodeId]: note } })),
@@ -605,6 +634,7 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
   setSearchQuery: (query) => set({ searchQuery: query }),
 
   setTheme: (theme) => set({ theme }),
+  setApplyLayoutAtStart: (v) => set({ applyLayoutAtStart: v }),
   setCanvasBackgroundVariant: (v) => set({ canvasBackgroundVariant: v }),
 
   setFocusedBranchNodeId: (id) => set({ focusedBranchNodeId: id }),

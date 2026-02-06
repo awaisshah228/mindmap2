@@ -11,6 +11,7 @@ import {
   Save,
   Check,
   Circle,
+  LayoutTemplate,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useCanvasStore } from "@/lib/store/canvas-store";
@@ -47,6 +48,8 @@ function CanvasBottomBarInner({
   const hasUnsavedChanges = useCanvasStore((s) => s.hasUnsavedChanges);
   const showSaveLayoutLabel = useCanvasStore((s) => s.showSaveLayoutLabel);
   const setShowSaveLayoutLabel = useCanvasStore((s) => s.setShowSaveLayoutLabel);
+  const applyLayoutAtStart = useCanvasStore((s) => s.applyLayoutAtStart);
+  const setApplyLayoutAtStart = useCanvasStore((s) => s.setApplyLayoutAtStart);
 
   // Update relative time display periodically
   const [, setTick] = useState(0);
@@ -138,6 +141,20 @@ function CanvasBottomBarInner({
         >
           Layout all
         </button>
+
+        <label
+          className="flex items-center gap-1.5 px-2 py-1 rounded-lg cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-700 text-[11px] text-gray-600 dark:text-gray-400"
+          title="Apply saved layout when opening a project"
+        >
+          <input
+            type="checkbox"
+            checked={applyLayoutAtStart}
+            onChange={(e) => setApplyLayoutAtStart(e.target.checked)}
+            className="rounded border-gray-300 text-violet-600 focus:ring-violet-500"
+          />
+          <LayoutTemplate className="w-3.5 h-3.5 shrink-0" />
+          <span>Layout at start</span>
+        </label>
 
         <div className="w-px h-5 bg-gray-200 dark:bg-gray-600 mx-1" />
 

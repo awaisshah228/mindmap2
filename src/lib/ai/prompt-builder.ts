@@ -99,7 +99,16 @@ export function buildSystemPrompt(layoutDirection?: string): string {
   return `
 You design diagrams for a React Flow whiteboard. Return only valid JSON. No markdown, no comments.
 
-Node types: mindMap, stickyNote, rectangle, diamond, circle, document, text, image, databaseSchema, service, queue, actor, icon. Do NOT use type "group" — use the groups array instead.
+CRITICAL — NODE TYPE SELECTION: Do NOT default to type "rectangle" for all nodes. Choose the semantically correct type for each node:
+- mindMap: mind map nodes (central topic, branches). Use when diagram type is mind map.
+- flowchart: rectangle = process/step, diamond = decision/branching, circle = start/end. Use data.shape for diamond/circle when type is rectangle.
+- architecture/system: service, queue, actor — for services use "service", for message queues use "queue", for users/actors use "actor". Use "rectangle" only for generic boxes.
+- entity-relationship: databaseSchema — for entities/tables with columns.
+- stickyNote: callouts, notes, comments.
+- document: document/file nodes.
+- icon: standalone icons or decorative elements.
+- image: when showing an image with data.imageUrl.
+Available types: mindMap, stickyNote, rectangle, diamond, circle, document, text, image, databaseSchema, service, queue, actor, icon. Do NOT use type "group" — use the groups array instead.
 
 LAYOUT & HANDLES:
 Layout direction is ${preferredLayoutDirection}. Place nodes so that: (1) edges are short and do not cross unnecessarily, (2) the flow reads naturally in one direction, (3) connected nodes are close together. ${handleRule}
@@ -143,13 +152,13 @@ Architecture / system design: HIGH-LEVEL VIEW ONLY. Show components as services,
 GROUPS — METADATA ONLY (app applies grouping like Ctrl+G):
 - Do NOT create nodes with type "group" or parentNode. Return a "groups" array: groups: [{ id: string, label: string, nodeIds: string[] }]. Each entry names a group (e.g. "Frontend", "Backend") and lists the node ids that belong to it. The app lays out all nodes flat, then applies grouping to those nodeIds (same as user selecting nodes and using group/subflow or Ctrl+G). Use at most 2–4 groups when they clarify the diagram; omit groups when not needed.
 
-Flowchart: rectangle=step, diamond=decision, circle=start/end. Flow top→bottom or left→right. Group related decision branches.
+Flowchart: MUST use type "diamond" for decisions (not rectangle), type "circle" for start/end. Use type "rectangle" only for process steps. Set data.shape: "diamond" or "circle" when using ShapeNode. Flow top→bottom or left→right. Group related decision branches.
 
 Special types: databaseSchema → use ONLY for entity-relationship or schema diagrams; data.columns [{name, type?, key?}]. For architecture/system design use "service" or "rectangle" for data stores (no columns). service → data.subtitle optional. queue/actor → data.label.
 
 Images: type "image" with data.imageUrl = https://picsum.photos/seed/<word>/200/150 (seed: user, api, database, server, etc.). data.label = short caption.
 
-Rules: Unique node ids. Every edge MUST use the correct handles for the layout: horizontal → sourceHandle "right", targetHandle "left"; vertical → sourceHandle "bottom", targetHandle "top". Every edge: source, target, sourceHandle, targetHandle; data.label only when it adds information (omit when self-explanatory); keep edge labels 1–3 words. Short node labels (2–5 words). Every node: data.icon, data.iconUrl, or data.emoji. For architecture/system design: high-level view only — use service/rectangle for databases. Use databaseSchema only for entity-relationship or schema diagram type. Place nodes so the flow matches the handle rule above.
+Rules: Unique node ids. Every edge MUST use the correct handles for the layout: horizontal → sourceHandle "right", targetHandle "left"; vertical → sourceHandle "bottom", targetHandle "top". Every edge: source, target, sourceHandle, targetHandle; data.label only when it adds information (omit when self-explanatory); keep edge labels 1–3 words. Short node labels (2–5 words). For longer descriptions or paragraphs (e.g. notes, callouts, body text), use type "text" — text-only nodes without a shape, which scale to fit content. For shape nodes (rectangle, diamond, etc.) keep labels short so text fits the shape; shapes auto-scale to short text. Every node: data.icon, data.iconUrl, or data.emoji. For architecture/system design: high-level view only — use service/rectangle for databases. Use databaseSchema only for entity-relationship or schema diagram type. Place nodes so the flow matches the handle rule above. Center the diagram in the canvas; layout will fit and center the view.
 `.trim();
 }
 
@@ -179,7 +188,7 @@ export function buildUserMessage(params: PromptParams): string {
             architecture:
               "Type: architecture — high-level system design only. Service or rectangle nodes, short labels (e.g. API Gateway, Redis, PostgreSQL). No databaseSchema or table columns. Use groups array for 2–4 layers (e.g. Frontend, Backend, Data, External). Left-to-right or top-to-bottom flow. Edge labels only when they add clarity (e.g. REST, gRPC, Pub/Sub, Queries); omit for obvious flows (User→Frontend, API→DB). Space nodes so labeled edges have room. Good data: data.icon + data.iconUrl on every node, 2–4 groups with clear nodeIds.",
             flowchart:
-              "Type: flowchart. Rectangles = steps, diamonds = decisions, circles = start/end. One clear direction (top→bottom or left→right). Use groups array to group phases (e.g. Input, Process, Output). Label edges only for decision outcomes (Yes/No) or when the transition needs explanation; omit for simple step→step. Good data: short step labels, optional data.shape for diamond/circle.",
+              "Type: flowchart. Use type 'rectangle' for process steps, type 'diamond' for decisions (NOT rectangle), type 'circle' for start/end. One clear direction (top→bottom or left→right). Use groups array to group phases. Label edges for decision outcomes (Yes/No). Good data: short step labels, correct type per node role.",
             sequence:
               "Type: sequence. Actors (left column or top row), interactions between them. Use groups to separate actors/systems. Edge labels for message or action (e.g. request, response, notify) when not obvious; omit when arrow direction is enough. Good data: actor labels, clear source/target and handles.",
             "entity-relationship":
