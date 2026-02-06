@@ -305,7 +305,10 @@ export function useProjectPersistence() {
                 nodeAttachments: newProj.nodeAttachments,
               }),
             })
-              .then((r) => r.json())
+              .then((r) => {
+                if (!r.ok) throw new Error("Project create failed");
+                return r.json();
+              })
               .then((created) => {
                 const p: Project = {
                   ...newProj,
@@ -327,18 +330,26 @@ export function useProjectPersistence() {
                 applyNodesAndEdgesInChunks(setNodes, setEdges, p.nodes, p.edges);
               })
               .catch(() => {
+                const localId = `proj-local-${now}-${Math.random().toString(36).slice(2, 9)}`;
+                const localProj: Project = {
+                  ...newProj,
+                  id: localId,
+                  createdAt: now,
+                  updatedAt: now,
+                };
                 useCanvasStore.setState({
-                  projects: [newProj],
-                  activeProjectId: newProj.id,
+                  projects: [localProj],
+                  activeProjectId: localId,
                   nodes: [],
                   edges: [],
-                  nodeNotes: newProj.nodeNotes,
-                  nodeTasks: newProj.nodeTasks,
-                  nodeAttachments: newProj.nodeAttachments,
+                  nodeNotes: localProj.nodeNotes,
+                  nodeTasks: localProj.nodeTasks,
+                  nodeAttachments: localProj.nodeAttachments,
                   persistenceSource: "local",
                 });
+                saveProjects([localProj]);
                 const { setNodes, setEdges } = useCanvasStore.getState();
-                applyNodesAndEdgesInChunks(setNodes, setEdges, newProj.nodes, newProj.edges);
+                applyNodesAndEdgesInChunks(setNodes, setEdges, localProj.nodes, localProj.edges);
               });
             return;
           }
@@ -489,7 +500,12 @@ export function useProjectPersistence() {
             nodeTasks: s.nodeTasks,
             nodeAttachments: s.nodeAttachments,
           }),
-        }).catch(() => {});
+        })
+          .then((r) => { if (!r.ok) throw new Error("Save failed"); })
+          .catch(() => {
+            useCanvasStore.setState({ persistenceSource: "local" });
+            saveProjects(updatedProjects);
+          });
       } else {
         saveProjects(updatedProjects);
       }
@@ -559,7 +575,12 @@ export function saveNow() {
         nodeTasks: s.nodeTasks,
         nodeAttachments: s.nodeAttachments,
       }),
-    }).catch(() => {});
+    })
+      .then((r) => { if (!r.ok) throw new Error("Save failed"); })
+      .catch(() => {
+        useCanvasStore.setState({ persistenceSource: "local" });
+        saveProjects(updatedProjects);
+      });
   } else {
     saveProjects(updatedProjects);
   }

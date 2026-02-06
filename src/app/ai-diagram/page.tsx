@@ -295,14 +295,14 @@ function AIDiagramPage() {
         }
       }
 
-      // ─── Custom prompt: require API key or sign-in (to pay / use credits) ──
+      // ─── Custom prompt (no preset or preset with no diagram): require sign-in or API key when local ──
       if (!parsed && !llmApiKey && !isSignedIn) {
         setLoading(false);
         setError("signup-or-key");
         return;
       }
 
-      // ─── Call LLM (use user's API key + model when set) ──
+      // ─── Call LLM: use user's API key + selected model when set; otherwise server (credits). Stream in both cases. ──
       if (!parsed) {
         let full = "";
         let streamBuffer = "";
@@ -356,6 +356,7 @@ function AIDiagramPage() {
         };
 
         if (llmApiKey) {
+          // Stream frontend LLM response: user's API key + selected provider/model; onChunk updates diagram as tokens arrive.
           const systemPrompt = buildSystemPrompt("horizontal");
           const userMessage = buildUserMessage({
             prompt: prompt.trim(),
@@ -377,9 +378,11 @@ function AIDiagramPage() {
             onChunk: processStreamChunk,
           });
         } else {
+          // Signed in, no API key: use server Langchain; response is streamed and processed in chunks.
           const res = await fetch("/api/diagrams/langchain", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
+            credentials: "include",
             body: JSON.stringify({
               prompt: prompt.trim(),
               previousPrompt: lastAIPrompt,
@@ -939,7 +942,7 @@ function AIDiagramPage() {
             <p className="text-xs text-gray-500">
               {mode === "mindmap-refine"
                 ? "Describe what new ideas, children or siblings you want to add for this mind map node."
-                : "Describe your diagram and we'll create it. Try: \"E‑commerce architecture\" or \"Flowchart for user signup\"."}
+                : "Describe your diagram and we'll create it. Presets work without sign-in; for your own description, sign up or add your API key in Settings."}
             </p>
             <textarea
               value={prompt}

@@ -539,3 +539,18 @@ export const PRESET_DIAGRAMS: Record<string, PresetDiagram> = {
 export function getPresetDiagram(presetValue: string): PresetDiagram | null {
   return PRESET_DIAGRAMS[presetValue] ?? null;
 }
+
+/** Fallback list when DB is unreachable: slug as id so stream?preset=<slug> still works. */
+export function getPresetsApiFallback(templates: boolean): { id: string; name: string; label: string; diagramType: string; level: string; prompt?: string; isTemplate: boolean; sortOrder: number; hasNodes: boolean }[] {
+  return Object.keys(PRESET_DIAGRAMS).map((slug, i) => ({
+    id: slug,
+    name: slug,
+    label: slug.replace(/-/g, " ").replace(/\b\w/g, (c) => c.toUpperCase()),
+    diagramType: "architecture",
+    level: "other",
+    prompt: undefined,
+    isTemplate: templates,
+    sortOrder: i,
+    hasNodes: true,
+  }));
+}

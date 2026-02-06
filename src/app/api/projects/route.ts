@@ -9,44 +9,46 @@ export async function GET(request: NextRequest) {
   const userId = await requireAuth();
   if (userId instanceof NextResponse) return userId;
 
-  const list = await db
-    .select()
-    .from(documents)
-    .where(eq(documents.userId, userId))
-    .orderBy(desc(documents.updatedAt));
+  try {
+    const list = await db
+      .select()
+      .from(documents)
+      .where(eq(documents.userId, userId))
+      .orderBy(desc(documents.updatedAt));
 
-  const metadataOnly = request.nextUrl.searchParams.get("metadataOnly") === "1";
-
-  const projects = list.map((doc) =>
-    metadataOnly
-      ? {
-          id: doc.id,
-          name: doc.name,
-          nodes: [] as unknown[],
-          edges: [] as unknown[],
-          nodeNotes: {} as Record<string, string>,
-          nodeTasks: {} as Record<string, unknown>,
-          nodeAttachments: {} as Record<string, unknown>,
-          isFavorite: doc.isFavorite ?? false,
-          createdAt: doc.createdAt ? new Date(doc.createdAt).getTime() : Date.now(),
-          updatedAt: doc.updatedAt ? new Date(doc.updatedAt).getTime() : Date.now(),
-        }
-      : {
-          id: doc.id,
-          name: doc.name,
-          nodes: doc.nodes ?? [],
-          edges: doc.edges ?? [],
-          viewport: doc.viewport ?? undefined,
-          nodeNotes: doc.nodeNotes ?? {},
-          nodeTasks: doc.nodeTasks ?? {},
-          nodeAttachments: doc.nodeAttachments ?? {},
-          isFavorite: doc.isFavorite ?? false,
-          createdAt: doc.createdAt ? new Date(doc.createdAt).getTime() : Date.now(),
-          updatedAt: doc.updatedAt ? new Date(doc.updatedAt).getTime() : Date.now(),
-        }
-  );
-
-  return NextResponse.json(projects);
+    const metadataOnly = request.nextUrl.searchParams.get("metadataOnly") === "1";
+    const projects = list.map((doc) =>
+      metadataOnly
+        ? {
+            id: doc.id,
+            name: doc.name,
+            nodes: [] as unknown[],
+            edges: [] as unknown[],
+            nodeNotes: {} as Record<string, string>,
+            nodeTasks: {} as Record<string, unknown>,
+            nodeAttachments: {} as Record<string, unknown>,
+            isFavorite: doc.isFavorite ?? false,
+            createdAt: doc.createdAt ? new Date(doc.createdAt).getTime() : Date.now(),
+            updatedAt: doc.updatedAt ? new Date(doc.updatedAt).getTime() : Date.now(),
+          }
+        : {
+            id: doc.id,
+            name: doc.name,
+            nodes: doc.nodes ?? [],
+            edges: doc.edges ?? [],
+            viewport: doc.viewport ?? undefined,
+            nodeNotes: doc.nodeNotes ?? {},
+            nodeTasks: doc.nodeTasks ?? {},
+            nodeAttachments: doc.nodeAttachments ?? {},
+            isFavorite: doc.isFavorite ?? false,
+            createdAt: doc.createdAt ? new Date(doc.createdAt).getTime() : Date.now(),
+            updatedAt: doc.updatedAt ? new Date(doc.updatedAt).getTime() : Date.now(),
+          }
+    );
+    return NextResponse.json(projects);
+  } catch {
+    return NextResponse.json([]);
+  }
 }
 
 /** POST /api/projects – create a new document (project). */

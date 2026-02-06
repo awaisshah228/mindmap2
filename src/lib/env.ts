@@ -8,7 +8,6 @@ const FALLBACK = {
   OPENROUTER_BASE_URL: "https://openrouter.ai/api/v1",
   OPENROUTER_HTTP_REFERER: "http://localhost:3000",
   OPENROUTER_APP_TITLE: "AI Diagram Generator",
-  DATABASE_URL: "postgresql://user:pass@host/db?sslmode=require",
 } as const;
 
 /** OpenRouter API key; fallback empty so route can return 500 if not set. */
@@ -33,9 +32,9 @@ export function getOpenAiApiKey(): string {
   return process.env.OPENAI_API_KEY ?? "";
 }
 
-/** Database URL — only call from server (API routes, Server Actions, server components). Never expose to client. */
+/** Database URL — only call from server. Set in .env to your Neon URL (e.g. from https://neon.tech). No fallback so missing/invalid URL is caught and routes can return fallbacks. */
 export function getDatabaseUrl(): string {
-  return process.env.DATABASE_URL ?? FALLBACK.DATABASE_URL;
+  return process.env.DATABASE_URL ?? "";
 }
 
 /** Stripe secret key. */
