@@ -28,6 +28,8 @@ import {
   Search,
   Upload,
   ImagePlus,
+  Group,
+  Ungroup,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { SHAPE_TYPES, SHAPE_LABELS, SHAPE_PATHS, type ShapeType } from "@/lib/shape-types";
@@ -700,6 +702,46 @@ export default function CanvasToolbar({ activeTool, onToolChange }: CanvasToolba
             </Popover.Content>
           </Popover.Portal>
         </Popover.Root>
+        <div className="w-8 h-px bg-gray-200 dark:bg-gray-600 my-1" />
+        {/* Group / Ungroup selected nodes */}
+        <Tooltip.Root>
+          <Tooltip.Trigger asChild>
+            <button
+              type="button"
+              className="w-10 h-10 flex items-center justify-center rounded-lg hover:bg-gray-100 text-gray-600 dark:hover:bg-gray-700 dark:text-gray-400 transition-colors"
+              aria-label="Group selected nodes (⌘G)"
+              onClick={() => {
+                document.dispatchEvent(new KeyboardEvent("keydown", { key: "g", metaKey: true, ctrlKey: true, bubbles: true }));
+              }}
+            >
+              <Group className="w-5 h-5" />
+            </button>
+          </Tooltip.Trigger>
+          <Tooltip.Portal>
+            <Tooltip.Content side="right" sideOffset={8} className="z-100 px-2.5 py-1.5 text-xs font-medium text-white bg-gray-800 rounded shadow-lg border border-gray-700">
+              <span>Group selected </span><kbd className="ml-1 px-1 py-0.5 bg-gray-700 rounded text-[10px]">⌘G</kbd>
+            </Tooltip.Content>
+          </Tooltip.Portal>
+        </Tooltip.Root>
+        <Tooltip.Root>
+          <Tooltip.Trigger asChild>
+            <button
+              type="button"
+              className="w-10 h-10 flex items-center justify-center rounded-lg hover:bg-gray-100 text-gray-600 dark:hover:bg-gray-700 dark:text-gray-400 transition-colors"
+              aria-label="Ungroup selected (⌘⇧G)"
+              onClick={() => {
+                document.dispatchEvent(new KeyboardEvent("keydown", { key: "g", metaKey: true, ctrlKey: true, shiftKey: true, bubbles: true }));
+              }}
+            >
+              <Ungroup className="w-5 h-5" />
+            </button>
+          </Tooltip.Trigger>
+          <Tooltip.Portal>
+            <Tooltip.Content side="right" sideOffset={8} className="z-100 px-2.5 py-1.5 text-xs font-medium text-white bg-gray-800 rounded shadow-lg border border-gray-700">
+              <span>Ungroup selected </span><kbd className="ml-1 px-1 py-0.5 bg-gray-700 rounded text-[10px]">⌘⇧G</kbd>
+            </Tooltip.Content>
+          </Tooltip.Portal>
+        </Tooltip.Root>
         <div className="w-8 h-px bg-gray-200 dark:bg-gray-600 my-1" />
         <ToolButton icon={<Wand2 className="w-5 h-5" />} label="AI Generate" tool="ai" active={false} onClick={() => handleToolClick("ai")} />
     </div>
