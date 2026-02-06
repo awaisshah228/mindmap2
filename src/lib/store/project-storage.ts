@@ -853,6 +853,34 @@ export function saveNow() {
   if (activeProj) setCachedProject(activeProj);
 }
 
+/** Record a prompt + diagram to history (project + diagram level). Only for API projects. */
+export function recordPromptHistory(opts: {
+  prompt: string;
+  nodes?: object[];
+  edges?: object[];
+  targetCanvas?: "reactflow" | "excalidraw" | "drawio";
+}): void {
+  const s = useCanvasStore.getState();
+  if (!s.activeProjectId || !isApiProjectId(s.activeProjectId) || s.persistenceSource !== "cloud") return;
+  const nodes = opts.nodes ?? [];
+  const edges = opts.edges ?? [];
+  const nodeCount = Array.isArray(nodes) ? nodes.length : 0;
+  const edgeCount = Array.isArray(edges) ? edges.length : 0;
+  fetch(`/api/projects/${s.activeProjectId}/prompt-history`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    credentials: "include",
+    body: JSON.stringify({
+      prompt: opts.prompt.trim(),
+      nodes,
+      edges,
+      targetCanvas: opts.targetCanvas ?? "reactflow",
+      nodeCount,
+      edgeCount,
+    }),
+  }).catch(() => {});
+}
+
 // ─── API-aware CRUD for authenticated users (syncs API + localStorage) ───
 
 /** Create project: POST to API when authenticated or in cloud mode, else local only. Updates store + localStorage. */

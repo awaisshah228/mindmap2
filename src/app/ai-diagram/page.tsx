@@ -19,7 +19,7 @@ import {
 import { buildSystemPrompt, buildUserMessage, getMindMapStructure, type CanvasBounds } from "@/lib/ai/prompt-builder";
 import { streamDiagramGeneration } from "@/lib/ai/frontend-ai";
 import EditorLayout from "@/components/layout/EditorLayout";
-import { saveNow } from "@/lib/store/project-storage";
+import { saveNow, recordPromptHistory } from "@/lib/store/project-storage";
 import { Loader2, Settings } from "lucide-react";
 import { applyNodesAndEdgesInChunks } from "@/lib/chunked-nodes";
 import { parseStreamingDiagramBuffer, parseStreamingElementsBuffer } from "@/lib/ai/streaming-json-parser";
@@ -264,6 +264,7 @@ function AIDiagramPage() {
             setLastAIPrompt(effectivePrompt.trim());
             setLastAIDiagram(null);
             saveNow();
+            recordPromptHistory({ prompt: effectivePrompt.trim(), targetCanvas: "drawio" });
             setPendingFitView(true);
             setLoading(false);
             return;
@@ -275,6 +276,7 @@ function AIDiagramPage() {
             setLastAIPrompt(effectivePrompt.trim());
             setLastAIDiagram(null);
             saveNow();
+            recordPromptHistory({ prompt: effectivePrompt.trim(), targetCanvas: "excalidraw" });
             setPendingFitView(true);
             setLoading(false);
             return;
@@ -288,6 +290,7 @@ function AIDiagramPage() {
             setLastAIPrompt(effectivePrompt.trim());
             setLastAIDiagram(null);
             saveNow();
+            recordPromptHistory({ prompt: effectivePrompt.trim(), nodes, edges, targetCanvas: "reactflow" });
             setPendingFitView(true);
             setPendingFitViewNodeIds(nodes.map((n) => n.id));
             setLoading(false);
@@ -369,6 +372,7 @@ function AIDiagramPage() {
           }).catch(() => {});
         }
         saveNow();
+        recordPromptHistory({ prompt: effectivePrompt.trim(), targetCanvas: "drawio" });
         setPendingFitView(true);
         setLoading(false);
         return;
@@ -442,6 +446,7 @@ function AIDiagramPage() {
           }).catch(() => {});
         }
         saveNow();
+        recordPromptHistory({ prompt: effectivePrompt.trim(), targetCanvas: "excalidraw" });
         setPendingFitView(true);
         setLoading(false);
         return;
@@ -1091,6 +1096,14 @@ function AIDiagramPage() {
 
       // Persist so the canvas shows the generated diagram (both Diagram and Excalidraw canvases).
       saveNow();
+      // Record prompt + diagram (use applied state from store)
+      const applied = useCanvasStore.getState();
+      recordPromptHistory({
+        prompt: effectivePrompt.trim(),
+        nodes: applied.nodes as object[],
+        edges: applied.edges as object[],
+        targetCanvas: "reactflow",
+      });
 
       // If user was in Excalidraw mode, switch view so they see the result there.
       if (targetCanvasMode === "excalidraw") setCanvasMode("excalidraw");

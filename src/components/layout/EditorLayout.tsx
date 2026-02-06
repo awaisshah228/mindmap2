@@ -31,6 +31,7 @@ const DrawioCanvas = dynamic(
 import { NodeDetailsPanel } from "@/components/panels/NodeDetailsPanel";
 import { KeyboardShortcutsPanel } from "@/components/panels/KeyboardShortcutsPanel";
 import { SearchPanel } from "@/components/panels/SearchPanel";
+import { PromptHistoryPanel } from "@/components/panels/PromptHistoryPanel";
 // PresentationMode is rendered inside DiagramCanvas
 import { PresentationFlowEditor } from "@/components/panels/PresentationMode";
 import { SettingsPanel } from "@/components/panels/SettingsPanel";
@@ -61,6 +62,7 @@ import {
   Grid3X3,
   Minus,
   LayoutTemplate,
+  History,
 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import * as Dropdown from "@radix-ui/react-dropdown-menu";
@@ -336,6 +338,7 @@ export default function EditorLayout() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [exportOpen, setExportOpen] = useState(false);
   const [shareOpen, setShareOpen] = useState(false);
+  const [promptHistoryOpen, setPromptHistoryOpen] = useState(false);
   const [editingTitle, setEditingTitle] = useState(false);
   const [convertExcalidrawLoading, setConvertExcalidrawLoading] = useState(false);
   const titleInputRef = useRef<HTMLInputElement>(null);
@@ -660,6 +663,14 @@ export default function EditorLayout() {
               </button>
               <button
                 type="button"
+                onClick={() => setPromptHistoryOpen(true)}
+                className="p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
+                title="Prompt history"
+              >
+                <History className="w-4 h-4 text-gray-500 dark:text-gray-400" />
+              </button>
+              <button
+                type="button"
                 onClick={() => setPresentationMode(true)}
                 className="p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
                 title="Present (P)"
@@ -777,6 +788,13 @@ export default function EditorLayout() {
                     )}
                     <Dropdown.Item
                       className="px-3 py-2 text-xs text-gray-700 dark:text-gray-200 hover:bg-violet-50 dark:hover:bg-violet-900/20 outline-none cursor-pointer flex items-center gap-2"
+                      onSelect={() => setPromptHistoryOpen(true)}
+                    >
+                      <History className="w-3.5 h-3.5" />
+                      Prompt history
+                    </Dropdown.Item>
+                    <Dropdown.Item
+                      className="px-3 py-2 text-xs text-gray-700 dark:text-gray-200 hover:bg-violet-50 dark:hover:bg-violet-900/20 outline-none cursor-pointer flex items-center gap-2"
                       onSelect={() => router.push("/ai-diagram")}
                     >
                       <Wand2 className="w-3.5 h-3.5" />
@@ -860,6 +878,7 @@ export default function EditorLayout() {
         <DailyNotesPanel />
         <ExportImportPanel open={exportOpen} onClose={() => setExportOpen(false)} />
         <SharePanel open={shareOpen} onClose={() => setShareOpen(false)} />
+        <PromptHistoryPanel open={promptHistoryOpen} onOpenChange={setPromptHistoryOpen} />
         <PresentationFlowEditor />
       </div>
     </ThemeProvider>
