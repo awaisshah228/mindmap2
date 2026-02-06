@@ -14,6 +14,7 @@ import { PresentationFlowEditor } from "@/components/panels/PresentationMode";
 import { SettingsPanel } from "@/components/panels/SettingsPanel";
 import { DailyNotesPanel } from "@/components/panels/DailyNotesPanel";
 import { ExportImportPanel } from "@/components/panels/ExportImportPanel";
+import { SharePanel } from "@/components/panels/SharePanel";
 import { ThemeProvider } from "@/components/panels/ThemeProvider";
 import {
   Menu,
@@ -50,6 +51,7 @@ export default function EditorLayout() {
   const isMobile = useMediaQuery("(max-width: 768px)");
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [exportOpen, setExportOpen] = useState(false);
+  const [shareOpen, setShareOpen] = useState(false);
   const [editingTitle, setEditingTitle] = useState(false);
   const titleInputRef = useRef<HTMLInputElement>(null);
 
@@ -209,7 +211,9 @@ export default function EditorLayout() {
               <AuthStrip />
               <button
                 type="button"
+                onClick={() => setShareOpen(true)}
                 className="px-4 py-1.5 rounded-lg bg-violet-600 hover:bg-violet-500 text-white text-sm font-medium"
+                title="Share"
               >
                 Share
               </button>
@@ -236,6 +240,7 @@ export default function EditorLayout() {
         <SettingsPanel />
         <DailyNotesPanel />
         <ExportImportPanel open={exportOpen} onClose={() => setExportOpen(false)} />
+        <SharePanel open={shareOpen} onClose={() => setShareOpen(false)} />
         <PresentationFlowEditor />
       </div>
     </ThemeProvider>

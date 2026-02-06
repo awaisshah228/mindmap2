@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Panel, useStore, useStoreApi } from "@xyflow/react";
-import { Settings2, ArrowRight, ArrowDown, ArrowLeft, ArrowUp, Layout, X, PanelRight, Save, Check } from "lucide-react";
+import { Settings2, ArrowRight, ArrowDown, ArrowLeft, ArrowUp, Layout, PanelRight, Save, Check, Minimize2 } from "lucide-react";
 import { useCanvasStore } from "@/lib/store/canvas-store";
 import {
   ALGORITHM_FAMILIES,
@@ -142,10 +142,10 @@ export function MindMapLayoutPanel({
             type="button"
             onClick={() => setPanelVisible(false)}
             className="p-1 rounded hover:bg-gray-700 text-gray-400 hover:text-gray-200 transition-colors"
-            title="Hide panel"
-            aria-label="Hide panel"
+            title="Minimize (collapse to button)"
+            aria-label="Minimize layout panel"
           >
-            <X className="w-4 h-4" />
+            <Minimize2 className="w-4 h-4" />
           </button>
         </div>
         <div className="space-y-3">
