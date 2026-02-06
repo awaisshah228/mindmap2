@@ -14,6 +14,10 @@ import type { Node, Edge } from "@xyflow/react";
 import { applyNodesAndEdgesInChunks } from "@/lib/chunked-nodes";
 import { parseStreamingDiagramBuffer } from "@/lib/ai/streaming-json-parser";
 
+/** Module-level refs so loadProjectContentFromStream and saveNow can sync with auto-save. */
+const lastSavedPayloadRef = { current: "" };
+const lastPatchAtRef = { current: 0 };
+
 /** Load one project's diagram from GET /api/projects/[id]?stream=1 and apply to canvas in chunks. */
 async function loadProjectContentFromStream(projectId: string): Promise<void> {
   const res = await fetch(`/api/projects/${projectId}?stream=1`, { credentials: "include" });
@@ -80,6 +84,8 @@ async function loadProjectContentFromStream(projectId: string): Promise<void> {
       nodeNotes?: Record<string, string>;
       nodeTasks?: Record<string, unknown>;
       nodeAttachments?: Record<string, unknown>;
+      excalidrawData?: unknown;
+      drawioData?: string | null;
     };
     const nodes = Array.isArray(data.nodes) ? data.nodes : [];
     const edges = Array.isArray(data.edges) ? data.edges : [];
@@ -111,6 +117,27 @@ async function loadProjectContentFromStream(projectId: string): Promise<void> {
     if (data.nodeAttachments && typeof data.nodeAttachments === "object") {
       useCanvasStore.setState({ nodeAttachments: data.nodeAttachments as Project["nodeAttachments"] });
     }
+    if (data.excalidrawData !== undefined) {
+      useCanvasStore.getState().setExcalidrawData(data.excalidrawData ?? null);
+    }
+    if (data.drawioData !== undefined) {
+      useCanvasStore.getState().setDrawioData(data.drawioData ?? null);
+    }
+    // Mark as "already saved" so save effect skips redundant PATCH right after load
+    const s = useCanvasStore.getState();
+    const active = s.projects.find((p) => p.id === projectId);
+    const payload = {
+      name: active?.name,
+      nodes: s.nodes,
+      edges: s.edges,
+      viewport: active?.viewport,
+      nodeNotes: s.nodeNotes,
+      nodeTasks: s.nodeTasks,
+      nodeAttachments: s.nodeAttachments,
+      excalidrawData: s.excalidrawData ?? undefined,
+      drawioData: s.drawioData ?? undefined,
+    };
+    lastSavedPayloadRef.current = JSON.stringify(payload);
   } catch {
     // keep streamed state if final parse fails
   }
@@ -324,6 +351,8 @@ export function useProjectPersistence() {
                   nodeNotes: p.nodeNotes,
                   nodeTasks: p.nodeTasks,
                   nodeAttachments: p.nodeAttachments,
+                  excalidrawData: (p as Project).excalidrawData ?? null,
+                  drawioData: (p as Project).drawioData ?? null,
                   persistenceSource: "cloud",
                 });
                 const { setNodes, setEdges } = useCanvasStore.getState();
@@ -345,6 +374,8 @@ export function useProjectPersistence() {
                   nodeNotes: localProj.nodeNotes,
                   nodeTasks: localProj.nodeTasks,
                   nodeAttachments: localProj.nodeAttachments,
+                  excalidrawData: localProj.excalidrawData ?? null,
+                  drawioData: localProj.drawioData ?? null,
                   persistenceSource: "local",
                 });
                 saveProjects([localProj]);
@@ -363,6 +394,8 @@ export function useProjectPersistence() {
             nodeNotes: active.nodeNotes,
             nodeTasks: active.nodeTasks,
             nodeAttachments: active.nodeAttachments,
+            excalidrawData: active.excalidrawData ?? null,
+            drawioData: active.drawioData ?? null,
             persistenceSource: "cloud",
           });
         })
@@ -399,6 +432,8 @@ export function useProjectPersistence() {
             nodeNotes: active.nodeNotes,
             nodeTasks: active.nodeTasks,
             nodeAttachments: active.nodeAttachments,
+            excalidrawData: active.excalidrawData ?? null,
+            drawioData: active.drawioData ?? null,
             persistenceSource: "local",
           });
           const { setNodes, setEdges } = useCanvasStore.getState();
@@ -439,31 +474,41 @@ export function useProjectPersistence() {
       nodeNotes: active.nodeNotes,
       nodeTasks: active.nodeTasks,
       nodeAttachments: active.nodeAttachments,
+      excalidrawData: active.excalidrawData ?? null,
+      drawioData: active.drawioData ?? null,
       persistenceSource: "local",
     });
     const { setNodes, setEdges } = useCanvasStore.getState();
     applyNodesAndEdgesInChunks(setNodes, setEdges, active.nodes, active.edges);
   }, [sessionStatus, userId]);
 
-  // When on cloud and active project has no diagram data (metadata-only list), stream load it and apply in chunks.
+  // When on cloud and active project has no diagram data (metadata-only list), stream load it once.
+  const streamLoadedIds = useRef<Set<string>>(new Set());
   const persistenceSource = useCanvasStore((s) => s.persistenceSource);
   const activeProjectId = useCanvasStore((s) => s.activeProjectId);
   const projects = useCanvasStore((s) => s.projects);
   useEffect(() => {
-    if (persistenceSource !== "cloud" || !activeProjectId) return;
+    if (persistenceSource !== "cloud" || !activeProjectId || !isApiProjectId(activeProjectId)) return;
+    if (streamLoadedIds.current.has(activeProjectId)) return;
     const active = projects.find((p) => p.id === activeProjectId);
     if (!active || (Array.isArray(active.nodes) && active.nodes.length > 0)) return;
+    streamLoadedIds.current.add(activeProjectId);
     loadProjectContentFromStream(activeProjectId);
   }, [persistenceSource, activeProjectId, projects]);
 
-  // Auto-save canvas data on change (debounced).
+  // Auto-save: frequent local updates, infrequent cloud PATCH. Only PATCH when data changed.
+  const LOCAL_SAVE_DEBOUNCE_MS = 2000; // Update in-memory + localStorage every 2s after last change
+  const CLOUD_PATCH_INTERVAL_MS = 30000; // PATCH to API at most every 30s
   const saveTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
+  const lastActiveProjectIdRef = useRef<string>("");
   const initialSave = useRef(true);
   const nodes = useCanvasStore((s) => s.nodes);
   const edges = useCanvasStore((s) => s.edges);
   const nodeNotes = useCanvasStore((s) => s.nodeNotes);
   const nodeTasks = useCanvasStore((s) => s.nodeTasks);
   const nodeAttachments = useCanvasStore((s) => s.nodeAttachments);
+  const excalidrawData = useCanvasStore((s) => s.excalidrawData);
+  const drawioData = useCanvasStore((s) => s.drawioData);
 
   useEffect(() => {
     if (!hydrated.current) return;
@@ -472,46 +517,105 @@ export function useProjectPersistence() {
       return;
     }
 
+    // Reset "saved" state when switching projects so we don't compare against wrong project
+    const pid = activeProjectId ?? "";
+    if (pid !== lastActiveProjectIdRef.current) {
+      lastActiveProjectIdRef.current = pid;
+      lastSavedPayloadRef.current = "";
+    }
+
     useCanvasStore.setState({ hasUnsavedChanges: true });
 
     clearTimeout(saveTimer.current);
     saveTimer.current = setTimeout(() => {
       const s = useCanvasStore.getState();
       const now = Date.now();
+      const active = s.projects.find((p) => p.id === s.activeProjectId);
+      const payload = {
+        name: active?.name,
+        nodes: s.nodes,
+        edges: s.edges,
+        viewport: active?.viewport,
+        nodeNotes: s.nodeNotes,
+        nodeTasks: s.nodeTasks,
+        nodeAttachments: s.nodeAttachments,
+        excalidrawData: s.excalidrawData ?? undefined,
+        drawioData: s.drawioData ?? undefined,
+      };
+      const payloadStr = JSON.stringify(payload);
+
+      // Skip entirely if nothing changed (no in-memory update, no PATCH)
+      if (payloadStr === lastSavedPayloadRef.current) {
+        useCanvasStore.setState({ hasUnsavedChanges: false });
+        return;
+      }
+
       const updatedProjects = s.projects.map((p) =>
         p.id === s.activeProjectId
-          ? { ...p, nodes: s.nodes, edges: s.edges, nodeNotes: s.nodeNotes, nodeTasks: s.nodeTasks, nodeAttachments: s.nodeAttachments, updatedAt: now }
+          ? { ...p, nodes: s.nodes, edges: s.edges, nodeNotes: s.nodeNotes, nodeTasks: s.nodeTasks, nodeAttachments: s.nodeAttachments, excalidrawData: s.excalidrawData ?? undefined, drawioData: s.drawioData ?? undefined, updatedAt: now }
           : p
       );
       useCanvasStore.setState({ projects: updatedProjects, lastSavedAt: now, hasUnsavedChanges: false });
+      lastSavedPayloadRef.current = payloadStr;
 
       if (s.persistenceSource === "cloud" && s.activeProjectId && isApiProjectId(s.activeProjectId)) {
-        const active = updatedProjects.find((x) => x.id === s.activeProjectId);
+        const elapsed = now - lastPatchAtRef.current;
+        if (elapsed < CLOUD_PATCH_INTERVAL_MS) {
+          // Reschedule PATCH after min interval; use fresh state when it runs
+          const pid = s.activeProjectId;
+          saveTimer.current = setTimeout(() => {
+            const fresh = useCanvasStore.getState();
+            if (fresh.activeProjectId !== pid) return; // Switched project
+            const freshActive = fresh.projects.find((p) => p.id === pid);
+            const freshPayload = {
+              name: freshActive?.name,
+              nodes: fresh.nodes,
+              edges: fresh.edges,
+              viewport: freshActive?.viewport,
+              nodeNotes: fresh.nodeNotes,
+              nodeTasks: fresh.nodeTasks,
+              nodeAttachments: fresh.nodeAttachments,
+              excalidrawData: fresh.excalidrawData ?? undefined,
+              drawioData: fresh.drawioData ?? undefined,
+            };
+            const freshStr = JSON.stringify(freshPayload);
+            if (freshStr === lastSavedPayloadRef.current) return;
+            lastSavedPayloadRef.current = freshStr;
+            lastPatchAtRef.current = Date.now();
+            fetch(`/api/projects/${pid}`, {
+              method: "PATCH",
+              headers: { "Content-Type": "application/json" },
+              credentials: "include",
+              body: JSON.stringify(freshPayload),
+            })
+              .then((r) => { if (!r.ok) throw new Error("Save failed"); })
+              .catch(() => {
+                useCanvasStore.setState({ persistenceSource: "local" });
+                saveProjects(fresh.projects);
+                lastSavedPayloadRef.current = "";
+              });
+          }, CLOUD_PATCH_INTERVAL_MS - elapsed);
+          return;
+        }
+        lastPatchAtRef.current = now;
         fetch(`/api/projects/${s.activeProjectId}`, {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
           credentials: "include",
-          body: JSON.stringify({
-            name: active?.name,
-            nodes: s.nodes,
-            edges: s.edges,
-            viewport: active?.viewport,
-            nodeNotes: s.nodeNotes,
-            nodeTasks: s.nodeTasks,
-            nodeAttachments: s.nodeAttachments,
-          }),
+          body: JSON.stringify(payload),
         })
           .then((r) => { if (!r.ok) throw new Error("Save failed"); })
           .catch(() => {
             useCanvasStore.setState({ persistenceSource: "local" });
             saveProjects(updatedProjects);
+            lastSavedPayloadRef.current = "";
           });
       } else {
         saveProjects(updatedProjects);
       }
-    }, 2000);
+    }, LOCAL_SAVE_DEBOUNCE_MS);
     return () => clearTimeout(saveTimer.current);
-  }, [nodes, edges, nodeNotes, nodeTasks, nodeAttachments, activeProjectId, persistenceSource]);
+  }, [nodes, edges, nodeNotes, nodeTasks, nodeAttachments, activeProjectId, persistenceSource, excalidrawData, drawioData]);
 
   // Auto-save settings on change
   const theme = useCanvasStore((s) => s.theme);
@@ -535,7 +639,7 @@ export function useProjectPersistence() {
       const now = Date.now();
       const updatedProjects = s.projects.map((p) =>
         p.id === s.activeProjectId
-          ? { ...p, nodes: s.nodes, edges: s.edges, nodeNotes: s.nodeNotes, nodeTasks: s.nodeTasks, nodeAttachments: s.nodeAttachments, updatedAt: now }
+          ? { ...p, nodes: s.nodes, edges: s.edges, nodeNotes: s.nodeNotes, nodeTasks: s.nodeTasks, nodeAttachments: s.nodeAttachments, excalidrawData: s.excalidrawData ?? undefined, drawioData: s.drawioData ?? undefined, updatedAt: now }
           : p
       );
       saveProjects(updatedProjects);
@@ -555,33 +659,51 @@ export function saveNow() {
   const now = Date.now();
   const updatedProjects = s.projects.map((p) =>
     p.id === s.activeProjectId
-      ? { ...p, nodes: s.nodes, edges: s.edges, nodeNotes: s.nodeNotes, nodeTasks: s.nodeTasks, nodeAttachments: s.nodeAttachments, updatedAt: now }
+          ? { ...p, nodes: s.nodes, edges: s.edges, nodeNotes: s.nodeNotes, nodeTasks: s.nodeTasks, nodeAttachments: s.nodeAttachments, excalidrawData: s.excalidrawData ?? undefined, drawioData: s.drawioData ?? undefined, updatedAt: now }
       : p
   );
   useCanvasStore.setState({ projects: updatedProjects, lastSavedAt: now, hasUnsavedChanges: false });
 
   if (s.persistenceSource === "cloud" && isApiProjectId(s.activeProjectId)) {
     const active = updatedProjects.find((x) => x.id === s.activeProjectId);
+    const payload = {
+      name: active?.name,
+      nodes: s.nodes,
+      edges: s.edges,
+      viewport: active?.viewport,
+      nodeNotes: s.nodeNotes,
+      nodeTasks: s.nodeTasks,
+      nodeAttachments: s.nodeAttachments,
+      excalidrawData: s.excalidrawData ?? undefined,
+      drawioData: s.drawioData ?? undefined,
+    };
     fetch(`/api/projects/${s.activeProjectId}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       credentials: "include",
-      body: JSON.stringify({
-        name: active?.name,
-        nodes: s.nodes,
-        edges: s.edges,
-        viewport: active?.viewport,
-        nodeNotes: s.nodeNotes,
-        nodeTasks: s.nodeTasks,
-        nodeAttachments: s.nodeAttachments,
-      }),
+      body: JSON.stringify(payload),
     })
-      .then((r) => { if (!r.ok) throw new Error("Save failed"); })
+      .then((r) => {
+        if (!r.ok) throw new Error("Save failed");
+        lastSavedPayloadRef.current = JSON.stringify(payload);
+        lastPatchAtRef.current = now;
+      })
       .catch(() => {
         useCanvasStore.setState({ persistenceSource: "local" });
         saveProjects(updatedProjects);
       });
   } else {
+    lastSavedPayloadRef.current = JSON.stringify({
+      name: updatedProjects.find((x) => x.id === s.activeProjectId)?.name,
+      nodes: s.nodes,
+      edges: s.edges,
+      viewport: updatedProjects.find((x) => x.id === s.activeProjectId)?.viewport,
+      nodeNotes: s.nodeNotes,
+      nodeTasks: s.nodeTasks,
+      nodeAttachments: s.nodeAttachments,
+      excalidrawData: s.excalidrawData ?? undefined,
+      drawioData: s.drawioData ?? undefined,
+    });
     saveProjects(updatedProjects);
   }
 }

@@ -46,6 +46,7 @@ function MindMapNode({ id, data, selected }: NodeProps) {
   const node = getNode(id);
   const addAndLayout = useMindMapLayout();
   const pushUndo = useCanvasStore((s) => s.pushUndo);
+  const router = useRouter();
   const updateNodeData = useMindMapUpdateNodeData();
   // Avoid calling getEdges() on every render — memoize derived values
   const { childCount, hasChildren, branchStyle } = useMemo(() => {
@@ -61,7 +62,6 @@ function MindMapNode({ id, data, selected }: NodeProps) {
   const customIcon = data.customIcon as string | undefined;
   const iconDef = getIconById(data.icon as string);
   const IconComponent = iconDef?.Icon;
-  const router = useRouter();
   const presentationMode = useCanvasStore((s) => s.presentationMode);
   const activeTool = useCanvasStore((s) => s.activeTool);
 
@@ -358,9 +358,7 @@ function MindMapNode({ id, data, selected }: NodeProps) {
                     type="button"
                     onClick={() =>
                       router.push(
-                        `/ai-diagram?mode=mindmap-refine&nodeId=${encodeURIComponent(
-                          id
-                        )}&label=${encodeURIComponent(label)}`
+                        `/ai-diagram?mode=mindmap-refine&nodeId=${encodeURIComponent(id)}&label=${encodeURIComponent(label)}`
                       )
                     }
                     className="w-full flex items-center gap-2 px-3 py-2 text-sm text-violet-700 hover:bg-violet-50 rounded-md text-left"
@@ -391,9 +389,7 @@ function MindMapNode({ id, data, selected }: NodeProps) {
                     type="button"
                     onClick={() =>
                       router.push(
-                        `/ai-diagram?mode=mindmap-refine&nodeId=${encodeURIComponent(
-                          id
-                        )}&label=${encodeURIComponent(label)}`
+                        `/ai-diagram?mode=mindmap-refine&nodeId=${encodeURIComponent(id)}&label=${encodeURIComponent(label)}`
                       )
                     }
                     className="w-full flex items-center gap-2 px-3 py-2 text-sm text-violet-700 hover:bg-violet-50 rounded-md text-left"

@@ -83,6 +83,8 @@ export async function POST(request: Request) {
       nodeNotes: body.nodeNotes ?? {},
       nodeTasks: body.nodeTasks ?? {},
       nodeAttachments: body.nodeAttachments ?? {},
+      excalidrawData: null,
+      drawioData: null,
       isFavorite: body.isFavorite ?? false,
     })
     .returning();

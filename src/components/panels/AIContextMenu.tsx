@@ -33,22 +33,16 @@ export function AIContextMenu({ nodeId, x, y, onClose }: AIContextMenuProps) {
     async (promptTemplate: string, promptId: string) => {
       setLoading(promptId);
 
-      // For mind map nodes, use the refine route
       if (node?.type === "mindMap") {
         router.push(
-          `/ai-diagram?mode=mindmap-refine&nodeId=${encodeURIComponent(
-            nodeId
-          )}&label=${encodeURIComponent(label)}`
+          `/ai-diagram?mode=mindmap-refine&nodeId=${encodeURIComponent(nodeId)}&label=${encodeURIComponent(label)}`
         );
         onClose();
         return;
       }
 
-      // For other nodes, navigate to AI diagram page with the prompt pre-filled
       const resolvedPrompt = promptTemplate.replace(/\{label\}/g, label);
-      router.push(
-        `/ai-diagram?prompt=${encodeURIComponent(resolvedPrompt)}`
-      );
+      router.push(`/ai-diagram?prompt=${encodeURIComponent(resolvedPrompt)}`);
       onClose();
     },
     [nodeId, label, node, router, onClose]

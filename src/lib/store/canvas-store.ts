@@ -88,6 +88,14 @@ export const LLM_MODELS: LLMModel[] = [
   { id: "gemini-2.5-pro-preview-06-05", label: "Gemini 2.5 Pro", provider: "google" },
 ];
 
+/** Excalidraw scene saved with the project (when canvas mode is or was Excalidraw). */
+export interface ExcalidrawScene {
+  elements: unknown[];
+  appState?: Record<string, unknown>;
+  /** Binary files (images) referenced by image elements. */
+  files?: Record<string, { mimeType: string; id: string; dataURL: string }>;
+}
+
 /** A saved project (diagram + metadata) */
 export interface Project {
   id: string;
@@ -101,6 +109,10 @@ export interface Project {
   nodeTasks: Record<string, NodeTask[]>;
   nodeAttachments: Record<string, NodeAttachment[]>;
   viewport?: { x: number; y: number; zoom: number };
+  /** When set, Excalidraw canvas has content; load when switching to Excalidraw mode. */
+  excalidrawData?: ExcalidrawScene | null;
+  /** Draw.io diagram XML; load when switching to Draw.io mode. */
+  drawioData?: string | null;
 }
 
 export const DEFAULT_AI_PROMPTS: AIPromptTemplate[] = [
@@ -162,6 +174,10 @@ interface CanvasState {
   /** Node id whose details panel is open (notes/tasks/attachments) */
   detailsPanelNodeId: string | null;
 
+  /** Canvas mode: "reactflow" | "excalidraw" | "drawio" */
+  canvasMode: "reactflow" | "excalidraw" | "drawio";
+  setCanvasMode: (mode: "reactflow" | "excalidraw" | "drawio") => void;
+
   /** Presentation mode */
   presentationMode: boolean;
   presentationNodeIndex: number;
@@ -177,6 +193,10 @@ interface CanvasState {
   /** Theme */
   theme: ThemeMode;
 
+  /** React Flow canvas background: dots, lines, cross, or none */
+  canvasBackgroundVariant: "dots" | "lines" | "cross" | "none";
+  setCanvasBackgroundVariant: (v: "dots" | "lines" | "cross" | "none") => void;
+
   /** Focus mode — only show this node's branch */
   focusedBranchNodeId: string | null;
 
@@ -190,6 +210,11 @@ interface CanvasState {
   /** Daily notes */
   dailyNotes: Record<string, string>; // key = YYYY-MM-DD
   dailyNotesOpen: boolean;
+
+  /** AI sidebar — opens on editor without routing */
+  aiSidebarOpen: boolean;
+  aiSidebarContext: { mode?: string; nodeId?: string; label?: string; prompt?: string } | null;
+  setAISidebarOpen: (open: boolean, context?: { mode?: string; nodeId?: string; label?: string; prompt?: string }) => void;
 
   /** Configurable AI prompts */
   aiPrompts: AIPromptTemplate[];
@@ -215,6 +240,12 @@ interface CanvasState {
   /** Set by persistence layer: "local" (localStorage) or "cloud" (API). */
   persistenceSource: "local" | "cloud";
   setPersistenceSource: (source: "local" | "cloud") => void;
+  /** Current Excalidraw scene (for active project); syncs to project on save / switch. */
+  excalidrawData: ExcalidrawScene | null;
+  setExcalidrawData: (data: ExcalidrawScene | null) => void;
+  /** Draw.io diagram XML (for active project); syncs to project on save / switch. */
+  drawioData: string | null;
+  setDrawioData: (data: string | null) => void;
 
   createProject: (name: string) => string;
   deleteProject: (id: string) => void;
@@ -326,6 +357,9 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
   nodeTasks: {},
   nodeAttachments: {},
   detailsPanelNodeId: null,
+  canvasMode: "reactflow" as const,
+  setCanvasMode: (mode) => set({ canvasMode: mode }),
+
   presentationMode: false,
   presentationNodeIndex: 0,
   presentationOrder: [],
@@ -333,12 +367,17 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
   searchOpen: false,
   searchQuery: "",
   theme: "light",
+  canvasBackgroundVariant: "dots",
   focusedBranchNodeId: null,
   shortcutsOpen: false,
   settingsOpen: false,
   settingsInitialTab: null,
   dailyNotes: {},
   dailyNotesOpen: false,
+  aiSidebarOpen: false,
+  aiSidebarContext: null as { mode?: string; nodeId?: string; label?: string; prompt?: string } | null,
+  setAISidebarOpen: (open, context) =>
+    set({ aiSidebarOpen: open, aiSidebarContext: open && context ? context : null }),
   aiPrompts: DEFAULT_AI_PROMPTS,
   llmProvider: "openrouter" as LLMProvider,
   llmModel: "openai/gpt-4o-mini",
@@ -358,6 +397,10 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
   activeProjectId: null,
   persistenceSource: "local",
   setPersistenceSource: (source) => set({ persistenceSource: source }),
+  excalidrawData: null,
+  setExcalidrawData: (data) => set({ excalidrawData: data }),
+  drawioData: null,
+  setDrawioData: (data) => set({ drawioData: data }),
 
   createProject: (name) => {
     const id = `proj-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
@@ -374,7 +417,7 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
       nodeTasks: {},
       nodeAttachments: {},
     };
-    set((s) => ({ projects: [project, ...s.projects], activeProjectId: id, nodes: [], edges: [], nodeNotes: {}, nodeTasks: {}, nodeAttachments: {} }));
+    set((s) => ({ projects: [project, ...s.projects], activeProjectId: id, nodes: [], edges: [], nodeNotes: {}, nodeTasks: {}, nodeAttachments: {}, excalidrawData: null, drawioData: null }));
     return id;
   },
 
@@ -392,9 +435,11 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
           nodeNotes: next.nodeNotes,
           nodeTasks: next.nodeTasks,
           nodeAttachments: next.nodeAttachments,
+          excalidrawData: next.excalidrawData ?? null,
+          drawioData: next.drawioData ?? null,
         });
       } else {
-        set({ projects: remaining, activeProjectId: null, nodes: [], edges: [], nodeNotes: {}, nodeTasks: {}, nodeAttachments: {} });
+        set({ projects: remaining, activeProjectId: null, nodes: [], edges: [], nodeNotes: {}, nodeTasks: {}, nodeAttachments: {}, excalidrawData: null, drawioData: null });
       }
     } else {
       set({ projects: remaining });
@@ -419,6 +464,8 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
       nodeNotes: { ...src.nodeNotes },
       nodeTasks: JSON.parse(JSON.stringify(src.nodeTasks)),
       nodeAttachments: JSON.parse(JSON.stringify(src.nodeAttachments)),
+      excalidrawData: src.excalidrawData ? JSON.parse(JSON.stringify(src.excalidrawData)) : undefined,
+      drawioData: src.drawioData ?? undefined,
     };
     set((s2) => ({ projects: [dup, ...s2.projects] }));
   },
@@ -434,7 +481,7 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
     if (s.activeProjectId) {
       const updated = s.projects.map((p) =>
         p.id === s.activeProjectId
-          ? { ...p, nodes: s.nodes, edges: s.edges, nodeNotes: s.nodeNotes, nodeTasks: s.nodeTasks, nodeAttachments: s.nodeAttachments, updatedAt: Date.now() }
+          ? { ...p, nodes: s.nodes, edges: s.edges, nodeNotes: s.nodeNotes, nodeTasks: s.nodeTasks, nodeAttachments: s.nodeAttachments, excalidrawData: s.excalidrawData ?? undefined, drawioData: s.drawioData ?? undefined, updatedAt: Date.now() }
           : p
       );
       const target = updated.find((p) => p.id === id);
@@ -447,6 +494,8 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
           nodeNotes: target.nodeNotes,
           nodeTasks: target.nodeTasks,
           nodeAttachments: target.nodeAttachments,
+          excalidrawData: target.excalidrawData ?? null,
+          drawioData: target.drawioData ?? null,
           undoStack: [],
           redoStack: [],
         });
@@ -464,6 +513,8 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
           nodeNotes: target.nodeNotes,
           nodeTasks: target.nodeTasks,
           nodeAttachments: target.nodeAttachments,
+          excalidrawData: target.excalidrawData ?? null,
+          drawioData: target.drawioData ?? null,
           undoStack: [],
           redoStack: [],
         });
@@ -485,7 +536,7 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
     set({
       projects: s.projects.map((p) =>
         p.id === s.activeProjectId
-          ? { ...p, nodes: s.nodes, edges: s.edges, nodeNotes: s.nodeNotes, nodeTasks: s.nodeTasks, nodeAttachments: s.nodeAttachments, updatedAt: Date.now() }
+          ? { ...p, nodes: s.nodes, edges: s.edges, nodeNotes: s.nodeNotes, nodeTasks: s.nodeTasks, nodeAttachments: s.nodeAttachments, excalidrawData: s.excalidrawData ?? undefined, drawioData: s.drawioData ?? undefined, updatedAt: Date.now() }
           : p
       ),
     });
@@ -554,6 +605,7 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
   setSearchQuery: (query) => set({ searchQuery: query }),
 
   setTheme: (theme) => set({ theme }),
+  setCanvasBackgroundVariant: (v) => set({ canvasBackgroundVariant: v }),
 
   setFocusedBranchNodeId: (id) => set({ focusedBranchNodeId: id }),
 

@@ -32,6 +32,8 @@ export async function GET(request: NextRequest, { params }: Params) {
     nodeNotes: doc.nodeNotes ?? {},
     nodeTasks: doc.nodeTasks ?? {},
     nodeAttachments: doc.nodeAttachments ?? {},
+    excalidrawData: doc.excalidrawData ?? undefined,
+    drawioData: doc.drawioData ?? undefined,
     isFavorite: doc.isFavorite ?? false,
     createdAt: doc.createdAt ? new Date(doc.createdAt).getTime() : Date.now(),
     updatedAt: doc.updatedAt ? new Date(doc.updatedAt).getTime() : Date.now(),
@@ -74,6 +76,8 @@ export async function PATCH(request: Request, { params }: Params) {
     nodeNotes?: Record<string, string>;
     nodeTasks?: Record<string, unknown>;
     nodeAttachments?: Record<string, unknown>;
+    excalidrawData?: { elements: unknown[]; appState?: Record<string, unknown> } | null;
+    drawioData?: string | null;
     isFavorite?: boolean;
   } = {};
   try {
@@ -92,6 +96,8 @@ export async function PATCH(request: Request, { params }: Params) {
       ...(body.nodeNotes !== undefined && { nodeNotes: body.nodeNotes }),
       ...(body.nodeTasks !== undefined && { nodeTasks: body.nodeTasks }),
       ...(body.nodeAttachments !== undefined && { nodeAttachments: body.nodeAttachments }),
+      ...(body.excalidrawData !== undefined && { excalidrawData: body.excalidrawData }),
+      ...(body.drawioData !== undefined && { drawioData: body.drawioData }),
       ...(body.isFavorite !== undefined && { isFavorite: body.isFavorite }),
       updatedAt: new Date(),
     })
@@ -111,6 +117,8 @@ export async function PATCH(request: Request, { params }: Params) {
     nodeNotes: updated.nodeNotes ?? {},
     nodeTasks: updated.nodeTasks ?? {},
     nodeAttachments: updated.nodeAttachments ?? {},
+    excalidrawData: updated.excalidrawData ?? undefined,
+    drawioData: updated.drawioData ?? undefined,
     isFavorite: updated.isFavorite ?? false,
     createdAt: updated.createdAt ? new Date(updated.createdAt).getTime() : Date.now(),
     updatedAt: updated.updatedAt ? new Date(updated.updatedAt).getTime() : Date.now(),

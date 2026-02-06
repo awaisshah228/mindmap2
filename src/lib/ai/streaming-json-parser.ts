@@ -133,3 +133,63 @@ export function parseStreamingDiagramBuffer(buffer: string): StreamingParseResul
 
   return { nodes, edges, phase };
 }
+
+/** Result for parsing streaming elements array (Draw.io / Excalidraw skeleton format). */
+export interface StreamingElementsParseResult {
+  elements: Record<string, unknown>[];
+  done: boolean;
+}
+
+/**
+ * Parse a streaming JSON array of elements (e.g. [ {...}, {...} ]).
+ * Extracts complete objects as they stream in.
+ * Handles both raw array [ {...} ] and wrapped { "elements": [ {...} ] }.
+ */
+export function parseStreamingElementsBuffer(buffer: string): StreamingElementsParseResult {
+  const elements: Record<string, unknown>[] = [];
+  const trimmed = buffer.trim();
+
+  // Try wrapped format first: { "elements": [ ... ] }
+  const elementsKey = '"elements"';
+  const elementsIdx = trimmed.indexOf(elementsKey);
+  if (elementsIdx !== -1) {
+    const bracketStart = trimmed.indexOf("[", elementsIdx + elementsKey.length);
+    if (bracketStart === -1) return { elements: [], done: false };
+    let pos = bracketStart + 1;
+    while (pos < trimmed.length) {
+      pos = skipWhitespaceAndComma(trimmed, pos);
+      if (pos >= trimmed.length) break;
+      if (trimmed[pos] === "]") return { elements, done: true };
+      const end = findCompleteObject(trimmed, pos);
+      if (end === -1) break;
+      try {
+        const obj = JSON.parse(trimmed.slice(pos, end)) as Record<string, unknown>;
+        if (obj && typeof obj === "object" && "type" in obj) elements.push(obj);
+      } catch {
+        /* skip */
+      }
+      pos = end;
+    }
+    return { elements, done: false };
+  }
+
+  // Raw array: [ {...}, {...} ]
+  const arrayStart = trimmed.indexOf("[");
+  if (arrayStart === -1) return { elements: [], done: false };
+  let pos = arrayStart + 1;
+  while (pos < trimmed.length) {
+    pos = skipWhitespaceAndComma(trimmed, pos);
+    if (pos >= trimmed.length) break;
+    if (trimmed[pos] === "]") return { elements, done: true };
+    const end = findCompleteObject(trimmed, pos);
+    if (end === -1) break;
+    try {
+      const obj = JSON.parse(trimmed.slice(pos, end)) as Record<string, unknown>;
+      if (obj && typeof obj === "object" && "type" in obj) elements.push(obj);
+    } catch {
+      /* skip */
+    }
+    pos = end;
+  }
+  return { elements, done: false };
+}

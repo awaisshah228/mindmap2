@@ -17,6 +17,7 @@ export function SharePanel({ open, onClose }: SharePanelProps) {
   const nodeNotes = useCanvasStore((s) => s.nodeNotes);
   const nodeTasks = useCanvasStore((s) => s.nodeTasks);
   const activeProjectId = useCanvasStore((s) => s.activeProjectId);
+  const canvasMode = useCanvasStore((s) => s.canvasMode);
   const setSettingsOpen = useCanvasStore((s) => s.setSettingsOpen);
 
   const { isSignedIn } = useUser();
@@ -43,30 +44,45 @@ export function SharePanel({ open, onClose }: SharePanelProps) {
     URL.revokeObjectURL(url);
   }, [nodes, edges, nodeNotes, nodeTasks]);
 
-  // Save as PNG (viewport capture)
+  // Save as PNG (Diagram or Excalidraw)
   const handleSaveAsImage = useCallback(async () => {
-    const el = document.querySelector(".react-flow");
-    if (!el || !(el instanceof HTMLElement)) return;
     const isDark = document.documentElement.classList.contains("dark");
-    try {
-      const dataUrl = await toPng(el, {
-        backgroundColor: isDark ? "#111827" : "#f9fafb",
-        filter: (node) => {
-          const c = node as HTMLElement;
-          if (c.classList?.contains("react-flow__controls")) return false;
-          if (c.classList?.contains("react-flow__minimap")) return false;
-          if (c.closest?.(".react-flow__panel")) return false;
-          return true;
-        },
-      });
-      const a = document.createElement("a");
-      a.href = dataUrl;
-      a.download = `diagram-${Date.now()}.png`;
-      a.click();
-    } catch (err) {
-      console.error("PNG export failed:", err);
+    const bg = isDark ? "#111827" : "#f9fafb";
+    if (canvasMode === "excalidraw") {
+      const el = document.getElementById("excalidraw-canvas-export");
+      if (!el || !(el instanceof HTMLElement)) return;
+      try {
+        const dataUrl = await toPng(el, { backgroundColor: bg });
+        const a = document.createElement("a");
+        a.href = dataUrl;
+        a.download = `excalidraw-${Date.now()}.png`;
+        a.click();
+      } catch (err) {
+        console.error("PNG export failed:", err);
+      }
+    } else {
+      const el = document.querySelector(".react-flow");
+      if (!el || !(el instanceof HTMLElement)) return;
+      try {
+        const dataUrl = await toPng(el, {
+          backgroundColor: bg,
+          filter: (node) => {
+            const c = node as HTMLElement;
+            if (c.classList?.contains("react-flow__controls")) return false;
+            if (c.classList?.contains("react-flow__minimap")) return false;
+            if (c.closest?.(".react-flow__panel")) return false;
+            return true;
+          },
+        });
+        const a = document.createElement("a");
+        a.href = dataUrl;
+        a.download = `diagram-${Date.now()}.png`;
+        a.click();
+      } catch (err) {
+        console.error("PNG export failed:", err);
+      }
     }
-  }, []);
+  }, [canvasMode]);
 
   // Copy shareable link (when signed in; include project id if cloud)
   const handleCopyLink = useCallback(async () => {

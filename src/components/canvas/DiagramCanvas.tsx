@@ -132,6 +132,7 @@ export default function DiagramCanvas() {
   const setPendingFitView = useCanvasStore((s) => (s as any).setPendingFitView);
   const setPendingFitViewNodeIds = useCanvasStore((s) => (s as any).setPendingFitViewNodeIds);
   const presentationMode = useCanvasStore((s) => s.presentationMode);
+  const canvasBackgroundVariant = useCanvasStore((s) => s.canvasBackgroundVariant);
   const presentationNodeIndex = useCanvasStore((s) => s.presentationNodeIndex);
   const reactFlowRef = useRef<ReactFlowInstance | null>(null);
 
@@ -1637,7 +1638,19 @@ export default function DiagramCanvas() {
         <EraserPreview points={isErasing ? eraserPoints : []} />
         {presentationMode
           ? <Background variant={BackgroundVariant.Dots} gap={16} size={0} color="transparent" className="!bg-white" />
-          : <Background variant={BackgroundVariant.Dots} gap={16} size={1} />
+          : canvasBackgroundVariant === "none"
+            ? null
+            : <Background
+                variant={
+                  canvasBackgroundVariant === "lines"
+                    ? BackgroundVariant.Lines
+                    : canvasBackgroundVariant === "cross"
+                      ? BackgroundVariant.Cross
+                      : BackgroundVariant.Dots
+                }
+                gap={16}
+                size={1}
+              />
         }
         {!presentationMode && (
           <MiniMap

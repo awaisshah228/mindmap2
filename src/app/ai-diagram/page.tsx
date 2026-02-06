@@ -22,7 +22,10 @@ import EditorLayout from "@/components/layout/EditorLayout";
 import { saveNow } from "@/lib/store/project-storage";
 import { Loader2, Settings } from "lucide-react";
 import { applyNodesAndEdgesInChunks } from "@/lib/chunked-nodes";
-import { parseStreamingDiagramBuffer } from "@/lib/ai/streaming-json-parser";
+import { parseStreamingDiagramBuffer, parseStreamingElementsBuffer } from "@/lib/ai/streaming-json-parser";
+import { diagramToExcalidraw } from "@/lib/excalidraw-convert";
+import { excalidrawToDrawioXml } from "@/lib/excalidraw-to-drawio";
+import { normalizeSkeletons } from "@/lib/skeleton-normalize";
 
 export const DIAGRAM_TYPE_OPTIONS = [
   { value: "auto", label: "Auto detect (default)" },
@@ -109,6 +112,8 @@ function AIDiagramPage() {
   const [diagramType, setDiagramType] = useState<DiagramTypeValue>("auto");
   const [preset, setPreset] = useState<string>("none");
   const [presetOptions, setPresetOptions] = useState<PresetOption[]>(DEFAULT_PRESET_OPTIONS);
+  /** Target canvas for AI generation: diagram (React Flow), excalidraw, or drawio. */
+  const [targetCanvas, setTargetCanvas] = useState<"reactflow" | "excalidraw" | "drawio">("reactflow");
   const router = useRouter();
 
   useEffect(() => {
@@ -123,10 +128,14 @@ function AIDiagramPage() {
       })
       .catch(() => {});
   }, []);
+
   const searchParams = useSearchParams();
   const mode = searchParams.get("mode") || "diagram";
   const focusNodeId = searchParams.get("nodeId");
   const focusNodeLabelFromQuery = searchParams.get("label") || "";
+  const urlPrompt = searchParams.get("prompt");
+  const urlPreset = searchParams.get("preset");
+  const urlDiagramType = searchParams.get("diagramType");
   const {
     addNodes,
     addEdges,
@@ -141,7 +150,26 @@ function AIDiagramPage() {
     nodes: canvasNodes,
     edges: canvasEdges,
     mindMapLayout,
+    canvasMode,
+    setCanvasMode,
+    setExcalidrawData,
+    setDrawioData,
+    setHasUnsavedChanges,
   } = useCanvasStore() as any;
+
+  // Sync target canvas from current tab when landing on AI page
+  useEffect(() => {
+    setTargetCanvas(canvasMode);
+  }, [canvasMode]);
+
+  // Initialize from URL when redirected from AI sidebar or other entry points
+  useEffect(() => {
+    if (urlPrompt) setPrompt(urlPrompt);
+    if (urlPreset) setPreset(urlPreset);
+    if (urlDiagramType && DIAGRAM_TYPE_OPTIONS.some((o) => o.value === urlDiagramType)) {
+      setDiagramType(urlDiagramType as DiagramTypeValue);
+    }
+  }, [urlPrompt, urlPreset, urlDiagramType]);
 
   const focusNode =
     mode === "mindmap-refine" && focusNodeId
@@ -159,14 +187,151 @@ function AIDiagramPage() {
     );
   };
 
+  /** Sync the same diagram (nodes/edges) to the Excalidraw canvas so both canvases have AI output. */
+  const syncDiagramToExcalidraw = async (nodes: Node[], edges: Edge[]) => {
+    const skeletons = diagramToExcalidraw(nodes, edges);
+    if (skeletons.length === 0) {
+      setExcalidrawData(null);
+      return;
+    }
+    const { convertToExcalidrawElements } = await import("@excalidraw/excalidraw");
+    const elements = convertToExcalidrawElements(skeletons as never[], { regenerateIds: false });
+    setExcalidrawData({ elements, appState: {} });
+    setHasUnsavedChanges(true);
+  };
+
   const handleGenerate = async () => {
-    if (!prompt.trim()) return;
+    const effectivePrompt = preset !== "none"
+      ? (presetOptions.find((p) => p.value === preset)?.prompt ?? prompt)
+      : prompt;
+    if (!effectivePrompt.trim()) return;
     setLoading(true);
     setError(null);
+    const effectiveTarget = preset !== "none" ? "reactflow" : targetCanvas;
+    const targetCanvasMode = effectiveTarget;
 
     try {
       // Read LLM settings from store
       const { llmProvider, llmModel, llmApiKey, llmBaseUrl } = useCanvasStore.getState();
+
+      // ─── Draw.io: streaming generation ───
+      if (effectiveTarget === "drawio") {
+        if (!llmApiKey && !isSignedIn) {
+          setLoading(false);
+          setError("signup-or-key");
+          return;
+        }
+        const res = await fetch("/api/diagrams/generate-drawio", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          credentials: "include",
+          body: JSON.stringify({
+            prompt: effectivePrompt.trim(),
+            llmProvider,
+            llmModel,
+            llmApiKey: llmApiKey || undefined,
+          }),
+        });
+        if (!res.ok) {
+          const errData = await res.json().catch(() => ({}));
+          throw new Error(errData?.error ?? "Failed to generate Draw.io diagram");
+        }
+        if (!res.body) throw new Error("No response body");
+        const decoder = new TextDecoder();
+        let streamBuffer = "";
+        let lastElementCount = 0;
+        const reader = res.body.getReader();
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          streamBuffer += decoder.decode(value, { stream: true });
+          const parsed = parseStreamingElementsBuffer(streamBuffer);
+          if (parsed.elements.length > lastElementCount) {
+            const normalized = normalizeSkeletons(parsed.elements);
+            const xml = excalidrawToDrawioXml(normalized as Parameters<typeof excalidrawToDrawioXml>[0]);
+            setDrawioData(xml);
+            setCanvasMode("drawio");
+            lastElementCount = parsed.elements.length;
+          }
+        }
+        const finalParsed = parseStreamingElementsBuffer(streamBuffer);
+        if (finalParsed.elements.length === 0) {
+          setError("AI returned no elements. Try a different prompt.");
+          setLoading(false);
+          return;
+        }
+        const normalized = normalizeSkeletons(finalParsed.elements);
+        const xml = excalidrawToDrawioXml(normalized as Parameters<typeof excalidrawToDrawioXml>[0]);
+        setDrawioData(xml);
+        setCanvasMode("drawio");
+        setHasUnsavedChanges(true);
+        setLastAIPrompt(effectivePrompt.trim());
+        setLastAIDiagram(null);
+        saveNow();
+        setPendingFitView(true);
+        setLoading(false);
+        return;
+      }
+
+      // ─── Excalidraw: streaming generation ───
+      if (effectiveTarget === "excalidraw") {
+        if (!llmApiKey && !isSignedIn) {
+          setLoading(false);
+          setError("signup-or-key");
+          return;
+        }
+        const res = await fetch("/api/diagrams/generate-excalidraw", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          credentials: "include",
+          body: JSON.stringify({
+            prompt: effectivePrompt.trim(),
+            llmProvider,
+            llmModel,
+            llmApiKey: llmApiKey || undefined,
+          }),
+        });
+        if (!res.ok) {
+          const errData = await res.json().catch(() => ({}));
+          throw new Error(errData?.error ?? "Failed to generate Excalidraw diagram");
+        }
+        if (!res.body) throw new Error("No response body");
+        const decoder = new TextDecoder();
+        let streamBuffer = "";
+        let lastElementCount = 0;
+        const { convertToExcalidrawElements } = await import("@excalidraw/excalidraw");
+        const reader = res.body.getReader();
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          streamBuffer += decoder.decode(value, { stream: true });
+          const parsed = parseStreamingElementsBuffer(streamBuffer);
+          if (parsed.elements.length > lastElementCount) {
+            const normalized = normalizeSkeletons(parsed.elements);
+            const elements = convertToExcalidrawElements(normalized as never[], { regenerateIds: false });
+            setExcalidrawData({ elements, appState: {} });
+            setCanvasMode("excalidraw");
+            lastElementCount = parsed.elements.length;
+          }
+        }
+        const finalParsed = parseStreamingElementsBuffer(streamBuffer);
+        if (finalParsed.elements.length === 0) {
+          setError("AI returned no elements. Try a different prompt.");
+          setLoading(false);
+          return;
+        }
+        const normalized = normalizeSkeletons(finalParsed.elements);
+        const elements = convertToExcalidrawElements(normalized as never[], { regenerateIds: false });
+        setExcalidrawData({ elements, appState: {} });
+        setCanvasMode("excalidraw");
+        setHasUnsavedChanges(true);
+        setLastAIPrompt(effectivePrompt.trim());
+        setLastAIDiagram(null);
+        saveNow();
+        setPendingFitView(true);
+        setLoading(false);
+        return;
+      }
 
       const effectiveDiagramType = mode === "mindmap-refine" ? "mindmap" : diagramType;
 
@@ -363,7 +528,7 @@ function AIDiagramPage() {
           // Stream frontend LLM response: user's API key + selected provider/model; onChunk updates diagram as tokens arrive.
           const systemPrompt = buildSystemPrompt("horizontal");
           const userMessage = buildUserMessage({
-            prompt: prompt.trim(),
+            prompt: effectivePrompt.trim(),
             layoutDirection: "horizontal",
             mode,
             focusNodeId,
@@ -389,7 +554,7 @@ function AIDiagramPage() {
             headers: { "Content-Type": "application/json" },
             credentials: "include",
             body: JSON.stringify({
-              prompt: prompt.trim(),
+              prompt: effectivePrompt.trim(),
               previousPrompt: lastAIPrompt,
               previousDiagram: lastAIDiagram,
               layoutDirection: "horizontal",
@@ -745,11 +910,13 @@ function AIDiagramPage() {
           }),
           mergedDirection
         );
-        applyNodesAndEdgesInChunks(setNodes, setEdges, refineLayoutAgain.nodes, refinedEdgesAfterLayout);
+        await applyNodesAndEdgesInChunks(setNodes, setEdges, refineLayoutAgain.nodes, refinedEdgesAfterLayout);
         setPendingFitViewNodeIds(refineLayoutAgain.nodes.map((n: { id: string }) => n.id));
+        await syncDiagramToExcalidraw(refineLayoutAgain.nodes, refinedEdgesAfterLayout);
       } else if (mode === "mindmap-refine") {
-        applyNodesAndEdgesInChunks(setNodes, setEdges, layoutedNodes, layoutedEdges);
+        await applyNodesAndEdgesInChunks(setNodes, setEdges, layoutedNodes, layoutedEdges);
         setPendingFitViewNodeIds(layoutedNodes.map((n: { id: string }) => n.id));
+        await syncDiagramToExcalidraw(layoutedNodes, layoutedEdges);
       } else {
         // ─── Keep existing nodes, add AI nodes alongside them ─────────
         if (existingNodes.length > 0 && canvasBounds) {
@@ -782,24 +949,28 @@ function AIDiagramPage() {
 
           const mergedNodes: Node[] = [...(existingNodes as Node[]), ...(offsetNodes as Node[])];
           const mergedEdges: Edge[] = [...(existingEdges as Edge[]), ...(layoutedEdges as Edge[])];
-          applyNodesAndEdgesInChunks(setNodes, setEdges, mergedNodes, mergedEdges);
+          await applyNodesAndEdgesInChunks(setNodes, setEdges, mergedNodes, mergedEdges);
           setPendingFitViewNodeIds(offsetNodes.map((n: { id: string }) => n.id));
+          await syncDiagramToExcalidraw(mergedNodes, mergedEdges);
         } else {
           // Canvas is empty — apply in chunks to avoid "Maximum call stack exceeded"
-          applyNodesAndEdgesInChunks(setNodes, setEdges, layoutedNodes, layoutedEdges);
+          await applyNodesAndEdgesInChunks(setNodes, setEdges, layoutedNodes, layoutedEdges);
           setPendingFitViewNodeIds(layoutedNodes.map((n: { id: string }) => n.id));
+          await syncDiagramToExcalidraw(layoutedNodes, layoutedEdges);
         }
       }
 
-      setLastAIPrompt(prompt.trim());
+      setLastAIPrompt(effectivePrompt.trim());
       setLastAIDiagram({ nodes: layoutedNodes, edges: layoutedEdges });
 
-      // Persist so the canvas shows the generated diagram.
+      // Persist so the canvas shows the generated diagram (both Diagram and Excalidraw canvases).
       saveNow();
 
-      // Fit diagram into view. Stay on canvas (app home), do not route to landing.
+      // If user was in Excalidraw mode, switch view so they see the result there.
+      if (targetCanvasMode === "excalidraw") setCanvasMode("excalidraw");
+
+      // Fit diagram into view. Stay on ai-diagram page; user closes to go back to editor.
       setPendingFitView(true);
-      setTimeout(() => router.push("/editor"), 450);
     } catch (err) {
       const msg = err instanceof Error ? err.message : "Something went wrong";
       // For API-key-related errors, provide a friendlier message
@@ -886,6 +1057,23 @@ function AIDiagramPage() {
               </div>
             )}
             {mode !== "mindmap-refine" && (
+              <div className="space-y-1">
+                <label className="text-[11px] font-semibold text-gray-700 block">
+                  Generate for
+                </label>
+                <select
+                  value={targetCanvas}
+                  onChange={(e) => setTargetCanvas(e.target.value as "reactflow" | "excalidraw" | "drawio")}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm bg-white focus:ring-2 focus:ring-violet-500 focus:border-transparent"
+                  disabled={loading}
+                >
+                  <option value="reactflow">Diagram (React Flow)</option>
+                  <option value="excalidraw">Excalidraw</option>
+                  <option value="drawio">Draw.io</option>
+                </select>
+              </div>
+            )}
+            {mode !== "mindmap-refine" && targetCanvas === "reactflow" && (
               <>
                 <div className="space-y-1">
                   <label className="text-[11px] font-semibold text-gray-700 block">
@@ -926,24 +1114,36 @@ function AIDiagramPage() {
                     })()}
                   </div>
                 </div>
-                <div className="space-y-1">
-                  <label className="text-[11px] font-semibold text-gray-700 block">
-                    Diagram type
-                  </label>
-                  <select
-                    value={diagramType}
-                    onChange={(e) => setDiagramType(e.target.value as DiagramTypeValue)}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm bg-white focus:ring-2 focus:ring-violet-500 focus:border-transparent"
-                    disabled={loading}
-                  >
-                    {DIAGRAM_TYPE_OPTIONS.map((opt) => (
-                      <option key={opt.value} value={opt.value}>
-                        {opt.label}
-                      </option>
-                    ))}
-                  </select>
-                </div>
+                {targetCanvas === "reactflow" && (
+                  <div className="space-y-1">
+                    <label className="text-[11px] font-semibold text-gray-700 block">
+                      Diagram type
+                    </label>
+                    <select
+                      value={diagramType}
+                      onChange={(e) => setDiagramType(e.target.value as DiagramTypeValue)}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm bg-white focus:ring-2 focus:ring-violet-500 focus:border-transparent"
+                      disabled={loading}
+                    >
+                      {DIAGRAM_TYPE_OPTIONS.map((opt) => (
+                        <option key={opt.value} value={opt.value}>
+                          {opt.label}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                )}
               </>
+            )}
+            {targetCanvas === "excalidraw" && (
+              <p className="text-[11px] text-violet-700 dark:text-violet-300 bg-violet-50 dark:bg-violet-900/20 rounded-lg px-2.5 py-1.5">
+                Generating for Excalidraw (shapes, arrows). Use prompts like &quot;flowchart for user login&quot;, &quot;simple architecture diagram&quot;, or &quot;mind map about project planning&quot;.
+              </p>
+            )}
+            {targetCanvas === "drawio" && (
+              <p className="text-[11px] text-violet-700 dark:text-violet-300 bg-violet-50 dark:bg-violet-900/20 rounded-lg px-2.5 py-1.5">
+                Draw.io (dedicated AI). Flowcharts, architecture, process flows, UML. Output is Draw.io mxGraph format.
+              </p>
             )}
             <p className="text-xs text-gray-500">
               {mode === "mindmap-refine"

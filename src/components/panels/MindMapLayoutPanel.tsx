@@ -83,16 +83,17 @@ export function MindMapLayoutPanel({
     setActiveTool("select");
   }, [setNodes, setActiveTool, pushUndo]);
 
-  // Run layout on first load only for mind map diagrams (default template), never for architecture/flow/other diagrams
+  // Run layout on first load ONLY for the default mind-map template (exact 6 nodes from project-storage).
+  // Skip for AI-generated, user-edited, or any diagram that's already been layouted and saved.
+  const DEFAULT_TEMPLATE_IDS = new Set(["mind-root", "mind-goals", "mind-tasks", "mind-stakeholders", "mind-task-ideas", "mind-task-next"]);
   const hasRunInitialLayout = useRef(false);
   useEffect(() => {
     if (hasRunInitialLayout.current) return;
-    const hasMindMapRoot = nodes.some((n) => n.id === "mind-root" && n.type === "mindMap");
-    if (!hasMindMapRoot || edges.length === 0) return;
-    const layoutExcluded = new Set(["freeDraw", "edgeAnchor", "group"]);
-    const layoutableNodes = nodes.filter((n) => !layoutExcluded.has(n.type ?? ""));
-    const allLayoutableAreMindMap = layoutableNodes.length > 0 && layoutableNodes.every((n) => n.type === "mindMap");
-    if (!allLayoutableAreMindMap) return; // skip: not a pure mind map (e.g. architecture or mixed diagram)
+    const nodeIds = new Set(nodes.map((n) => n.id));
+    const isDefaultTemplate =
+      nodeIds.size === DEFAULT_TEMPLATE_IDS.size &&
+      [...DEFAULT_TEMPLATE_IDS].every((id) => nodeIds.has(id));
+    if (!isDefaultTemplate || edges.length === 0) return;
     const t = setTimeout(() => {
       hasRunInitialLayout.current = true;
       applyLayout();

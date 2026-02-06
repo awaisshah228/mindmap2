@@ -21,6 +21,8 @@ import { cn } from "@/lib/utils";
 import { useCanvasStore, type Project } from "@/lib/store/canvas-store";
 import { applyNodesAndEdgesInChunks } from "@/lib/chunked-nodes";
 import { parseStreamingDiagramBuffer } from "@/lib/ai/streaming-json-parser";
+import { getLayoutedElements } from "@/lib/layout-engine";
+import { saveNow } from "@/lib/store/project-storage";
 
 interface AppSidebarProps {
   isOpen?: boolean;
@@ -48,6 +50,7 @@ export default function AppSidebar({ isOpen = true, onClose, isMobile }: AppSide
   const activeProjectId = useCanvasStore((s) => s.activeProjectId);
   const createProject = useCanvasStore((s) => s.createProject);
   const switchProject = useCanvasStore((s) => s.switchProject);
+  const setHasUnsavedChanges = useCanvasStore((s) => s.setHasUnsavedChanges);
   const renameProject = useCanvasStore((s) => s.renameProject);
   const deleteProject = useCanvasStore((s) => s.deleteProject);
   const duplicateProject = useCanvasStore((s) => s.duplicateProject);
@@ -139,7 +142,7 @@ export default function AppSidebar({ isOpen = true, onClose, isMobile }: AppSide
         }
       }
       try {
-        const data = JSON.parse(full.trim()) as { nodes?: unknown[]; edges?: unknown[] };
+        const data = JSON.parse(full.trim()) as { nodes?: unknown[]; edges?: unknown[]; layoutDirection?: string };
         const nodes = Array.isArray(data.nodes) ? data.nodes : [];
         const edges = Array.isArray(data.edges) ? data.edges : [];
         const flatNodes = (nodes as { id: string; type?: string; position?: { x: number; y: number }; data?: Record<string, unknown>; parentId?: string }[])
@@ -160,9 +163,19 @@ export default function AppSidebar({ isOpen = true, onClose, isMobile }: AppSide
             target: e.target,
             ...(e.data && { data: e.data }),
           })) as Edge[];
-        applyNodesAndEdgesInChunks(setNodes, setEdges, flatNodes, validEdges);
+        const direction = data.layoutDirection === "vertical" ? ("TB" as const) : ("LR" as const);
+        const layoutResult = await getLayoutedElements(
+          flatNodes,
+          validEdges,
+          direction,
+          [160, 120],
+          "elk-layered"
+        );
+        await applyNodesAndEdgesInChunks(setNodes, setEdges, layoutResult.nodes, layoutResult.edges);
+        setHasUnsavedChanges(true);
+        saveNow();
         setPendingFitView(true);
-        setPendingFitViewNodeIds(flatNodes.map((n) => n.id));
+        setPendingFitViewNodeIds(layoutResult.nodes.map((n) => n.id));
       } catch {
         // keep streamed state if final parse fails
       }

@@ -1,8 +1,8 @@
 "use client";
 
 import { useCallback, useRef } from "react";
-import { Download, Upload, X, FileJson, FileText, FileCode } from "lucide-react";
-import { useReactFlow } from "@xyflow/react";
+import { Download, Upload, X, FileJson, FileText, FileCode, Image } from "lucide-react";
+import { toPng } from "html-to-image";
 import { useCanvasStore } from "@/lib/store/canvas-store";
 import { applyNodesAndEdgesInChunks } from "@/lib/chunked-nodes";
 
@@ -14,6 +14,7 @@ interface ExportImportPanelProps {
 export function ExportImportPanel({ open, onClose }: ExportImportPanelProps) {
   const nodes = useCanvasStore((s) => s.nodes);
   const edges = useCanvasStore((s) => s.edges);
+  const canvasMode = useCanvasStore((s) => s.canvasMode);
   const nodeNotes = useCanvasStore((s) => s.nodeNotes);
   const nodeTasks = useCanvasStore((s) => s.nodeTasks);
   const setNodes = useCanvasStore((s) => s.setNodes);
@@ -120,6 +121,54 @@ export function ExportImportPanel({ open, onClose }: ExportImportPanelProps) {
     URL.revokeObjectURL(url);
   }, [handleExportJSON]);
 
+  // Export as PNG (Diagram or Excalidraw)
+  const handleExportPNG = useCallback(async () => {
+    const isDark = document.documentElement.classList.contains("dark");
+    const bg = isDark ? "#111827" : "#f9fafb";
+    if (canvasMode === "excalidraw") {
+      const el = document.getElementById("excalidraw-canvas-export");
+      if (!el || !(el instanceof HTMLElement)) {
+        alert("Excalidraw canvas not found. Switch to Excalidraw view first.");
+        return;
+      }
+      try {
+        const dataUrl = await toPng(el, { backgroundColor: bg });
+        const a = document.createElement("a");
+        a.href = dataUrl;
+        a.download = `excalidraw-${Date.now()}.png`;
+        a.click();
+      } catch (err) {
+        console.error("PNG export failed:", err);
+        alert("Failed to export Excalidraw as image.");
+      }
+    } else {
+      const el = document.querySelector(".react-flow");
+      if (!el || !(el instanceof HTMLElement)) {
+        alert("Diagram canvas not found.");
+        return;
+      }
+      try {
+        const dataUrl = await toPng(el, {
+          backgroundColor: bg,
+          filter: (node) => {
+            const c = node as HTMLElement;
+            if (c.classList?.contains("react-flow__controls")) return false;
+            if (c.classList?.contains("react-flow__minimap")) return false;
+            if (c.closest?.(".react-flow__panel")) return false;
+            return true;
+          },
+        });
+        const a = document.createElement("a");
+        a.href = dataUrl;
+        a.download = `diagram-${Date.now()}.png`;
+        a.click();
+      } catch (err) {
+        console.error("PNG export failed:", err);
+        alert("Failed to export diagram as image.");
+      }
+    }
+  }, [canvasMode]);
+
   // Import JSON
   const handleImportJSON = useCallback(
     (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -179,12 +228,18 @@ export function ExportImportPanel({ open, onClose }: ExportImportPanelProps) {
             <h3 className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-3">
               Export
             </h3>
-            <div className="grid grid-cols-3 gap-2">
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
               <ExportButton
                 icon={<FileJson className="w-5 h-5" />}
                 label="JSON"
                 description="Full data"
                 onClick={handleExportJSON}
+              />
+              <ExportButton
+                icon={<Image className="w-5 h-5" />}
+                label="PNG"
+                description={canvasMode === "excalidraw" ? "Excalidraw image" : "Diagram image"}
+                onClick={handleExportPNG}
               />
               <ExportButton
                 icon={<FileText className="w-5 h-5" />}

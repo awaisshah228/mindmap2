@@ -87,6 +87,8 @@ export const documents = pgTable("documents", {
   nodeNotes: jsonb("node_notes").$type<Record<string, string>>().default({}),
   nodeTasks: jsonb("node_tasks").$type<Record<string, unknown>>().default({}),
   nodeAttachments: jsonb("node_attachments").$type<Record<string, unknown>>().default({}),
+  excalidrawData: jsonb("excalidraw_data").$type<{ elements: unknown[]; appState?: Record<string, unknown> }>(),
+  drawioData: text("drawio_data"),
   isFavorite: boolean("is_favorite").default(false),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
