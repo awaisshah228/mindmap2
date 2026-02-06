@@ -54,6 +54,7 @@ export function EditableNodeContent({
   const { updateNodeData } = useReactFlow();
   const editingNodeId = useCanvasStore((s) => s.editingNodeId);
   const setEditingNodeId = useCanvasStore((s) => s.setEditingNodeId);
+  const pushUndo = useCanvasStore((s) => s.pushUndo);
   const internalRef = useRef<HTMLDivElement>(null);
   const ref = editRef ?? internalRef;
 
@@ -90,8 +91,9 @@ export function EditableNodeContent({
   }, [nodeId, value, placeholder, updateNodeData, onEditingChange, onCommit, editOnlyViaToolbar, setEditingNodeId]);
 
   const handleFocus = useCallback(() => {
+    pushUndo();
     onEditingChange?.(true);
-  }, [onEditingChange]);
+  }, [onEditingChange, pushUndo]);
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
@@ -114,16 +116,24 @@ export function EditableNodeContent({
 
   const fontSizeClass = formatting?.fontSize ? FONT_SIZE_CLASSES[formatting.fontSize] : undefined;
 
+  const handleDoubleClickToEdit = useCallback(() => {
+    if (editOnlyViaToolbar) {
+      setEditingNodeId(nodeId);
+    }
+  }, [editOnlyViaToolbar, nodeId, setEditingNodeId]);
+
   if (editOnlyViaToolbar && !isEditing) {
     return (
       <div
         className={cn(
-          "nodrag nokey min-w-[1ch] truncate",
+          "nodrag nokey min-w-[1ch] truncate cursor-text",
           !value && "text-gray-400",
           className,
           fontSizeClass
         )}
         style={Object.keys(formatStyle).length > 0 ? formatStyle : undefined}
+        onDoubleClick={handleDoubleClickToEdit}
+        title="Double-click to edit"
       >
         {value || placeholder}
       </div>

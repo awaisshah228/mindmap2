@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, Suspense } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useCanvasStore } from "@/lib/store/canvas-store";
 import {
@@ -9,6 +9,8 @@ import {
   type LayoutDirection,
   type LayoutAlgorithm,
 } from "@/lib/layout-engine";
+import { buildSystemPrompt, buildUserMessage } from "@/lib/ai/prompt-builder";
+import { streamDiagramGeneration } from "@/lib/ai/frontend-ai";
 import EditorLayout from "@/components/layout/EditorLayout";
 import { Loader2 } from "lucide-react";
 
@@ -39,7 +41,15 @@ export const DIAGRAM_PRESETS = [
 
 export type PresetValue = (typeof DIAGRAM_PRESETS)[number]["value"];
 
-export default function AIDiagramPage() {
+export default function AIDiagramPageWrapper() {
+  return (
+    <Suspense fallback={null}>
+      <AIDiagramPage />
+    </Suspense>
+  );
+}
+
+function AIDiagramPage() {
   const [prompt, setPrompt] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -87,49 +97,86 @@ export default function AIDiagramPage() {
     setError(null);
 
     try {
-      const res = await fetch("/api/diagrams/langchain", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
+      // Read LLM settings from store
+      const { llmProvider, llmModel, llmApiKey, llmBaseUrl } = useCanvasStore.getState();
+
+      const effectiveDiagramType = mode === "mindmap-refine" ? "mindmap" : diagramType;
+
+      let full = "";
+
+      if (llmApiKey) {
+        // ─── Direct frontend call (user has API key) ──────────
+        const systemPrompt = buildSystemPrompt("horizontal");
+        const userMessage = buildUserMessage({
           prompt: prompt.trim(),
-          previousPrompt: lastAIPrompt,
-          previousDiagram: lastAIDiagram,
           layoutDirection: "horizontal",
           mode,
           focusNodeId,
-          diagramType: mode === "mindmap-refine" ? "mindmap" : diagramType,
-        }),
-      });
+          diagramType: effectiveDiagramType,
+          previousPrompt: lastAIPrompt,
+          previousDiagram: lastAIDiagram as Record<string, unknown> | null,
+        });
 
-      if (!res.ok || !res.body) {
-        let data: any = {};
-        try {
-          data = await res.json();
-        } catch {
-          // ignore JSON parse error here; we'll fall back to generic message
+        full = await streamDiagramGeneration({
+          provider: llmProvider,
+          model: llmModel,
+          apiKey: llmApiKey,
+          baseUrl: llmBaseUrl || undefined,
+          systemPrompt,
+          userMessage,
+        });
+      } else {
+        // ─── Fallback: server API route (uses server-side env keys) ──
+        const res = await fetch("/api/diagrams/langchain", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            prompt: prompt.trim(),
+            previousPrompt: lastAIPrompt,
+            previousDiagram: lastAIDiagram,
+            layoutDirection: "horizontal",
+            mode,
+            focusNodeId,
+            diagramType: effectiveDiagramType,
+            llmProvider,
+            llmModel,
+          }),
+        });
+
+        if (!res.ok || !res.body) {
+          let data: Record<string, unknown> = {};
+          try {
+            data = await res.json();
+          } catch {
+            // ignore JSON parse error here; we'll fall back to generic message
+          }
+          throw new Error((data?.error as string) || "Failed to generate diagram");
         }
-        throw new Error(data?.error || "Failed to generate diagram");
+
+        // Stream the response text (JSON built up over time for huge diagrams)
+        const reader = res.body.getReader();
+        const decoder = new TextDecoder();
+
+        // eslint-disable-next-line no-constant-condition
+        while (true) {
+          const { value, done } = await reader.read();
+          if (done) break;
+          if (value) {
+            full += decoder.decode(value, { stream: true });
+          }
+        }
+        full += decoder.decode();
       }
 
-      // Stream the response text (JSON built up over time for huge diagrams)
-      const reader = res.body.getReader();
-      const decoder = new TextDecoder();
-      let full = "";
-
-      // eslint-disable-next-line no-constant-condition
-      while (true) {
-        const { value, done } = await reader.read();
-        if (done) break;
-        if (value) {
-          full += decoder.decode(value, { stream: true });
-        }
-      }
-      full += decoder.decode();
-
-      let parsed: any;
+      let parsed: Record<string, unknown>;
       try {
-        parsed = JSON.parse(full);
-      } catch (e) {
+        // Strip markdown fences if the LLM wraps the JSON
+        let jsonStr = full.trim();
+        if (jsonStr.startsWith("```")) {
+          jsonStr = jsonStr.replace(/^```(?:json)?\s*/, "").replace(/\s*```$/, "");
+        }
+        parsed = JSON.parse(jsonStr);
+      } catch {
         throw new Error("AI returned invalid JSON diagram");
       }
 
@@ -262,8 +309,8 @@ export default function AIDiagramPage() {
           ? "TB"
           : "LR";
       const spacing: [number, number] = isMindMapDiagram
-        ? [mindMapLayout?.spacingX ?? 80, mindMapLayout?.spacingY ?? 60]
-        : [140, 120];
+        ? [mindMapLayout?.spacingX ?? 120, mindMapLayout?.spacingY ?? 100]
+        : [280, 220];
       const layoutAlgorithm: LayoutAlgorithm = isMindMapDiagram
         ? (mindMapLayout?.algorithm ?? "elk-mrtree")
         : "elk-layered";

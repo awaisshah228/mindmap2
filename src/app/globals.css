@@ -12,8 +12,14 @@
   --font-mono: var(--font-geist-mono);
 }
 
+/* Dark mode via class (controlled by ThemeProvider) */
+.dark {
+  --background: #111827;
+  --foreground: #f9fafb;
+}
+
 @media (prefers-color-scheme: dark) {
-  :root {
+  :root:not(.dark):not(:has(.dark)) {
     --background: #0a0a0a;
     --foreground: #ededed;
   }
@@ -23,4 +29,23 @@ body {
   background: var(--background);
   color: var(--foreground);
   font-family: Arial, Helvetica, sans-serif;
+}
+
+/* Dark mode overrides for React Flow */
+.dark .react-flow__background {
+  background-color: #1f2937;
+}
+
+.dark .react-flow__minimap {
+  background-color: #374151 !important;
+}
+
+.dark .react-flow__controls button {
+  background-color: #374151;
+  color: #d1d5db;
+  border-color: #4b5563;
+}
+
+.dark .react-flow__controls button:hover {
+  background-color: #4b5563;
 }

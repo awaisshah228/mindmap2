@@ -4,7 +4,6 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ReactFlow,
   Background,
-  Controls,
   MiniMap,
   useNodesState,
   useEdgesState,
@@ -16,12 +15,12 @@ import {
   type ReactFlowInstance,
   BackgroundVariant,
   ConnectionLineType,
-  Panel,
   applyNodeChanges,
   applyEdgeChanges,
   SelectionMode,
 } from "@xyflow/react";
 import { KeyboardHandler } from "./KeyboardHandler";
+import { PresentationMode } from "@/components/panels/PresentationMode";
 import { HelperLines } from "./HelperLines";
 import { getLayoutedElements, type LayoutDirection } from "@/lib/layout-engine";
 import { resolveCollisions } from "@/lib/resolve-collisions";
@@ -58,6 +57,8 @@ import { MindMapLayoutPanel } from "@/components/panels/MindMapLayoutPanel";
 import { MobileColorIndicator } from "@/components/panels/MobileColorIndicator";
 import { MindMapLayoutProvider } from "@/contexts/MindMapLayoutContext";
 import { getDragPayload } from "@/lib/dnd-payload";
+import { AIContextMenu } from "@/components/panels/AIContextMenu";
+import { CanvasBottomBar } from "./CanvasBottomBar";
 
 const EDGE_ANCHOR_SIZE = 12;
 
@@ -214,8 +215,9 @@ export default function DiagramCanvas() {
   const selectedNodeIds = useCanvasStore((s) => s.selectedNodeIds);
   const pendingFitView = useCanvasStore((s) => (s as any).pendingFitView);
   const setPendingFitView = useCanvasStore((s) => (s as any).setPendingFitView);
+  const presentationMode = useCanvasStore((s) => s.presentationMode);
+  const presentationNodeIndex = useCanvasStore((s) => s.presentationNodeIndex);
   const reactFlowRef = useRef<ReactFlowInstance | null>(null);
-  const skipCanvasToStoreRef = useRef(false);
 
   const [helperLines, setHelperLines] = useState<{
     horizontal: { y: number; x1: number; x2: number } | null;
@@ -228,27 +230,96 @@ export default function DiagramCanvas() {
   const [eraserPoints, setEraserPoints] = useState<{ x: number; y: number }[]>([]);
   const [isErasing, setIsErasing] = useState(false);
 
+  // Open details panel when clicking a node in presentation mode
+  const setDetailsPanelNodeId = useCanvasStore((s) => s.setDetailsPanelNodeId);
+  const onNodeClick = useCallback(
+    (_: React.MouseEvent, node: Node) => {
+      if (presentationMode) {
+        setDetailsPanelNodeId(node.id);
+      }
+    },
+    [presentationMode, setDetailsPanelNodeId]
+  );
+
+  // AI context menu state
+  const [contextMenu, setContextMenu] = useState<{
+    nodeId: string;
+    x: number;
+    y: number;
+  } | null>(null);
+
+  const onNodeContextMenu = useCallback(
+    (e: React.MouseEvent, node: Node) => {
+      e.preventDefault();
+      setContextMenu({ nodeId: node.id, x: e.clientX, y: e.clientY });
+    },
+    []
+  );
+
   const hiddenNodeIds = useMemo(
     () => getHiddenNodeIds(nodes, edges),
     [nodes, edges]
   );
 
+  // Determine the focused node ID during presentation mode
+  const presentationFocusedNodeId = useMemo(() => {
+    if (!presentationMode) return null;
+    const presentable = nodes.filter(
+      (n) =>
+        n.type !== "freeDraw" &&
+        n.type !== "edgeAnchor" &&
+        n.type !== "group"
+    );
+    return presentable[presentationNodeIndex]?.id ?? null;
+  }, [presentationMode, presentationNodeIndex, nodes]);
+
   const visibleNodes = useMemo(
     () =>
-      nodes.map((n) =>
-        hiddenNodeIds.has(n.id) ? { ...n, hidden: true as const } : n
-      ),
-    [nodes, hiddenNodeIds]
+      nodes.map((n) => {
+        if (hiddenNodeIds.has(n.id)) return { ...n, hidden: true as const };
+
+        // In presentation mode, dim non-focused nodes
+        if (presentationMode && presentationFocusedNodeId) {
+          const isFocused = n.id === presentationFocusedNodeId;
+          return {
+            ...n,
+            style: {
+              ...n.style,
+              opacity: isFocused ? 1 : 0.2,
+              transition: "opacity 0.4s ease, filter 0.4s ease",
+              filter: isFocused ? "drop-shadow(0 0 12px rgba(139, 92, 246, 0.5))" : "none",
+              zIndex: isFocused ? 10 : 0,
+            },
+          };
+        }
+        return n;
+      }),
+    [nodes, hiddenNodeIds, presentationMode, presentationFocusedNodeId]
   );
 
   const visibleEdges = useMemo(
     () =>
-      edges.map((e) =>
-        hiddenNodeIds.has(e.source) || hiddenNodeIds.has(e.target)
-          ? { ...e, hidden: true as const }
-          : e
-      ),
-    [edges, hiddenNodeIds]
+      edges.map((e) => {
+        if (hiddenNodeIds.has(e.source) || hiddenNodeIds.has(e.target))
+          return { ...e, hidden: true as const };
+
+        // In presentation mode, highlight edges connected to focused node, dim others
+        if (presentationMode && presentationFocusedNodeId) {
+          const isConnected =
+            e.source === presentationFocusedNodeId ||
+            e.target === presentationFocusedNodeId;
+          return {
+            ...e,
+            style: {
+              ...e.style,
+              opacity: isConnected ? 1 : 0.1,
+              transition: "opacity 0.4s ease",
+            },
+          };
+        }
+        return e;
+      }),
+    [edges, hiddenNodeIds, presentationMode, presentationFocusedNodeId]
   );
 
   const getNodeBounds = useCallback((node: Node) => {
@@ -539,35 +610,47 @@ export default function DiagramCanvas() {
     return () => window.clearTimeout(id);
   }, [pendingFitView, setPendingFitView]);
 
-  // Sync canvas → store for persistence (skip when we just applied store → canvas to avoid loop)
+  // Sync store → canvas when undo/redo or hydration updates the Zustand store.
+  // We track whether the store change originated from the canvas (via onNodesChange/onEdgesChange)
+  // to avoid an infinite loop.
+  const fromCanvasRef = useRef(false);
+
   useEffect(() => {
-    if (skipCanvasToStoreRef.current) {
-      skipCanvasToStoreRef.current = false;
+    if (fromCanvasRef.current) {
+      fromCanvasRef.current = false;
       return;
     }
-    setStoreNodes(nodes);
-    setStoreEdges(edges);
-  }, [nodes, edges, setStoreNodes, setStoreEdges]);
-
-  // Sync store → canvas when undo/redo (or store) updates; apply so position/dimension/delete undo works
-  useEffect(() => {
     setNodes(storeNodes);
     setEdges(storeEdges);
-    skipCanvasToStoreRef.current = true;
   }, [storeNodes, storeEdges, setNodes, setEdges]);
 
+  // onNodesChange: update React Flow local state AND push to Zustand store in one go.
+  // This guarantees that every change (including updateNodeData "replace" changes)
+  // reaches the store that the auto-save reads from.
   const onNodesChange = useCallback(
     (changes: NodeChange[]) => {
-      setNodes((nds) => applyNodeChanges(changes, nds));
+      setNodes((nds) => {
+        const updated = applyNodeChanges(changes, nds);
+        // Push to Zustand so persistence picks it up.
+        // Mark the flag so the store→canvas sync ignores this update.
+        fromCanvasRef.current = true;
+        setStoreNodes(updated);
+        return updated;
+      });
     },
-    [setNodes]
+    [setNodes, setStoreNodes]
   );
 
   const onEdgesChange = useCallback(
     (changes: EdgeChange[]) => {
-      setEdges((eds) => applyEdgeChanges(changes, eds));
+      setEdges((eds) => {
+        const updated = applyEdgeChanges(changes, eds);
+        fromCanvasRef.current = true;
+        setStoreEdges(updated);
+        return updated;
+      });
     },
-    [setEdges]
+    [setEdges, setStoreEdges]
   );
 
   const pendingEdgeType = useCanvasStore((s) => s.pendingEdgeType);
@@ -646,21 +729,39 @@ export default function DiagramCanvas() {
       setNodes(updatedNodes);
       setEdges(updatedEdges);
 
+      // Only layout non-freehand nodes
+      const layoutableNodes = updatedNodes.filter((n) => !LAYOUT_EXCLUDED_TYPES.has(n.type ?? ""));
+      const layoutableIds = new Set(layoutableNodes.map((n) => n.id));
+      const layoutableEdges = updatedEdges.filter(
+        (e) => layoutableIds.has(e.source) && layoutableIds.has(e.target)
+      );
+
       try {
         const { nodes: layoutedNodes, edges: layoutedEdges } = await getLayoutedElements(
-          updatedNodes,
-          updatedEdges,
+          layoutableNodes,
+          layoutableEdges,
           mindMapLayout.direction,
           [mindMapLayout.spacingX, mindMapLayout.spacingY],
           mindMapLayout.algorithm
         );
-        setEdges(layoutedEdges);
+        setEdges((all) =>
+          all.map((e) => {
+            const le = layoutedEdges.find((x) => x.id === e.id);
+            return le ? { ...e, ...le } : e;
+          })
+        );
         const collisionFreeNodes = resolveCollisions(layoutedNodes, {
           maxIterations: 150,
           overlapThreshold: 0,
           margin: 24,
         });
-        setNodes(collisionFreeNodes);
+        // Merge layouted positions back, leaving freehand nodes untouched
+        setNodes((all) =>
+          all.map((n) => {
+            const ln = collisionFreeNodes.find((x) => x.id === n.id);
+            return ln ? { ...n, position: ln.position } : n;
+          })
+        );
         setTimeout(() => {
           reactFlowRef.current?.fitView({
             padding: 0.2,
@@ -723,6 +824,7 @@ export default function DiagramCanvas() {
       const onPane = !target.closest(".react-flow__node") && !target.closest(".react-flow__controls");
 
       if (activeTool === "eraser" && reactFlowRef.current && onPane) {
+        pushUndo();
         const pos = reactFlowRef.current.screenToFlowPosition({ x: e.clientX, y: e.clientY });
         setIsErasing(true);
         setEraserPoints([{ x: pos.x, y: pos.y }]);
@@ -1244,56 +1346,28 @@ export default function DiagramCanvas() {
     [createFreeDrawNode]
   );
 
-  // --- Local storage persistence for diagrams ---
-  // On mount, try to hydrate from localStorage (if present). Dedupe by id to avoid React key errors.
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-    try {
-      const raw = window.localStorage.getItem("ai-diagram-state-v1");
-      if (!raw) return;
-      const parsed = JSON.parse(raw) as { nodes?: Node[]; edges?: Edge[] };
-      if (Array.isArray(parsed.nodes) && Array.isArray(parsed.edges)) {
-        const nodeById = new Map<string, Node>();
-        parsed.nodes.forEach((n) => nodeById.set(n.id, n));
-        const edgeById = new Map<string, Edge>();
-        parsed.edges.forEach((e) => edgeById.set(e.id, e));
-        setStoreNodes(Array.from(nodeById.values()));
-        setStoreEdges(Array.from(edgeById.values()));
-      }
-    } catch {
-      // Ignore malformed localStorage; fall back to default behavior.
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  // Note: localStorage persistence is now handled by useProjectPersistence() in EditorLayout.
 
-  // Whenever store-backed nodes/edges change, persist to localStorage.
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-    try {
-      const payload = JSON.stringify({ nodes: storeNodes, edges: storeEdges });
-      window.localStorage.setItem("ai-diagram-state-v1", payload);
-    } catch {
-      // Swallow quota/serialization errors; persistence is best-effort.
-    }
-  }, [storeNodes, storeEdges]);
+  /** Node types excluded from layout algorithms (they have freeform positions). */
+  const LAYOUT_EXCLUDED_TYPES = new Set(["freeDraw", "edgeAnchor", "group"]);
 
   const handleLayoutSelectedNodes = useCallback(async () => {
     if (selectedNodeIds.length < 2) return;
 
     const selectedSet = new Set(selectedNodeIds);
-    const subNodes = nodes.filter((n) => selectedSet.has(n.id));
+    const subNodes = nodes.filter(
+      (n) => selectedSet.has(n.id) && !LAYOUT_EXCLUDED_TYPES.has(n.type ?? "")
+    );
     const subEdges = edges.filter(
       (e) => selectedSet.has(e.source) && selectedSet.has(e.target)
     );
 
     if (subNodes.length < 2) return;
 
-    // Use a left-to-right layered layout for arbitrary diagrams.
     const direction: LayoutDirection = "LR";
     const { nodes: layoutedNodes, edges: layoutedEdges } =
       await getLayoutedElements(subNodes, subEdges, direction, [140, 120], "elk-layered");
 
-    // Merge layouted positions/handles back into the full graph.
     setNodes((all) =>
       all.map((n) => {
         const ln = layoutedNodes.find((x) => x.id === n.id);
@@ -1315,23 +1389,47 @@ export default function DiagramCanvas() {
   }, [selectedNodeIds, nodes, edges, setNodes, setEdges]);
 
   const handleLayoutAllNodes = useCallback(async () => {
-    if (nodes.length < 2) return;
-    // Record state so user can undo a full-layout operation.
+    // Filter out freehand / anchor / group nodes — only layout structured nodes
+    const layoutableNodes = nodes.filter((n) => !LAYOUT_EXCLUDED_TYPES.has(n.type ?? ""));
+    if (layoutableNodes.length < 2) return;
+
     pushUndo();
 
     const direction: LayoutDirection = mindMapLayout.direction;
     const spacing: [number, number] = [mindMapLayout.spacingX, mindMapLayout.spacingY];
 
+    const layoutableIds = new Set(layoutableNodes.map((n) => n.id));
+    const layoutableEdges = edges.filter(
+      (e) => layoutableIds.has(e.source) && layoutableIds.has(e.target)
+    );
+
     const { nodes: layoutedNodes, edges: layoutedEdges } = await getLayoutedElements(
-      nodes,
-      edges,
+      layoutableNodes,
+      layoutableEdges,
       direction,
       spacing,
       mindMapLayout.algorithm
     );
 
-    setNodes(layoutedNodes);
-    setEdges(layoutedEdges);
+    // Merge back — only update nodes that were layouted; leave freehand/groups untouched
+    setNodes((all) =>
+      all.map((n) => {
+        const ln = layoutedNodes.find((x) => x.id === n.id);
+        return ln ? { ...n, position: ln.position } : n;
+      })
+    );
+    setEdges((all) =>
+      all.map((e) => {
+        const le = layoutedEdges.find((x) => x.id === e.id);
+        return le
+          ? {
+              ...e,
+              sourceHandle: le.sourceHandle ?? e.sourceHandle,
+              targetHandle: le.targetHandle ?? e.targetHandle,
+            }
+          : e;
+      })
+    );
   }, [nodes, edges, mindMapLayout, setNodes, setEdges, pushUndo]);
 
   return (
@@ -1369,9 +1467,6 @@ export default function DiagramCanvas() {
         undo={undo}
         redo={redo}
       />
-        {activeTool === "freeDraw" && (
-          <FreehandOverlay onStrokeComplete={handleFreehandStrokeComplete} />
-        )}
         {activeTool === "freeDraw" && reactFlowRef.current && (
           <FreehandOverlay
             onStrokeComplete={handleFreehandStrokeComplete}
@@ -1389,25 +1484,27 @@ export default function DiagramCanvas() {
           onEdgesChange={onEdgesChange}
           onConnect={onConnect}
           onConnectEnd={onConnectEnd}
+          onNodeClick={onNodeClick}
           onPaneClick={onPaneClick}
           onDrop={onDrop}
           onDragOver={onDragOver}
           onNodeDragStart={onNodeDragStart}
           onNodeDrag={onNodeDrag}
           onNodeDragStop={onNodeDragStop}
+          onNodeContextMenu={onNodeContextMenu}
           nodeTypes={nodeTypes}
           edgeTypes={edgeTypes}
           fitView
-          nodesDraggable={activeTool !== "freeDraw"}
-          nodesConnectable={activeTool !== "freeDraw"}
+          nodesDraggable={!presentationMode && activeTool !== "freeDraw"}
+          nodesConnectable={!presentationMode && activeTool !== "freeDraw"}
           elementsSelectable={activeTool !== "freeDraw"}
           edgesFocusable={activeTool !== "freeDraw"}
-          zoomOnScroll
-          zoomOnPinch
-          zoomOnDoubleClick
-          panOnDrag={activeTool === "select"}
-          panActivationKeyCode="Space"
-          selectionOnDrag={activeTool === "selection"}
+          zoomOnScroll={!presentationMode}
+          zoomOnPinch={!presentationMode}
+          zoomOnDoubleClick={!presentationMode}
+          panOnDrag={!presentationMode && activeTool === "select"}
+          panActivationKeyCode={presentationMode ? undefined : "Space"}
+          selectionOnDrag={!presentationMode && activeTool === "selection"}
           selectionMode={SelectionMode.Partial}
           minZoom={0.1}
           maxZoom={4}
@@ -1436,44 +1533,44 @@ export default function DiagramCanvas() {
           points={pendingEdgeType === "straight" ? [] : edgeDrawPoints}
         />
         <EraserPreview points={isErasing ? eraserPoints : []} />
-        <Background variant={BackgroundVariant.Dots} gap={16} size={1} />
-        <Controls showZoom showFitView showInteractive />
-        <MiniMap
-          nodeColor="#a78bfa"
-          maskColor="rgba(0, 0, 0, 0.1)"
-          className="!bg-gray-50"
-        />
-        <MindMapLayoutPanel
-          setNodes={setNodes}
-          setEdges={setEdges}
-          fitView={() =>
-            reactFlowRef.current?.fitView({ padding: 0.2, duration: 300 })
-          }
-        />
-        <MobileColorIndicator />
-        <Panel position="bottom-right" className="flex flex-col gap-2 m-2">
-          <div className="flex items-center gap-2 bg-white/80 rounded shadow px-2 py-1">
-            <button
-              type="button"
-              onClick={handleLayoutSelectedNodes}
-              className="text-xs px-2 py-1 rounded bg-violet-100 text-violet-700 hover:bg-violet-200 disabled:opacity-50"
-              disabled={selectedNodeIds.length < 2}
-            >
-              Layout selection
-            </button>
-            <button
-              type="button"
-              onClick={handleLayoutAllNodes}
-              className="text-xs px-2 py-1 rounded bg-slate-100 text-slate-700 hover:bg-slate-200"
-            >
-              Layout all
-            </button>
-            <span className="text-[11px] text-gray-500">
-              Ctrl/Cmd+Z undo • Ctrl/Cmd+Shift+Z or Ctrl/Cmd+Y redo • Ctrl+A select all • Esc deselect
-            </span>
-          </div>
-        </Panel>
+        {presentationMode
+          ? <Background variant={BackgroundVariant.Dots} gap={16} size={0} color="transparent" className="!bg-white" />
+          : <Background variant={BackgroundVariant.Dots} gap={16} size={1} />
+        }
+        {!presentationMode && (
+          <MiniMap
+            nodeColor="#a78bfa"
+            maskColor="rgba(0, 0, 0, 0.1)"
+            className="!bg-gray-50"
+          />
+        )}
+        {!presentationMode && (
+          <MindMapLayoutPanel
+            setNodes={setNodes}
+            setEdges={setEdges}
+            fitView={() =>
+              reactFlowRef.current?.fitView({ padding: 0.2, duration: 300 })
+            }
+          />
+        )}
+        {!presentationMode && <MobileColorIndicator />}
+        {!presentationMode && (
+          <CanvasBottomBar
+            selectedNodeCount={selectedNodeIds.length}
+            onLayoutSelection={handleLayoutSelectedNodes}
+            onLayoutAll={handleLayoutAllNodes}
+          />
+        )}
+        <PresentationMode />
       </ReactFlow>
+      {contextMenu && (
+        <AIContextMenu
+          nodeId={contextMenu.nodeId}
+          x={contextMenu.x}
+          y={contextMenu.y}
+          onClose={() => setContextMenu(null)}
+        />
+      )}
       </div>
     </MindMapLayoutProvider>
   );

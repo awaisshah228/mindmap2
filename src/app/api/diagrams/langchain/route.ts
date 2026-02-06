@@ -1,35 +1,40 @@
 import { NextRequest, NextResponse } from "next/server";
 import { ChatOpenAI } from "@langchain/openai";
-import { ICON_IDS_FOR_PROMPT } from "@/lib/icon-prompt-list";
+import { buildSystemPrompt, buildUserMessage } from "@/lib/ai/prompt-builder";
 import {
   getOpenRouterApiKey,
   getOpenRouterBaseUrl,
   getOpenRouterHttpReferer,
   getOpenRouterAppTitle,
+  getOpenAiApiKey,
 } from "@/lib/env";
 
 export const runtime = "nodejs";
 
-// We talk to OpenRouter instead of api.openai.com.
-// Model names are OpenRouter-compatible, e.g. "openai/gpt-4o-mini".
-type SupportedModel =
-  | "openai/gpt-4.1-mini"
-  | "openai/gpt-4.1"
-  | "openai/gpt-4o-mini"
-  | "openai/gpt-4o"
-  | "openai/o3-mini";
+/** Provider → base URL mapping for non-OpenRouter providers */
+const PROVIDER_BASE_URLS: Record<string, string> = {
+  openai: "https://api.openai.com/v1",
+  anthropic: "https://api.anthropic.com/v1",
+  google: "https://generativelanguage.googleapis.com/v1beta/openai",
+};
 
-function getModel(model?: string): SupportedModel {
-  const fallback: SupportedModel = "openai/gpt-4o-mini";
+/**
+ * Build the model name suitable for the selected provider.
+ * OpenRouter expects prefixed names like "openai/gpt-4o-mini".
+ * Direct providers use just "gpt-4o-mini".
+ */
+function resolveModelName(provider: string | undefined, model: string | undefined): string {
+  const fallback = "gpt-4o-mini";
   if (!model) return fallback;
-  const allowed: SupportedModel[] = [
-    "openai/gpt-4.1-mini",
-    "openai/gpt-4.1",
-    "openai/gpt-4o-mini",
-    "openai/gpt-4o",
-    "openai/o3-mini",
-  ];
-  return (allowed as string[]).includes(model) ? (model as SupportedModel) : fallback;
+
+  if (provider === "openrouter") {
+    // If the model already has a prefix (e.g. "openai/gpt-4o"), use it.
+    // Otherwise, prepend "openai/" as default.
+    return model.includes("/") ? model : `openai/${model}`;
+  }
+
+  // For direct providers, strip any "openai/" or "anthropic/" prefix
+  return model.includes("/") ? model.split("/").pop()! : model;
 }
 
 export async function POST(req: NextRequest) {
@@ -43,86 +48,73 @@ export async function POST(req: NextRequest) {
       mode,
       focusNodeId,
       diagramType,
+      llmProvider,
+      llmModel,
+      llmApiKey,
     } = await req.json();
 
     if (!prompt || typeof prompt !== "string") {
       return NextResponse.json({ error: "Prompt is required" }, { status: 400 });
     }
 
-    const openRouterApiKey = getOpenRouterApiKey();
-    if (!openRouterApiKey) {
+    // Determine effective provider, model, and API key
+    const provider: string = llmProvider || "openrouter";
+    const effectiveModel = resolveModelName(provider, llmModel || model);
+
+    let apiKey: string;
+    let baseURL: string | undefined;
+    let defaultHeaders: Record<string, string> = {};
+
+    if (provider === "openrouter") {
+      apiKey = llmApiKey || getOpenRouterApiKey();
+      baseURL = getOpenRouterBaseUrl();
+      defaultHeaders = {
+        "HTTP-Referer": getOpenRouterHttpReferer(),
+        "X-Title": getOpenRouterAppTitle(),
+      };
+    } else if (provider === "openai") {
+      apiKey = llmApiKey || getOpenAiApiKey();
+      baseURL = PROVIDER_BASE_URLS.openai;
+    } else if (provider === "anthropic") {
+      apiKey = llmApiKey || "";
+      baseURL = PROVIDER_BASE_URLS.anthropic;
+    } else if (provider === "google") {
+      apiKey = llmApiKey || "";
+      baseURL = PROVIDER_BASE_URLS.google;
+    } else {
+      // custom — user must supply key; baseURL is OpenAI-compatible by default
+      apiKey = llmApiKey || getOpenAiApiKey();
+      baseURL = PROVIDER_BASE_URLS.openai;
+    }
+
+    if (!apiKey) {
       return NextResponse.json(
-        { error: "OPENROUTER_API_KEY not configured" },
+        { error: `API key not configured for provider "${provider}". Add your key in Settings → Integration.` },
         { status: 500 }
       );
     }
 
     const llm = new ChatOpenAI({
-      model: getModel(model),
+      model: effectiveModel,
       temperature: 0.2,
-      apiKey: openRouterApiKey,
+      apiKey,
       streaming: true,
       configuration: {
-        baseURL: getOpenRouterBaseUrl(),
-        defaultHeaders: {
-          "HTTP-Referer": getOpenRouterHttpReferer(),
-          "X-Title": getOpenRouterAppTitle(),
-        },
+        baseURL,
+        defaultHeaders: Object.keys(defaultHeaders).length > 0 ? defaultHeaders : undefined,
       },
     });
 
-    const preferredLayoutDirection =
-      layoutDirection === "vertical" ? "vertical" : "horizontal";
-
-    const systemPrompt = `
-You design diagrams for a React Flow whiteboard. Return only valid JSON matching the schema below. No markdown, no comments.
-
-Node types: mindMap, stickyNote, rectangle, diamond, circle, document, text, image, databaseSchema, service, queue, actor, group.
-Layout: preferred layoutDirection is ${preferredLayoutDirection}. Use positions in [-1000,1000], spacing 150–220. Align in rows/columns. Edges: source/target = node ids; use sourceHandle/targetHandle "left"|"right"|"top"|"bottom" to match flow.
-
-Schema: nodes have id, type, position {x,y}. For groups: type "group", style {width, height}. For nodes inside a group: "parentNode": "<group-id>", position relative to group (e.g. 10, 20). data: label, shape?, icon?, imageUrl?, subtitle?, columns? (for databaseSchema). edges: id, source, target, sourceHandle?, targetHandle?, data?.label?.
-
-Icons: We use lucide-react and react-icons (si, fa). Set data.icon only to one of: ${ICON_IDS_FOR_PROMPT}. Defaults: services "lucide:server", data stores "lucide:database". Never use an icon not in this list.
-
-Mind map (only when user asks for mind map): type "mindMap", central node near (0,0), children 150–220 apart. If mode=mindmap-refine and focusNodeId set: add only children of that node; source=focusNodeId for every new edge.
-
-Architecture: rectangle for services/queues/gateways, document/text for notes, circle for start/end. Clear path (e.g. User→Frontend→API→Services→DB). Set data.icon on every rectangle/circle/document so no plain text-only nodes.
-
-Subflows (parent-child grouping): Use type "group" for logical clusters that contain multiple nodes. Keep single concepts as top-level nodes (e.g. User, Frontend = one node each). Use groups for: "Backend", "AWS", "GCP", "API layer", "Services" — any container that has several nodes inside. Group node: type "group", id, data.label (e.g. "Backend", "AWS"), position {x,y}, style {width, height} (e.g. 280–400 width, 200–300 height). Child nodes inside the group: set "parentNode" to the group's id; position {x,y} is relative to the group (e.g. 10–50, 20–80). You can nest groups: inner group has parentNode = outer group id, its children have parentNode = inner group id. Edges can connect across: e.g. source "frontend" (top-level) target "api-gw" (node inside group "backend"). Define the group node before any node that references it as parentNode.
-
-Flowchart: rectangle=step, diamond=decision, circle=start/end. Flow top→bottom or left→right.
-
-Special types: databaseSchema → data.columns [{name, type?, key?}]. service → data.subtitle optional. queue/actor → data.label.
-
-Images: type "image" with data.imageUrl = https://picsum.photos/seed/<word>/200/150 (seed: user, api, database, server, etc.). data.label = short caption.
-
-Rules: Short labels (2–5 words). Unique ids. Edges reference node ids. Non-mindMap: add edge.data.label where helpful (e.g. "HTTP", "Calls"). Always add data.icon or imageUrl for most nodes; never all plain rectangles.
-`.trim();
-
-    const isMindmapRefine = mode === "mindmap-refine" && focusNodeId;
-
-    const diagramTypeHint =
-      diagramType && diagramType !== "auto"
-        ? (() => {
-            const hints: Record<string, string> = {
-              mindmap: "Type: mind map. Central topic + branches, all nodes mindMap.",
-              architecture: "Type: architecture. Services, APIs, gateways, data stores; use data.icon or image nodes.",
-              flowchart: "Type: flowchart. Rectangles (steps), diamonds (decisions), circles (start/end).",
-              sequence: "Type: sequence. Actors and interactions, clear lanes.",
-              "entity-relationship": "Type: ER. Entities and relationships.",
-              bpmn: "Type: BPMN. Tasks, gateways, flows.",
-            };
-            return hints[diagramType] ?? "";
-          })()
-        : "";
-
-    const typeBlock = diagramTypeHint ? `${diagramTypeHint}\n\n` : "";
-    const meta = `Mode: ${isMindmapRefine ? "mindmap-refine" : "diagram"}. focusNodeId: ${focusNodeId ?? "—"}. layout: ${preferredLayoutDirection}.`;
-
-    const userMessage =
-      previousDiagram && Object.keys(previousDiagram).length > 0
-        ? `${typeBlock}${prompt}\n\n${meta}\n\nPrevious prompt: ${previousPrompt ?? "—"}\n\nPrevious diagram:\n${JSON.stringify(previousDiagram)}\n\nReturn full diagram JSON only.${isMindmapRefine ? " Extend only the focused node's branch." : ""}`
-        : `${typeBlock}${prompt}\n\n${meta}\n\nReturn diagram JSON only.`;
+    const systemPrompt = buildSystemPrompt(layoutDirection);
+    const userMessage = buildUserMessage({
+      prompt,
+      layoutDirection,
+      mode,
+      focusNodeId,
+      diagramType,
+      previousPrompt,
+      previousDiagram,
+    });
 
     const stream = await llm.stream([
       ["system", systemPrompt],

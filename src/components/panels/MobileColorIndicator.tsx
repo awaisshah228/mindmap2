@@ -5,6 +5,7 @@ import { Panel, useStore, useReactFlow } from "@xyflow/react";
 import * as Popover from "@radix-ui/react-popover";
 import { PALETTE_COLORS, getNodeBranchStyle } from "@/lib/branch-colors";
 import { useMediaQuery } from "@/hooks/useMediaQuery";
+import { useCanvasStore } from "@/lib/store/canvas-store";
 
 const COLOR_NODE_TYPES = ["mindMap", "stickyNote", "text", "rectangle", "diamond", "circle", "document"];
 
@@ -12,6 +13,7 @@ export function MobileColorIndicator() {
   const isMobile = useMediaQuery("(max-width: 768px)");
   const nodes = useStore((s) => s.nodes);
   const { updateNodeData, getEdges } = useReactFlow();
+  const pushUndo = useCanvasStore((s) => s.pushUndo);
   const selectedNode = nodes.find((n) => n.selected && COLOR_NODE_TYPES.includes(n.type ?? ""));
   const [pos, setPos] = useState({ x: 16, y: 80 });
   const [colorOpen, setColorOpen] = useState(false);
@@ -67,10 +69,11 @@ export function MobileColorIndicator() {
   const handleColorChange = useCallback(
     (color: string) => {
       if (!selectedNode) return;
+      pushUndo();
       updateNodeData(selectedNode.id, { color });
       setColorOpen(false);
     },
-    [selectedNode, updateNodeData]
+    [selectedNode, updateNodeData, pushUndo]
   );
 
   const edges = getEdges();

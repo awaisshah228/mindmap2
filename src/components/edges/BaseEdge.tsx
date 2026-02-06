@@ -4,7 +4,7 @@ import { memo } from "react";
 import { BaseEdge as ReactFlowBaseEdge, type EdgeMarker } from "@xyflow/react";
 import { cn } from "@/lib/utils";
 
-const DEFAULT_STROKE_WIDTH = 4;
+const DEFAULT_STROKE_WIDTH = 6;
 
 export interface BaseEdgeProps {
   id: string;
@@ -50,8 +50,8 @@ function BaseEdgeComponent({
       id={id}
       path={path}
       style={style}
-      markerStart={markerStart}
-      markerEnd={markerEnd}
+      markerStart={markerStart as string | undefined}
+      markerEnd={markerEnd as string | undefined}
       onMouseEnter={onMouseEnter}
       onMouseLeave={onMouseLeave}
       className={cn(className)}

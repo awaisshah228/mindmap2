@@ -11,6 +11,9 @@ interface UseApplyMindMapLayoutProps {
   fitView?: () => void;
 }
 
+/** Node types that must never be repositioned by layout algorithms. */
+const LAYOUT_EXCLUDED_TYPES = new Set(["freeDraw", "edgeAnchor", "group"]);
+
 export function useApplyMindMapLayout({
   setNodes,
   setEdges,
@@ -25,21 +28,49 @@ export function useApplyMindMapLayout({
     async (directionOverride?: LayoutDirection) => {
       const direction = directionOverride ?? mindMapLayout.direction;
       const spacing: [number, number] = [mindMapLayout.spacingX, mindMapLayout.spacingY];
+
+      // Filter out freehand / anchor / group nodes — they keep their positions
+      const layoutableNodes = nodes.filter((n) => !LAYOUT_EXCLUDED_TYPES.has(n.type ?? ""));
+      const layoutableIds = new Set(layoutableNodes.map((n) => n.id));
+      const layoutableEdges = edges.filter(
+        (e) => layoutableIds.has(e.source) && layoutableIds.has(e.target)
+      );
+
       try {
         const { nodes: layoutedNodes, edges: layoutedEdges } = await getLayoutedElements(
-          nodes,
-          edges,
+          layoutableNodes,
+          layoutableEdges,
           direction,
           spacing,
           mindMapLayout.algorithm
         );
-        setEdges(layoutedEdges);
+
         const collisionFreeNodes = resolveCollisions(layoutedNodes, {
           maxIterations: 150,
           overlapThreshold: 0,
           margin: 24,
         });
-        setNodes(collisionFreeNodes);
+
+        // Merge back — only update layouted nodes/edges, leave freehand untouched
+        setNodes((all) =>
+          all.map((n) => {
+            const ln = collisionFreeNodes.find((x) => x.id === n.id);
+            return ln ? { ...n, position: ln.position } : n;
+          })
+        );
+        setEdges((all) =>
+          all.map((e) => {
+            const le = layoutedEdges.find((x) => x.id === e.id);
+            return le
+              ? {
+                  ...e,
+                  sourceHandle: le.sourceHandle ?? e.sourceHandle,
+                  targetHandle: le.targetHandle ?? e.targetHandle,
+                }
+              : e;
+          })
+        );
+
         // Sync direction to store only after edges/nodes are updated, so MindMapNode never
         // renders new handles before edges have the matching handle IDs (fixes edges disappearing with Dagre).
         if (directionOverride) {

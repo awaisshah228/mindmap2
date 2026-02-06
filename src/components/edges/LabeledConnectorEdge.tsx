@@ -1,6 +1,6 @@
 "use client";
 
-import { memo, useCallback, useState, useMemo, useRef, useLayoutEffect } from "react";
+import { memo, useCallback, useState, useMemo, JSX } from "react";
 import {
   EdgeToolbar,
   EdgeLabelRenderer,
@@ -14,17 +14,12 @@ import {
 } from "@xyflow/react";
 import { cn } from "@/lib/utils";
 import { getBranchStrokeColor } from "@/lib/branch-colors";
+import { useCanvasStore } from "@/lib/store/canvas-store";
 import { BaseEdge } from "./BaseEdge";
 
-const EDGE_STROKE_WIDTH = 4;
+const EDGE_STROKE_WIDTH = 6;
 /** Offset toolbar above the label so it doesn't cover placeholder/input */
-const TOOLBAR_OFFSET_Y = -48;
-/** Gap length (in path units) where the label sits in the line */
-const LABEL_GAP_SIZE = 52;
-
-/** Node types that allow edge labels (shape nodes and edge anchors for standalone lines). */
-const SHAPE_NODE_TYPES = ["rectangle", "diamond", "circle", "document"];
-const EDGE_ANCHOR_TYPE = "edgeAnchor";
+const TOOLBAR_OFFSET_Y = -52;
 
 type ConnectorType = "smoothstep" | "default" | "straight" | "step";
 
@@ -71,20 +66,9 @@ function LabeledConnectorEdge({
   markerEnd,
   markerStart,
 }: import("@xyflow/react").EdgeProps) {
-  const { updateEdgeData, deleteElements, screenToFlowPosition, getEdges, getNodes, setEdges } = useReactFlow();
-  const nodes = getNodes();
+  const { updateEdgeData, deleteElements, screenToFlowPosition, getEdges, setEdges } = useReactFlow();
+  const pushUndo = useCanvasStore((s) => s.pushUndo);
   const edges = getEdges();
-  const allowLabels = useMemo(() => {
-    const sourceNode = nodes.find((n) => n.id === source);
-    const targetNode = nodes.find((n) => n.id === target);
-    if (!sourceNode || !targetNode) return false;
-    const sourceType = sourceNode.type ?? "";
-    const targetType = targetNode.type ?? "";
-    const bothShapes =
-      SHAPE_NODE_TYPES.includes(sourceType) && SHAPE_NODE_TYPES.includes(targetType);
-    const bothAnchors = sourceType === EDGE_ANCHOR_TYPE && targetType === EDGE_ANCHOR_TYPE;
-    return bothShapes || bothAnchors;
-  }, [nodes, source, target]);
   const branchColor = useMemo(
     () => (data?.strokeColor as string | undefined) ?? getBranchStrokeColor(source, target, edges),
     [source, target, edges, data?.strokeColor]
@@ -101,8 +85,6 @@ function LabeledConnectorEdge({
   const [draggingIndex, setDraggingIndex] = useState<number | null>(null);
   const [hovered, setHovered] = useState(false);
   const [activeMarkerSide, setActiveMarkerSide] = useState<"start" | "end" | null>(null);
-  const pathMeasureRef = useRef<SVGPathElement>(null);
-  const [gapDasharray, setGapDasharray] = useState<string | null>(null);
 
   const params = {
     sourceX,
@@ -129,48 +111,37 @@ function LabeledConnectorEdge({
   const labelX = defaultPathResult?.[1] ?? (sourceX + targetX) / 2;
   const labelY = defaultPathResult?.[2] ?? (sourceY + targetY) / 2;
 
-  const showLabelInLine = allowLabels && (label || isEditingLabel);
-
-  useLayoutEffect(() => {
-    if (!showLabelInLine || !pathMeasureRef.current) {
-      setGapDasharray(null);
-      return;
-    }
-    const len = pathMeasureRef.current.getTotalLength();
-    const half = (len - LABEL_GAP_SIZE) / 2;
-    if (half > 0) {
-      setGapDasharray(`${half} ${LABEL_GAP_SIZE} ${half}`);
-    } else {
-      setGapDasharray(null);
-    }
-  }, [showLabelInLine, edgePath]);
-
   const setConnectorType = useCallback(
     (type: ConnectorType) => {
+      pushUndo();
       updateEdgeData(id, { connectorType: type, pathPoints: [] });
     },
-    [id, updateEdgeData]
+    [id, updateEdgeData, pushUndo]
   );
 
   const handleLabelSave = useCallback(() => {
+    pushUndo();
     setIsEditingLabel(false);
     updateEdgeData(id, { label: editValue });
-  }, [id, editValue, updateEdgeData]);
+  }, [id, editValue, updateEdgeData, pushUndo]);
 
   const handleDelete = useCallback(() => {
+    pushUndo();
     deleteElements({ edges: [{ id }] });
-  }, [id, deleteElements]);
+  }, [id, deleteElements, pushUndo]);
 
   const handleAddPoint = useCallback(() => {
+    pushUndo();
     const midX = (sourceX + targetX) / 2;
     const midY = (sourceY + targetY) / 2;
     const newPoints = [...effectivePathPoints, { x: midX, y: midY }];
     updateEdgeData(id, { pathPoints: newPoints });
-  }, [id, effectivePathPoints, sourceX, sourceY, targetX, targetY, updateEdgeData]);
+  }, [id, effectivePathPoints, sourceX, sourceY, targetX, targetY, updateEdgeData, pushUndo]);
 
   const handleResetPath = useCallback(() => {
+    pushUndo();
     updateEdgeData(id, { pathPoints: [] });
-  }, [id, updateEdgeData]);
+  }, [id, updateEdgeData, pushUndo]);
 
   const handlePointDrag = useCallback(
     (index: number, clientX: number, clientY: number) => {
@@ -203,24 +174,27 @@ function LabeledConnectorEdge({
 
   const setMarkerEnd = useCallback(
     (value: EdgeMarker | undefined) => {
+      pushUndo();
       setEdges((eds) => eds.map((e) => (e.id === id ? { ...e, markerEnd: value } : e)));
     },
-    [id, setEdges]
+    [id, setEdges, pushUndo]
   );
   const setMarkerStart = useCallback(
     (value: EdgeMarker | undefined) => {
+      pushUndo();
       setEdges((eds) => eds.map((e) => (e.id === id ? { ...e, markerStart: value } : e)));
     },
-    [id, setEdges]
+    [id, setEdges, pushUndo]
   );
   const setLineStyle = useCallback(
     (dashed: boolean) => {
+      pushUndo();
       updateEdgeData(id, { strokeDasharray: dashed ? "5 5" : undefined });
     },
-    [id, updateEdgeData]
+    [id, updateEdgeData, pushUndo]
   );
 
-  const effectiveStrokeDasharray = showLabelInLine && gapDasharray ? gapDasharray : strokeDasharray;
+  const effectiveStrokeDasharray = strokeDasharray;
 
   type MarkerPreset = {
     id: string;
@@ -247,8 +221,8 @@ function LabeledConnectorEdge({
       getMarker: (color) => ({
         type: MarkerType.ArrowClosed,
         color,
-        width: 18,
-        height: 18,
+        width: 24,
+        height: 24,
       }),
       icon: (
         <svg width="24" height="12" viewBox="0 0 24 12" fill="none">
@@ -263,8 +237,8 @@ function LabeledConnectorEdge({
       getMarker: (color) => ({
         type: MarkerType.Circle,
         color,
-        width: 14,
-        height: 14,
+        width: 20,
+        height: 20,
       }),
       icon: (
         <svg width="24" height="12" viewBox="0 0 24 12" fill="none">
@@ -279,8 +253,8 @@ function LabeledConnectorEdge({
       getMarker: (color) => ({
         type: MarkerType.Diamond,
         color,
-        width: 18,
-        height: 18,
+        width: 24,
+        height: 24,
       }),
       icon: (
         <svg width="24" height="12" viewBox="0 0 24 12" fill="none">
@@ -295,8 +269,8 @@ function LabeledConnectorEdge({
       getMarker: (color) => ({
         type: MarkerType.Bar,
         color,
-        width: 14,
-        height: 14,
+        width: 20,
+        height: 20,
       }),
       icon: (
         <svg width="24" height="12" viewBox="0 0 24 12" fill="none">
@@ -309,14 +283,6 @@ function LabeledConnectorEdge({
 
   return (
     <>
-      {showLabelInLine && (
-        <svg
-          aria-hidden
-          style={{ position: "absolute", width: 0, height: 0, overflow: "hidden" }}
-        >
-          <path ref={pathMeasureRef} d={edgePath} />
-        </svg>
-      )}
       <BaseEdge
         id={id}
         path={edgePath}
@@ -494,25 +460,21 @@ function LabeledConnectorEdge({
             </div>
           </div>
           {/* Label customization */}
-          {allowLabels && (
-            <>
-              <div className="w-px h-4 bg-gray-600" />
-              <div className="flex items-center gap-1">
-                <span className="text-[10px] font-medium text-gray-500 uppercase tracking-wider mr-0.5">Label</span>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setIsEditingLabel(true);
-                    setEditValue(label);
-                  }}
-                  title="Edit label text"
-                  className="px-2 py-1 rounded hover:bg-gray-600 text-xs whitespace-nowrap"
-                >
-                  {label ? "Edit text" : "Add text"}
-                </button>
-              </div>
-            </>
-          )}
+          <div className="w-px h-4 bg-gray-600" />
+          <div className="flex items-center gap-1">
+            <span className="text-[10px] font-medium text-gray-500 uppercase tracking-wider mr-0.5">Label</span>
+            <button
+              type="button"
+              onClick={() => {
+                setIsEditingLabel(true);
+                setEditValue(label);
+              }}
+              title="Edit label text"
+              className="px-2 py-1 rounded hover:bg-gray-600 text-xs whitespace-nowrap"
+            >
+              {label ? "Edit text" : "Add text"}
+            </button>
+          </div>
           <div className="w-px h-4 bg-gray-600" />
           <button
             type="button"
@@ -526,8 +488,9 @@ function LabeledConnectorEdge({
           </button>
         </div>
       </EdgeToolbar>
-      {allowLabels && (
       <EdgeLabelRenderer>
+        {/* Edge label — only render when editing or label exists */}
+        {(label || isEditingLabel) && (
         <div
           style={{
             position: "absolute",
@@ -548,39 +511,20 @@ function LabeledConnectorEdge({
                   setIsEditingLabel(false);
                 }
               }}
-              className="px-2 py-1 text-xs bg-transparent border border-violet-300 rounded focus:outline-none focus:ring-2 focus:ring-violet-500 min-w-[60px] text-gray-800"
-              style={{ boxShadow: "none" }}
+              className="px-2.5 py-1 text-xs bg-white border border-violet-300 rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-violet-500 min-w-[60px] text-gray-800"
               autoFocus
             />
-          ) : label ? (
+          ) : (
             <div
-              onClick={() => setIsEditingLabel(true)}
-              onDoubleClick={() => setIsEditingLabel(true)}
-              className="px-2 py-1 text-xs bg-transparent border border-transparent cursor-text hover:border-gray-300 rounded text-gray-800"
-              style={{ boxShadow: "none" }}
+              onClick={() => { setEditValue(label); setIsEditingLabel(true); }}
+              onDoubleClick={() => { setEditValue(label); setIsEditingLabel(true); }}
+              className="px-2.5 py-0.5 text-xs bg-white border border-gray-200 rounded-md shadow-sm cursor-text hover:border-violet-300 text-gray-700 font-medium"
             >
               {label}
             </div>
-          ) : (
-            <div
-              role="button"
-              tabIndex={0}
-              onClick={() => { setEditValue(""); setIsEditingLabel(true); }}
-              onDoubleClick={() => { setEditValue(""); setIsEditingLabel(true); }}
-              onKeyDown={(e) => {
-                if (e.key === "Enter" || e.key === " ") {
-                  e.preventDefault();
-                  setEditValue("");
-                  setIsEditingLabel(true);
-                }
-              }}
-              className="px-2 py-1 text-xs text-gray-400 border border-dashed border-gray-300 rounded cursor-text hover:border-violet-300 hover:text-violet-600 min-w-[60px] bg-transparent"
-              style={{ boxShadow: "none" }}
-            >
-              Double-click to add label
-            </div>
           )}
         </div>
+        )}
         {selected &&
           effectivePathPoints.map((pt, i) => (
             <div
@@ -607,6 +551,7 @@ function LabeledConnectorEdge({
               onKeyDown={(e) => {
                 if (e.key === "Delete" || e.key === "Backspace") {
                   e.preventDefault();
+                  pushUndo();
                   const newPoints = effectivePathPoints.filter((_, idx) => idx !== i);
                   updateEdgeData(id, { pathPoints: newPoints });
                 }
@@ -615,7 +560,6 @@ function LabeledConnectorEdge({
             />
           ))}
       </EdgeLabelRenderer>
-      )}
     </>
   );
 }

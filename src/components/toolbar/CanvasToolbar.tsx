@@ -68,7 +68,9 @@ function ToolButton({ icon, label, tool, active, onClick }: ToolButtonProps) {
           onClick={onClick}
           className={cn(
             "w-10 h-10 flex items-center justify-center rounded-lg transition-colors",
-            active ? "bg-violet-100 text-violet-600" : "hover:bg-gray-100 text-gray-600"
+            active
+              ? "bg-violet-100 text-violet-600 dark:bg-violet-900/40 dark:text-violet-400"
+              : "hover:bg-gray-100 text-gray-600 dark:hover:bg-gray-700 dark:text-gray-400"
           )}
           aria-label={label}
         >
@@ -243,7 +245,7 @@ export default function CanvasToolbar({ activeTool, onToolChange }: CanvasToolba
 
   return (
     <Tooltip.Provider delayDuration={300}>
-      <div className="w-12 bg-white border-r border-gray-200 flex flex-col items-center py-2 gap-1 shadow-sm">
+      <div className="w-12 bg-white dark:bg-gray-800 border-r border-gray-200 dark:border-gray-700 flex flex-col items-center py-2 gap-1 shadow-sm">
         {/* Select group: Select + Selection box */}
         <Popover.Root open={selectOpen} onOpenChange={setSelectOpen}>
           <Tooltip.Root>
@@ -253,7 +255,7 @@ export default function CanvasToolbar({ activeTool, onToolChange }: CanvasToolba
                   type="button"
                   className={cn(
                     "w-10 h-10 flex items-center justify-center rounded-lg transition-colors",
-                    isSelectGroup ? "bg-violet-100 text-violet-600" : "hover:bg-gray-100 text-gray-600"
+                    isSelectGroup ? "bg-violet-100 text-violet-600 dark:bg-violet-900/40 dark:text-violet-400" : "hover:bg-gray-100 text-gray-600 dark:hover:bg-gray-700 dark:text-gray-400"
                   )}
                   aria-label="Select tools"
                 >
@@ -268,13 +270,13 @@ export default function CanvasToolbar({ activeTool, onToolChange }: CanvasToolba
             </Tooltip.Portal>
           </Tooltip.Root>
           <Popover.Portal>
-            <Popover.Content className="z-50 w-56 p-2 rounded-lg bg-white border border-gray-200 shadow-lg" sideOffset={8} side="right" align="start">
-              <div className="text-xs font-medium text-gray-500 px-2 py-1.5 border-b border-gray-100 mb-2">Select</div>
+            <Popover.Content className="z-50 w-56 p-2 rounded-lg bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 shadow-lg" sideOffset={8} side="right" align="start">
+              <div className="text-xs font-medium text-gray-500 dark:text-gray-400 px-2 py-1.5 border-b border-gray-100 dark:border-gray-700 mb-2">Select</div>
               <div className="flex flex-col gap-0.5">
                 <button
                   type="button"
                   onClick={() => { handleToolClick("select"); setSelectOpen(false); }}
-                  className={cn("flex items-center gap-2 px-2 py-2 rounded-md text-xs transition-colors text-left", activeTool === "select" ? "bg-violet-100 text-violet-700" : "hover:bg-gray-100 text-gray-700")}
+                  className={cn("flex items-center gap-2 px-2 py-2 rounded-md text-xs transition-colors text-left", activeTool === "select" ? "bg-violet-100 text-violet-700 dark:bg-violet-900/30 dark:text-violet-400" : "hover:bg-gray-100 text-gray-700 dark:hover:bg-gray-700 dark:text-gray-300")}
                 >
                   <MousePointer2 className="w-4 h-4 shrink-0" />
                   <span>Select (drag node to move, drag canvas to pan)</span>
@@ -282,7 +284,7 @@ export default function CanvasToolbar({ activeTool, onToolChange }: CanvasToolba
                 <button
                   type="button"
                   onClick={() => { handleToolClick("selection"); setSelectOpen(false); }}
-                  className={cn("flex items-center gap-2 px-2 py-2 rounded-md text-xs transition-colors text-left", activeTool === "selection" ? "bg-violet-100 text-violet-700" : "hover:bg-gray-100 text-gray-700")}
+                  className={cn("flex items-center gap-2 px-2 py-2 rounded-md text-xs transition-colors text-left", activeTool === "selection" ? "bg-violet-100 text-violet-700 dark:bg-violet-900/30 dark:text-violet-400" : "hover:bg-gray-100 text-gray-700 dark:hover:bg-gray-700 dark:text-gray-300")}
                 >
                   <BoxSelect className="w-4 h-4 shrink-0" />
                   <span>Selection box (drag on canvas to select area)</span>
@@ -291,7 +293,7 @@ export default function CanvasToolbar({ activeTool, onToolChange }: CanvasToolba
             </Popover.Content>
           </Popover.Portal>
         </Popover.Root>
-        <div className="w-8 h-px bg-gray-200 my-1" />
+        <div className="w-8 h-px bg-gray-200 dark:bg-gray-600 my-1" />
       <Popover.Root open={shapesOpen} onOpenChange={setShapesOpen}>
         <Tooltip.Root>
           <Tooltip.Trigger asChild>
@@ -300,7 +302,7 @@ export default function CanvasToolbar({ activeTool, onToolChange }: CanvasToolba
                 type="button"
                 className={cn(
                   "w-10 h-10 flex items-center justify-center rounded-lg transition-colors",
-                  (pendingShape || (activeTool === "rectangle" && !pendingShape)) ? "bg-violet-100 text-violet-600" : "hover:bg-gray-100 text-gray-600"
+                  (pendingShape || (activeTool === "rectangle" && !pendingShape)) ? "bg-violet-100 text-violet-600 dark:bg-violet-900/40 dark:text-violet-400" : "hover:bg-gray-100 text-gray-600 dark:hover:bg-gray-700 dark:text-gray-400"
                 )}
                 aria-label="Shapes menu"
               >
@@ -316,12 +318,12 @@ export default function CanvasToolbar({ activeTool, onToolChange }: CanvasToolba
         </Tooltip.Root>
         <Popover.Portal>
           <Popover.Content
-            className="z-50 w-52 p-2 rounded-lg bg-white border border-gray-200 shadow-lg"
+            className="z-50 w-52 p-2 rounded-lg bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 shadow-lg"
             sideOffset={8}
             side="right"
             align="start"
           >
-            <div className="text-xs font-medium text-gray-500 px-2 py-1.5 border-b border-gray-100 mb-2">
+            <div className="text-xs font-medium text-gray-500 dark:text-gray-400 px-2 py-1.5 border-b border-gray-100 dark:border-gray-700 mb-2">
               Shapes
             </div>
             <div className="grid grid-cols-3 gap-1 max-h-64 overflow-y-auto">
@@ -334,7 +336,7 @@ export default function CanvasToolbar({ activeTool, onToolChange }: CanvasToolba
                   onClick={() => handleShapePick(shape)}
                   className={cn(
                     "flex flex-col items-center gap-0.5 p-2 rounded-md text-xs transition-colors",
-                    pendingShape === shape ? "bg-violet-100 text-violet-700" : "hover:bg-gray-100 text-gray-700"
+                    pendingShape === shape ? "bg-violet-100 text-violet-700 dark:bg-violet-900/30 dark:text-violet-400" : "hover:bg-gray-100 text-gray-700 dark:hover:bg-gray-700 dark:text-gray-300"
                   )}
                   title={`${SHAPE_LABELS[shape]} (drag to canvas)`}
                 >
@@ -347,7 +349,7 @@ export default function CanvasToolbar({ activeTool, onToolChange }: CanvasToolba
                       <line x1={5} y1={62} x2={95} y2={62} stroke="currentColor" strokeWidth={2} />
                     </svg>
                   ) : (
-                    <svg width={20} height={20} viewBox="0 0 100 100" className="shrink-0 text-gray-600" fill="none" stroke="currentColor" strokeWidth={3}>
+                    <svg width={20} height={20} viewBox="0 0 100 100" className="shrink-0 text-gray-600 dark:text-gray-400" fill="none" stroke="currentColor" strokeWidth={3}>
                       <path d={SHAPE_PATHS[shape]} vectorEffect="non-scaling-stroke" />
                     </svg>
                   )}
@@ -366,7 +368,7 @@ export default function CanvasToolbar({ activeTool, onToolChange }: CanvasToolba
                 type="button"
                 className={cn(
                   "w-10 h-10 flex items-center justify-center rounded-lg transition-colors",
-                  activeTool === "connector" ? "bg-violet-100 text-violet-600" : "hover:bg-gray-100 text-gray-600"
+                  activeTool === "connector" ? "bg-violet-100 text-violet-600 dark:bg-violet-900/40 dark:text-violet-400" : "hover:bg-gray-100 text-gray-600 dark:hover:bg-gray-700 dark:text-gray-400"
                 )}
                 aria-label="Connector / edge"
               >
@@ -382,12 +384,12 @@ export default function CanvasToolbar({ activeTool, onToolChange }: CanvasToolba
         </Tooltip.Root>
         <Popover.Portal>
           <Popover.Content
-            className="z-50 w-40 p-2 rounded-lg bg-white border border-gray-200 shadow-lg"
+            className="z-50 w-40 p-2 rounded-lg bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 shadow-lg"
             sideOffset={8}
             side="right"
             align="start"
           >
-            <div className="text-xs font-medium text-gray-500 px-2 py-1.5 border-b border-gray-100 mb-2">
+            <div className="text-xs font-medium text-gray-500 dark:text-gray-400 px-2 py-1.5 border-b border-gray-100 dark:border-gray-700 mb-2">
               Edge type
             </div>
             <div className="flex flex-col gap-0.5">
@@ -398,11 +400,11 @@ export default function CanvasToolbar({ activeTool, onToolChange }: CanvasToolba
                   onClick={() => handleEdgeTypePick(opt.type)}
                   className={cn(
                     "flex items-center gap-2 px-2 py-2 rounded-md text-xs transition-colors text-left",
-                    pendingEdgeType === opt.type ? "bg-violet-100 text-violet-700" : "hover:bg-gray-100 text-gray-700"
+                    pendingEdgeType === opt.type ? "bg-violet-100 text-violet-700 dark:bg-violet-900/30 dark:text-violet-400" : "hover:bg-gray-100 text-gray-700 dark:hover:bg-gray-700 dark:text-gray-300"
                   )}
                   title={opt.label}
                 >
-                  <span className="shrink-0 text-gray-600">{opt.icon}</span>
+                  <span className="shrink-0 text-gray-600 dark:text-gray-400">{opt.icon}</span>
                   <span>{opt.label}</span>
                 </button>
               ))}
@@ -419,7 +421,7 @@ export default function CanvasToolbar({ activeTool, onToolChange }: CanvasToolba
                   type="button"
                   className={cn(
                     "w-10 h-10 flex items-center justify-center rounded-lg transition-colors",
-                    isAddNodeGroup ? "bg-violet-100 text-violet-600" : "hover:bg-gray-100 text-gray-600"
+                    isAddNodeGroup ? "bg-violet-100 text-violet-600 dark:bg-violet-900/40 dark:text-violet-400" : "hover:bg-gray-100 text-gray-600 dark:hover:bg-gray-700 dark:text-gray-400"
                   )}
                   aria-label="Add nodes"
                 >
@@ -434,8 +436,8 @@ export default function CanvasToolbar({ activeTool, onToolChange }: CanvasToolba
             </Tooltip.Portal>
           </Tooltip.Root>
           <Popover.Portal>
-            <Popover.Content className="z-50 w-56 max-h-[70vh] overflow-y-auto p-2 rounded-lg bg-white border border-gray-200 shadow-lg" sideOffset={8} side="right" align="start">
-              <div className="text-xs font-medium text-gray-500 px-2 py-1.5 border-b border-gray-100 mb-2">Nodes</div>
+            <Popover.Content className="z-50 w-56 max-h-[70vh] overflow-y-auto p-2 rounded-lg bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 shadow-lg" sideOffset={8} side="right" align="start">
+              <div className="text-xs font-medium text-gray-500 dark:text-gray-400 px-2 py-1.5 border-b border-gray-100 dark:border-gray-700 mb-2">Nodes</div>
               <div className="flex flex-col gap-0.5 mb-2">
                 {ADD_NODE_OPTIONS.map(({ icon, label, tool }) => {
                   const dragPayload = getDragPayloadForTool(tool);
@@ -446,9 +448,9 @@ export default function CanvasToolbar({ activeTool, onToolChange }: CanvasToolba
                       draggable={!!dragPayload}
                       onDragStart={dragPayload ? (e) => setDragPayload(e.dataTransfer, dragPayload) : undefined}
                       onClick={() => { handleToolClick(tool); setAddNodesOpen(false); }}
-                      className={cn("flex items-center gap-2 px-2 py-2 rounded-md text-xs transition-colors text-left", activeTool === tool ? "bg-violet-100 text-violet-700" : "hover:bg-gray-100 text-gray-700")}
+                      className={cn("flex items-center gap-2 px-2 py-2 rounded-md text-xs transition-colors text-left", activeTool === tool ? "bg-violet-100 text-violet-700 dark:bg-violet-900/30 dark:text-violet-400" : "hover:bg-gray-100 text-gray-700 dark:hover:bg-gray-700 dark:text-gray-300")}
                     >
-                      <span className="shrink-0 text-gray-600">{icon}</span>
+                      <span className="shrink-0 text-gray-600 dark:text-gray-400">{icon}</span>
                       <span>{label}</span>
                     </button>
                   );
@@ -466,7 +468,7 @@ export default function CanvasToolbar({ activeTool, onToolChange }: CanvasToolba
                   type="button"
                   className={cn(
                     "w-10 h-10 flex items-center justify-center rounded-lg transition-colors",
-                    activeTool === "emoji" || activeTool === "image" ? "bg-violet-100 text-violet-600" : "hover:bg-gray-100 text-gray-600"
+                    activeTool === "emoji" || activeTool === "image" ? "bg-violet-100 text-violet-600 dark:bg-violet-900/40 dark:text-violet-400" : "hover:bg-gray-100 text-gray-600 dark:hover:bg-gray-700 dark:text-gray-400"
                   )}
                   aria-label="Icons & images"
                 >
@@ -481,8 +483,8 @@ export default function CanvasToolbar({ activeTool, onToolChange }: CanvasToolba
             </Tooltip.Portal>
           </Tooltip.Root>
           <Popover.Portal>
-            <Popover.Content className="z-50 w-80 max-h-[75vh] overflow-hidden flex flex-col rounded-lg bg-white border border-gray-200 shadow-lg" sideOffset={8} side="right" align="start">
-              <div className="p-2 border-b border-gray-100 shrink-0">
+            <Popover.Content className="z-50 w-80 max-h-[75vh] overflow-hidden flex flex-col rounded-lg bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 shadow-lg" sideOffset={8} side="right" align="start">
+              <div className="p-2 border-b border-gray-100 dark:border-gray-700 shrink-0">
                 <div className="relative">
                   <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
                   <input
@@ -490,12 +492,12 @@ export default function CanvasToolbar({ activeTool, onToolChange }: CanvasToolba
                     placeholder="Search icons or images..."
                     value={searchIconsImages}
                     onChange={(e) => setSearchIconsImages(e.target.value)}
-                    className="w-full pl-8 pr-3 py-2 text-sm rounded-lg border border-gray-200 focus:ring-2 focus:ring-violet-500 focus:border-transparent"
+                    className="w-full pl-8 pr-3 py-2 text-sm rounded-lg border border-gray-200 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-200 focus:ring-2 focus:ring-violet-500 focus:border-transparent"
                   />
                 </div>
               </div>
               <div className="flex-1 overflow-y-auto p-2 min-h-0">
-                <div className="text-xs font-medium text-gray-500 px-1 py-1.5 border-b border-gray-100 mb-2">Icons</div>
+                <div className="text-xs font-medium text-gray-500 dark:text-gray-400 px-1 py-1.5 border-b border-gray-100 dark:border-gray-700 mb-2">Icons</div>
                 <div className="grid grid-cols-6 gap-1 mb-4 max-h-44 overflow-y-auto">
                   {filteredIcons.map((def) => (
                     <button
@@ -504,15 +506,15 @@ export default function CanvasToolbar({ activeTool, onToolChange }: CanvasToolba
                       draggable
                       onDragStart={(e) => setDragPayload(e.dataTransfer, { type: "icon", data: { iconId: def.id } })}
                       onClick={() => handleIconPick(def.id)}
-                      className="flex flex-col items-center justify-center h-10 rounded-md text-[10px] gap-0.5 hover:bg-gray-100"
+                      className="flex flex-col items-center justify-center h-10 rounded-md text-[10px] gap-0.5 hover:bg-gray-100 dark:hover:bg-gray-700"
                       title={`${def.label} (drag to canvas)`}
                     >
-                      <def.Icon className="w-4 h-4 text-gray-700 shrink-0" />
+                      <def.Icon className="w-4 h-4 text-gray-700 dark:text-gray-300 shrink-0" />
                       <span className="truncate w-full px-0.5">{def.label}</span>
                     </button>
                   ))}
                 </div>
-                <div className="text-xs font-medium text-gray-500 px-1 py-1.5 border-t border-gray-100 pt-2 mb-2">Emoji</div>
+                <div className="text-xs font-medium text-gray-500 dark:text-gray-400 px-1 py-1.5 border-t border-gray-100 dark:border-gray-700 pt-2 mb-2">Emoji</div>
                 <div className="grid grid-cols-8 gap-1 mb-4">
                   {EMOJIS.map((emoji) => (
                     <button
@@ -521,13 +523,13 @@ export default function CanvasToolbar({ activeTool, onToolChange }: CanvasToolba
                       draggable
                       onDragStart={(e) => setDragPayload(e.dataTransfer, { type: "icon", data: { emoji } })}
                       onClick={() => handleEmojiPickFromToolbar(emoji)}
-                      className="flex items-center justify-center h-8 rounded-md text-lg hover:bg-gray-100"
+                      className="flex items-center justify-center h-8 rounded-md text-lg hover:bg-gray-100 dark:hover:bg-gray-700"
                     >
                       {emoji}
                     </button>
                   ))}
                 </div>
-                <div className="text-xs font-medium text-gray-500 px-1 py-1.5 border-t border-gray-100 pt-2 mb-2">Images</div>
+                <div className="text-xs font-medium text-gray-500 dark:text-gray-400 px-1 py-1.5 border-t border-gray-100 dark:border-gray-700 pt-2 mb-2">Images</div>
                 <div className="grid grid-cols-3 gap-2">
                   {filteredImages.map((preset) => (
                     <button
@@ -536,7 +538,7 @@ export default function CanvasToolbar({ activeTool, onToolChange }: CanvasToolba
                       draggable
                       onDragStart={(e) => setDragPayload(e.dataTransfer, { type: "image", data: { imageUrl: `${PICSUM_BASE}/${preset.seed}/200/150`, label: preset.label } })}
                       onClick={() => handleImagePick(`${PICSUM_BASE}/${preset.seed}/200/150`, preset.label)}
-                      className="flex flex-col rounded-lg border border-gray-200 overflow-hidden hover:border-violet-300 hover:bg-violet-50/50 transition-colors"
+                      className="flex flex-col rounded-lg border border-gray-200 dark:border-gray-700 overflow-hidden hover:border-violet-300 dark:hover:border-violet-500 hover:bg-violet-50/50 dark:hover:bg-violet-900/20 transition-colors"
                     >
                       <img src={`${PICSUM_BASE}/${preset.seed}/80/60`} alt="" className="w-full aspect-[4/3] object-cover bg-gray-100" draggable={false} />
                       <span className="text-[10px] py-1 px-1 truncate text-center text-gray-600">{preset.label}</span>
@@ -556,7 +558,7 @@ export default function CanvasToolbar({ activeTool, onToolChange }: CanvasToolba
                   type="button"
                   className={cn(
                     "w-10 h-10 flex items-center justify-center rounded-lg transition-colors",
-                    isDrawGroup ? "bg-violet-100 text-violet-600" : "hover:bg-gray-100 text-gray-600"
+                    isDrawGroup ? "bg-violet-100 text-violet-600 dark:bg-violet-900/40 dark:text-violet-400" : "hover:bg-gray-100 text-gray-600 dark:hover:bg-gray-700 dark:text-gray-400"
                   )}
                   aria-label="Draw"
                 >
@@ -571,13 +573,13 @@ export default function CanvasToolbar({ activeTool, onToolChange }: CanvasToolba
             </Tooltip.Portal>
           </Tooltip.Root>
           <Popover.Portal>
-            <Popover.Content className="z-50 w-48 p-2 rounded-lg bg-white border border-gray-200 shadow-lg" sideOffset={8} side="right" align="start">
-              <div className="text-xs font-medium text-gray-500 px-2 py-1.5 border-b border-gray-100 mb-2">Draw</div>
+            <Popover.Content className="z-50 w-48 p-2 rounded-lg bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 shadow-lg" sideOffset={8} side="right" align="start">
+              <div className="text-xs font-medium text-gray-500 dark:text-gray-400 px-2 py-1.5 border-b border-gray-100 dark:border-gray-700 mb-2">Draw</div>
               <div className="flex flex-col gap-0.5">
                 <button
                   type="button"
                   onClick={() => { handleToolClick("freeDraw"); setDrawOpen(false); }}
-                  className={cn("flex items-center gap-2 px-2 py-2 rounded-md text-xs transition-colors text-left", activeTool === "freeDraw" ? "bg-violet-100 text-violet-700" : "hover:bg-gray-100 text-gray-700")}
+                  className={cn("flex items-center gap-2 px-2 py-2 rounded-md text-xs transition-colors text-left", activeTool === "freeDraw" ? "bg-violet-100 text-violet-700 dark:bg-violet-900/30 dark:text-violet-400" : "hover:bg-gray-100 text-gray-700 dark:hover:bg-gray-700 dark:text-gray-300")}
                 >
                   <Pencil className="w-4 h-4 shrink-0" />
                   Freehand draw
@@ -585,7 +587,7 @@ export default function CanvasToolbar({ activeTool, onToolChange }: CanvasToolba
                 <button
                   type="button"
                   onClick={() => { handleToolClick("eraser"); setDrawOpen(false); }}
-                  className={cn("flex items-center gap-2 px-2 py-2 rounded-md text-xs transition-colors text-left", activeTool === "eraser" ? "bg-violet-100 text-violet-700" : "hover:bg-gray-100 text-gray-700")}
+                  className={cn("flex items-center gap-2 px-2 py-2 rounded-md text-xs transition-colors text-left", activeTool === "eraser" ? "bg-violet-100 text-violet-700 dark:bg-violet-900/30 dark:text-violet-400" : "hover:bg-gray-100 text-gray-700 dark:hover:bg-gray-700 dark:text-gray-300")}
                 >
                   <Eraser className="w-4 h-4 shrink-0" />
                   Eraser
@@ -594,7 +596,7 @@ export default function CanvasToolbar({ activeTool, onToolChange }: CanvasToolba
             </Popover.Content>
           </Popover.Portal>
         </Popover.Root>
-        <div className="w-8 h-px bg-gray-200 my-1" />
+        <div className="w-8 h-px bg-gray-200 dark:bg-gray-600 my-1" />
         <ToolButton icon={<Wand2 className="w-5 h-5" />} label="AI Generate" tool="ai" active={false} onClick={() => handleToolClick("ai")} />
     </div>
     </Tooltip.Provider>

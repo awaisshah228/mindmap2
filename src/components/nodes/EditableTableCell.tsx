@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef } from "react";
 import { useReactFlow } from "@xyflow/react";
 import { cn } from "@/lib/utils";
+import { useCanvasStore } from "@/lib/store/canvas-store";
 
 interface EditableTableCellProps {
   nodeId: string;
@@ -23,7 +24,9 @@ export function EditableTableCell({
   className,
 }: EditableTableCellProps) {
   const { getNode, updateNodeData } = useReactFlow();
+  const pushUndo = useCanvasStore((s) => s.pushUndo);
   const ref = useRef<HTMLDivElement>(null);
+  const undoPushedRef = useRef(false);
 
   useEffect(() => {
     if (ref.current && ref.current.innerText !== value && !ref.current.matches(":focus")) {
@@ -31,7 +34,15 @@ export function EditableTableCell({
     }
   }, [value]);
 
+  const handleFocus = useCallback(() => {
+    if (!undoPushedRef.current) {
+      pushUndo();
+      undoPushedRef.current = true;
+    }
+  }, [pushUndo]);
+
   const handleBlur = useCallback(() => {
+    undoPushedRef.current = false;
     const text = ref.current?.innerText?.trim() ?? "";
     const node = getNode(nodeId);
     const cells = (node?.data?.cells as Record<string, string>) ?? {};
@@ -61,6 +72,7 @@ export function EditableTableCell({
         className
       )}
       data-placeholder={placeholder}
+      onFocus={handleFocus}
       onBlur={handleBlur}
       onKeyDown={handleKeyDown}
     />

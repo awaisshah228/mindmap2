@@ -57,14 +57,16 @@ function MindMapNode({ id, data, selected }: NodeProps) {
   const iconDef = getIconById(data.icon as string);
   const IconComponent = iconDef?.Icon;
   const router = useRouter();
+  const presentationMode = useCanvasStore((s) => s.presentationMode);
 
   const handleToggleCollapse = useCallback(
     (e: React.MouseEvent) => {
       e.stopPropagation();
       if (!hasChildren) return;
+      pushUndo();
       updateNodeData?.(id, { collapsed: !collapsed });
     },
-    [id, hasChildren, collapsed, updateNodeData]
+    [id, hasChildren, collapsed, updateNodeData, pushUndo]
   );
 
   const handleAddBelow = useCallback(() => {
@@ -157,17 +159,19 @@ function MindMapNode({ id, data, selected }: NodeProps) {
 
   return (
     <>
-      <NodeInlineToolbar nodeId={id} selected={selected} />
-      <NodeResizer
-        nodeId={id}
-        isVisible={selected}
-        minWidth={100}
-        minHeight={36}
-        color="rgb(139 92 246)"
-        lineClassName="!border-violet-400"
-        handleClassName="!bg-violet-400 !border-violet-500 !w-2 !h-2"
-        onResizeStart={() => pushUndo()}
-      />
+      {!presentationMode && <NodeInlineToolbar nodeId={id} selected={selected} />}
+      {!presentationMode && (
+        <NodeResizer
+          nodeId={id}
+          isVisible={selected}
+          minWidth={100}
+          minHeight={36}
+          color="rgb(139 92 246)"
+          lineClassName="!border-violet-400"
+          handleClassName="!bg-violet-400 !border-violet-500 !w-2 !h-2"
+          onResizeStart={() => pushUndo()}
+        />
+      )}
       <div
         className={cn(
           "group flex items-center transition-all",
@@ -181,65 +185,79 @@ function MindMapNode({ id, data, selected }: NodeProps) {
         onMouseLeave={onMouseLeave}
       >
         {/* All 4 handles so edges always find their connection point (avoids disappearing when direction/layout mismatch) */}
-        {/* Drag handle: large tap target for dragging on mobile */}
-        {/* Easy Connect: only this handle drags the node; rest is for connections */}
-        <div
-          className="shrink-0 flex items-center justify-center w-9 min-w-[36px] h-9 min-h-[36px] rounded-l-2xl cursor-grab active:cursor-grabbing touch-manipulation opacity-70 hover:opacity-100 transition-opacity border border-transparent border-r-0"
-          style={{
-            backgroundColor: branchStyle.bg,
-            borderColor: `${branchStyle.stroke}40`,
-          }}
-          title="Drag to move node"
-          aria-label="Drag to move node"
-        >
-          <GripVertical className="w-5 h-5" style={{ color: branchStyle.stroke }} />
-        </div>
-        {/* Easy Connect: larger hit areas; circles visible only when node selected */}
+        {/* Drag handle: large tap target for dragging on mobile — hidden in presentation */}
+        {!presentationMode && (
+          <div
+            className="shrink-0 flex items-center justify-center w-9 min-w-[36px] h-9 min-h-[36px] rounded-l-2xl cursor-grab active:cursor-grabbing touch-manipulation opacity-70 hover:opacity-100 transition-opacity border border-transparent border-r-0"
+            style={{
+              backgroundColor: branchStyle.bg,
+              borderColor: `${branchStyle.stroke}40`,
+            }}
+            title="Drag to move node"
+            aria-label="Drag to move node"
+          >
+            <GripVertical className="w-5 h-5" style={{ color: branchStyle.stroke }} />
+          </div>
+        )}
+        {/* Handles: always rendered (edges need them), but invisible in presentation mode */}
         <Handle
           id="left"
           type={sourceHandleId === "left" ? "source" : "target"}
           position={Position.Left}
           className={cn(
-            "!w-5 !h-5 !min-w-5 !min-h-5 !-left-2.5 !top-1/2 !-translate-y-1/2 !rounded-full !border-2 !transition-all",
-            selected ? "!border-gray-300/60 !opacity-60 hover:!opacity-100" : "!opacity-0"
+            "!rounded-full !border-2 !transition-all",
+            presentationMode
+              ? "!w-0 !h-0 !min-w-0 !min-h-0 !opacity-0 !border-0"
+              : "!w-5 !h-5 !min-w-5 !min-h-5 !-left-2.5 !top-1/2 !-translate-y-1/2",
+            !presentationMode && (selected ? "!border-gray-300/60 !opacity-60 hover:!opacity-100" : "!opacity-0")
           )}
-          style={selected ? { backgroundColor: branchStyle.bg, borderColor: branchStyle.stroke } : undefined}
+          style={!presentationMode && selected ? { backgroundColor: branchStyle.bg, borderColor: branchStyle.stroke } : undefined}
         />
         <Handle
           id="right"
           type={sourceHandleId === "right" ? "source" : "target"}
           position={Position.Right}
           className={cn(
-            "!w-5 !h-5 !min-w-5 !min-h-5 !-right-2.5 !top-1/2 !-translate-y-1/2 !rounded-full !border-2 !transition-all",
-            selected ? "!border-gray-300/60 !opacity-60 hover:!opacity-100" : "!opacity-0"
+            "!rounded-full !border-2 !transition-all",
+            presentationMode
+              ? "!w-0 !h-0 !min-w-0 !min-h-0 !opacity-0 !border-0"
+              : "!w-5 !h-5 !min-w-5 !min-h-5 !-right-2.5 !top-1/2 !-translate-y-1/2",
+            !presentationMode && (selected ? "!border-gray-300/60 !opacity-60 hover:!opacity-100" : "!opacity-0")
           )}
-          style={selected ? { backgroundColor: branchStyle.bg, borderColor: branchStyle.stroke } : undefined}
+          style={!presentationMode && selected ? { backgroundColor: branchStyle.bg, borderColor: branchStyle.stroke } : undefined}
         />
         <Handle
           id="top"
           type={sourceHandleId === "top" ? "source" : "target"}
           position={Position.Top}
           className={cn(
-            "!w-5 !h-5 !min-w-5 !min-h-5 !-top-2.5 !left-1/2 !-translate-x-1/2 !rounded-full !border-2 !transition-all",
-            selected ? "!border-gray-300/60 !opacity-60 hover:!opacity-100" : "!opacity-0"
+            "!rounded-full !border-2 !transition-all",
+            presentationMode
+              ? "!w-0 !h-0 !min-w-0 !min-h-0 !opacity-0 !border-0"
+              : "!w-5 !h-5 !min-w-5 !min-h-5 !-top-2.5 !left-1/2 !-translate-x-1/2",
+            !presentationMode && (selected ? "!border-gray-300/60 !opacity-60 hover:!opacity-100" : "!opacity-0")
           )}
-          style={selected ? { backgroundColor: branchStyle.bg, borderColor: branchStyle.stroke } : undefined}
+          style={!presentationMode && selected ? { backgroundColor: branchStyle.bg, borderColor: branchStyle.stroke } : undefined}
         />
         <Handle
           id="bottom"
           type={sourceHandleId === "bottom" ? "source" : "target"}
           position={Position.Bottom}
           className={cn(
-            "!w-5 !h-5 !min-w-5 !min-h-5 !-bottom-2.5 !left-1/2 !-translate-x-1/2 !rounded-full !border-2 !transition-all",
-            selected ? "!border-gray-300/60 !opacity-60 hover:!opacity-100" : "!opacity-0"
+            "!rounded-full !border-2 !transition-all",
+            presentationMode
+              ? "!w-0 !h-0 !min-w-0 !min-h-0 !opacity-0 !border-0"
+              : "!w-5 !h-5 !min-w-5 !min-h-5 !-bottom-2.5 !left-1/2 !-translate-x-1/2",
+            !presentationMode && (selected ? "!border-gray-300/60 !opacity-60 hover:!opacity-100" : "!opacity-0")
           )}
-          style={selected ? { backgroundColor: branchStyle.bg, borderColor: branchStyle.stroke } : undefined}
+          style={!presentationMode && selected ? { backgroundColor: branchStyle.bg, borderColor: branchStyle.stroke } : undefined}
         />
         <div
           className={cn(
-            "nodrag flex-1 min-w-0 flex items-center gap-2 rounded-r-2xl rounded-l-none px-3 py-2.5 transition-all shadow-sm",
+            "nodrag flex-1 min-w-0 flex items-center gap-2 px-3 py-2.5 transition-all shadow-sm",
+            presentationMode ? "rounded-2xl" : "rounded-r-2xl rounded-l-none",
             "border border-transparent",
-            selected && "ring-2 ring-violet-400 ring-offset-2 shadow-md"
+            selected && !presentationMode && "ring-2 ring-violet-400 ring-offset-2 shadow-md"
           )}
           style={{
             backgroundColor: branchStyle.bg,
@@ -247,7 +265,7 @@ function MindMapNode({ id, data, selected }: NodeProps) {
             color: branchStyle.text,
           }}
         >
-          {hasChildren ? (
+          {!presentationMode && (hasChildren ? (
             <button
               type="button"
               onClick={handleToggleCollapse}
@@ -264,7 +282,7 @@ function MindMapNode({ id, data, selected }: NodeProps) {
             </button>
           ) : (
             <span className="w-7 shrink-0" aria-hidden />
-          )}
+          ))}
           {(customIcon || IconComponent) && (
             <span className="shrink-0 opacity-90" style={IconComponent ? { color: branchStyle.stroke } : undefined}>
               {customIcon ? (
@@ -288,17 +306,19 @@ function MindMapNode({ id, data, selected }: NodeProps) {
               fontSize: (data.fontSize as "xs" | "sm" | "base" | "lg" | "xl") ?? "sm",
             }}
           />
-          <button
-            type="button"
-            onClick={handleEdit}
-            className="nodrag nokey shrink-0 flex items-center justify-center w-6 h-6 rounded hover:bg-black/5 text-gray-500 hover:text-gray-700 transition-colors"
-            aria-label="Edit"
-            title="Edit text"
-          >
-            <Pencil className="w-3.5 h-3.5" />
-          </button>
+          {!presentationMode && (
+            <button
+              type="button"
+              onClick={handleEdit}
+              className="nodrag nokey shrink-0 flex items-center justify-center w-6 h-6 rounded hover:bg-black/5 text-gray-500 hover:text-gray-700 transition-colors"
+              aria-label="Edit"
+              title="Edit text"
+            >
+              <Pencil className="w-3.5 h-3.5" />
+            </button>
+          )}
         </div>
-        <Popover.Root open={menuOpen} onOpenChange={setMenuOpen}>
+        {!presentationMode && <Popover.Root open={menuOpen} onOpenChange={setMenuOpen}>
           <Popover.Trigger asChild>
             <button
               type="button"
@@ -384,7 +404,7 @@ function MindMapNode({ id, data, selected }: NodeProps) {
               )}
             </Popover.Content>
           </Popover.Portal>
-        </Popover.Root>
+        </Popover.Root>}
       </div>
     </>
   );

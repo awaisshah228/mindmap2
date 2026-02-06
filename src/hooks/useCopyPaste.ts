@@ -2,6 +2,7 @@
 
 import { useCallback, useRef } from "react";
 import type { Node, Edge } from "@xyflow/react";
+import { useCanvasStore } from "@/lib/store/canvas-store";
 
 export function useCopyPaste(
   getNodes: () => Node[],
@@ -10,6 +11,7 @@ export function useCopyPaste(
   setEdges: (edges: Edge[] | ((prev: Edge[]) => Edge[])) => void,
   screenToFlowPosition: (pos: { x: number; y: number }) => { x: number; y: number }
 ) {
+  const pushUndo = useCanvasStore((s) => s.pushUndo);
   const clipboardRef = useRef<{ nodes: Node[]; edges: Edge[] } | null>(null);
 
   const copy = useCallback(() => {
@@ -41,6 +43,7 @@ export function useCopyPaste(
   const paste = useCallback(() => {
     const clipboard = clipboardRef.current;
     if (!clipboard?.nodes.length) return;
+      pushUndo();
 
       const center = screenToFlowPosition({
         x: typeof window !== "undefined" ? window.innerWidth / 2 : 400,
@@ -83,7 +86,7 @@ export function useCopyPaste(
       setNodes((nds) => [...nds, ...newNodes]);
       setEdges((eds) => [...eds, ...newEdges]);
     },
-    [screenToFlowPosition, setNodes, setEdges]
+    [screenToFlowPosition, setNodes, setEdges, pushUndo]
   );
 
   const canPaste = () => !!clipboardRef.current?.nodes.length;

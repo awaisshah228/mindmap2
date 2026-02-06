@@ -8,13 +8,9 @@ import {
   Bold,
   Italic,
   Strikethrough,
-  LayoutGrid,
   Wand2,
   Copy,
-  MessageSquare,
-  MoreHorizontal,
   X,
-  Palette,
   Type,
   Shapes,
   Smile,
@@ -24,6 +20,11 @@ import {
   Columns3,
   Pencil,
   LogOut,
+  FileText,
+  CheckSquare,
+  Focus,
+  Trash2,
+  Replace,
 } from "lucide-react";
 import type { Node } from "@xyflow/react";
 import { cn } from "@/lib/utils";
@@ -61,6 +62,7 @@ export function NodeInlineToolbar({ nodeId, selected = false }: NodeInlineToolba
   const [colorOpen, setColorOpen] = useState(false);
   const [fontSizeOpen, setFontSizeOpen] = useState(false);
   const [shapeOpen, setShapeOpen] = useState(false);
+  const [replaceOpen, setReplaceOpen] = useState(false);
   const hoveredNodeId = useCanvasStore((s) => s.hoveredNodeId);
   const { getNode, getNodes, setNodes, deleteElements, updateNodeData } = useReactFlow();
   const node = getNode(nodeId);
@@ -81,6 +83,7 @@ export function NodeInlineToolbar({ nodeId, selected = false }: NodeInlineToolba
   const handleDuplicate = () => {
     const node = getNode(nodeId);
     if (!node) return;
+    pushUndo();
     const newNode = {
       ...node,
       id: `node-${Date.now()}`,
@@ -116,6 +119,7 @@ export function NodeInlineToolbar({ nodeId, selected = false }: NodeInlineToolba
   };
 
   const handleDelete = () => {
+    pushUndo();
     deleteElements({ nodes: [{ id: nodeId }] });
   };
 
@@ -124,8 +128,24 @@ export function NodeInlineToolbar({ nodeId, selected = false }: NodeInlineToolba
   const setEditingNodeId = useCanvasStore((s) => s.setEditingNodeId);
   const handleEditText = () => setEditingNodeId(nodeId);
 
+  const setDetailsPanelNodeId = useCanvasStore((s) => s.setDetailsPanelNodeId);
+  const handleOpenDetails = () => setDetailsPanelNodeId(nodeId);
+
+  const setFocusedBranchNodeId = useCanvasStore((s) => s.setFocusedBranchNodeId);
+  const focusedBranchNodeId = useCanvasStore((s) => s.focusedBranchNodeId);
+  const handleFocusMode = () => {
+    setFocusedBranchNodeId(focusedBranchNodeId === nodeId ? null : nodeId);
+  };
+
+  // Task progress for this node
+  const tasks = useCanvasStore((s) => s.nodeTasks[nodeId]);
+  const taskCount = tasks?.length ?? 0;
+  const taskDoneCount = tasks?.filter((t) => t.done).length ?? 0;
+  const taskProgress = taskCount > 0 ? (taskDoneCount / taskCount) * 100 : 0;
+
   const handleColorChange = (color: string) => {
     if (hasColorPicker) {
+      pushUndo();
       updateNodeData(nodeId, { color });
       setColorOpen(false);
     }
@@ -137,50 +157,84 @@ export function NodeInlineToolbar({ nodeId, selected = false }: NodeInlineToolba
   const fontSize = (node?.data?.fontSize as FontSize) ?? "sm";
 
   const handleBold = () => {
+    pushUndo();
     updateNodeData(nodeId, { fontWeight: fontWeight === "bold" ? "normal" : "bold" });
   };
   const handleItalic = () => {
+    pushUndo();
     updateNodeData(nodeId, { fontStyle: fontStyle === "italic" ? "normal" : "italic" });
   };
   const handleStrikethrough = () => {
+    pushUndo();
     updateNodeData(nodeId, { textDecoration: textDecoration === "line-through" ? "none" : "line-through" });
   };
   const handleFontSize = (size: FontSize) => {
+    pushUndo();
     updateNodeData(nodeId, { fontSize: size });
     setFontSizeOpen(false);
   };
 
   const handleShapeChange = (shape: ShapeType) => {
     if (hasShapePicker) {
+      pushUndo();
       updateNodeData(nodeId, { shape });
       setShapeOpen(false);
     }
   };
 
   const handleIconChange = (iconId: string | null) => {
-    if (hasIconPicker) updateNodeData(nodeId, { icon: iconId ?? undefined });
+    if (hasIconPicker) { pushUndo(); updateNodeData(nodeId, { icon: iconId ?? undefined }); }
   };
 
   const handleCustomIconChange = (dataUrl: string | null) => {
-    if (hasIconPicker) updateNodeData(nodeId, { customIcon: dataUrl ?? undefined });
+    if (hasIconPicker) { pushUndo(); updateNodeData(nodeId, { customIcon: dataUrl ?? undefined }); }
   };
 
   const tableRows = (node?.data?.tableRows as number) ?? 3;
   const tableCols = (node?.data?.tableCols as number) ?? 3;
   const tableCells = (node?.data?.cells as Record<string, string>) ?? {};
-  const handleTableAddRow = () => updateNodeData(nodeId, { tableRows: tableRows + 1 });
-  const handleTableAddColumn = () => updateNodeData(nodeId, { tableCols: tableCols + 1 });
+  const handleTableAddRow = () => { pushUndo(); updateNodeData(nodeId, { tableRows: tableRows + 1 }); };
+  const handleTableAddColumn = () => { pushUndo(); updateNodeData(nodeId, { tableCols: tableCols + 1 }); };
   const handleTableDeleteRow = () => {
     if (tableRows <= 1) return;
+    pushUndo();
     const nextCells = { ...tableCells };
     for (let c = 0; c < tableCols; c++) delete nextCells[`${tableRows - 1},${c}`];
     updateNodeData(nodeId, { tableRows: tableRows - 1, cells: nextCells });
   };
   const handleTableDeleteColumn = () => {
     if (tableCols <= 1) return;
+    pushUndo();
     const nextCells = { ...tableCells };
     for (let r = 0; r < tableRows; r++) delete nextCells[`${r},${tableCols - 1}`];
     updateNodeData(nodeId, { tableCols: tableCols - 1, cells: nextCells });
+  };
+
+  /** Node types that can be converted to */
+  const CONVERTIBLE_TYPES: { type: string; label: string }[] = [
+    { type: "rectangle", label: "Rectangle" },
+    { type: "diamond", label: "Diamond" },
+    { type: "circle", label: "Circle" },
+    { type: "document", label: "Document" },
+    { type: "stickyNote", label: "Sticky Note" },
+    { type: "text", label: "Text" },
+    { type: "mindMap", label: "Mind Map" },
+  ];
+
+  /** Whether this node type can be replaced */
+  const canReplace = ["rectangle", "diamond", "circle", "document", "stickyNote", "text", "mindMap"].includes(nodeType);
+
+  const handleReplaceType = (newType: string) => {
+    if (!node || newType === nodeType) return;
+    pushUndo();
+    setNodes((nds) =>
+      nds.map((n) =>
+        n.id === nodeId
+          ? { ...n, type: newType, data: { ...n.data } }
+          : n
+      )
+    );
+    setReplaceOpen(false);
   };
 
   return (
@@ -323,14 +377,6 @@ export function NodeInlineToolbar({ nodeId, selected = false }: NodeInlineToolba
                     Reset to branch
                   </button>
                 )}
-                <div className="mt-2 pt-2 border-t border-gray-700 flex items-center justify-center gap-2">
-                  <button type="button" className="p-1.5 rounded hover:bg-gray-700 text-gray-400" title="Opacity" aria-label="Opacity">
-                    <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="4" y1="12" x2="20" y2="12" /><line x1="4" y1="8" x2="20" y2="8" /><line x1="4" y1="16" x2="20" y2="16" /></svg>
-                  </button>
-                  <button type="button" className="p-1.5 rounded hover:bg-gray-700 text-gray-400" title="Pick color" aria-label="Pick color">
-                    <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M15 3l1.5 1.5L9 12l-3 1 1-3 7.5-7.5L15 3z" /><path d="M3 21h9" /></svg>
-                  </button>
-                </div>
               </Popover.Content>
             </Popover.Portal>
           </Popover.Root>
@@ -369,47 +415,76 @@ export function NodeInlineToolbar({ nodeId, selected = false }: NodeInlineToolba
             </Popover.Content>
           </Popover.Portal>
         </Popover.Root>
-        <ToolbarButton title="Bold" onClick={handleBold} active={fontWeight === "bold"}>
-          <Bold className="w-3.5 h-3.5" />
-        </ToolbarButton>
-        <ToolbarButton title="Italic" onClick={handleItalic} active={fontStyle === "italic"}>
-          <Italic className="w-3.5 h-3.5" />
-        </ToolbarButton>
-        <ToolbarButton title="Strikethrough" onClick={handleStrikethrough} active={textDecoration === "line-through"}>
-          <Strikethrough className="w-3.5 h-3.5" />
-        </ToolbarButton>
-        {isMindMap && (
-          <>
-            <ToolbarDivider />
-            <ToolbarButton title="Layout">
-              <LayoutGrid className="w-3.5 h-3.5" />
-            </ToolbarButton>
-          </>
-        )}
         <ToolbarDivider />
         <ToolbarButton title="Edit text" onClick={handleEditText}>
           <Pencil className="w-3.5 h-3.5" />
         </ToolbarButton>
+        <ToolbarButton title="Notes (Shift+E)" onClick={handleOpenDetails}>
+          <FileText className="w-3.5 h-3.5" />
+        </ToolbarButton>
+        {taskCount > 0 && (
+          <ToolbarButton title={`Tasks: ${taskDoneCount}/${taskCount}`} onClick={handleOpenDetails}>
+            <CheckSquare className="w-3.5 h-3.5" />
+            <span className="text-[9px] ml-0.5 opacity-80">{Math.round(taskProgress)}%</span>
+          </ToolbarButton>
+        )}
         <ToolbarButton title="AI" onClick={handleAI}>
           <Wand2 className="w-3.5 h-3.5" />
         </ToolbarButton>
         <ToolbarButton title="Duplicate" onClick={handleDuplicate}>
           <Copy className="w-3.5 h-3.5" />
         </ToolbarButton>
+        {canReplace && (
+          <Popover.Root open={replaceOpen} onOpenChange={setReplaceOpen}>
+            <Popover.Trigger asChild>
+              <button
+                type="button"
+                title="Change node type"
+                className="p-1.5 rounded hover:bg-gray-600 transition-colors"
+                aria-label="Change node type"
+              >
+                <Replace className="w-3.5 h-3.5" />
+              </button>
+            </Popover.Trigger>
+            <Popover.Portal>
+              <Popover.Content
+                className="z-50 w-40 p-1.5 rounded-lg bg-gray-800 border border-gray-600 shadow-lg"
+                sideOffset={4}
+                align="start"
+              >
+                <div className="text-[10px] text-gray-400 uppercase tracking-wider px-2 mb-1">Change to</div>
+                <div className="flex flex-col gap-0.5">
+                  {CONVERTIBLE_TYPES.map((ct) => (
+                    <button
+                      key={ct.type}
+                      type="button"
+                      onClick={() => handleReplaceType(ct.type)}
+                      className={cn(
+                        "px-2 py-1.5 text-left text-xs rounded transition-colors",
+                        ct.type === nodeType
+                          ? "bg-violet-600 text-white"
+                          : "hover:bg-gray-700 text-gray-200"
+                      )}
+                    >
+                      {ct.label}
+                    </button>
+                  ))}
+                </div>
+              </Popover.Content>
+            </Popover.Portal>
+          </Popover.Root>
+        )}
+        <ToolbarButton title="Focus mode" onClick={handleFocusMode} active={focusedBranchNodeId === nodeId}>
+          <Focus className="w-3.5 h-3.5" />
+        </ToolbarButton>
         {isInGroup && (
           <ToolbarButton title="Exit group" onClick={handleExitGroup}>
             <LogOut className="w-3.5 h-3.5" />
           </ToolbarButton>
         )}
-        <ToolbarButton title="Comment">
-          <MessageSquare className="w-3.5 h-3.5" />
-        </ToolbarButton>
         <ToolbarDivider />
-        <ToolbarButton title="More">
-          <MoreHorizontal className="w-3.5 h-3.5" />
-        </ToolbarButton>
-        <ToolbarButton title="Delete" onClick={handleDelete}>
-          <X className="w-3.5 h-3.5" />
+        <ToolbarButton title="Delete node" onClick={handleDelete}>
+          <Trash2 className="w-3.5 h-3.5" />
         </ToolbarButton>
       </div>
     </NodeToolbar>

@@ -35,6 +35,12 @@ export function KeyboardHandler({
   );
 
   const setActiveTool = useCanvasStore((s) => s.setActiveTool);
+  const setSearchOpen = useCanvasStore((s) => s.setSearchOpen);
+  const setShortcutsOpen = useCanvasStore((s) => s.setShortcutsOpen);
+  const setDetailsPanelNodeId = useCanvasStore((s) => s.setDetailsPanelNodeId);
+  const setDailyNotesOpen = useCanvasStore((s) => s.setDailyNotesOpen);
+  const setPresentationMode = useCanvasStore((s) => s.setPresentationMode);
+  const setFocusedBranchNodeId = useCanvasStore((s) => s.setFocusedBranchNodeId);
 
   const selectAll = useCallback(() => {
     setNodes((nds) => nds.map((n) => ({ ...n, selected: true })));
@@ -53,6 +59,94 @@ export function KeyboardHandler({
         e.target instanceof HTMLTextAreaElement ||
         (e.target as HTMLElement).isContentEditable;
       const isUndoRedo = (e.metaKey || e.ctrlKey) && !inInput;
+
+      // ─── Panels that work everywhere (close with Esc) ──────────
+      const {
+        shortcutsOpen,
+        searchOpen,
+        settingsOpen,
+        detailsPanelNodeId,
+        dailyNotesOpen,
+        presentationMode,
+      } = useCanvasStore.getState();
+
+      // When presentation mode is active, skip all normal shortcuts
+      // (PresentationMode handles its own keys via capture phase)
+      if (presentationMode) return;
+
+      // Escape: close any open panel
+      if (e.key === "Escape") {
+        if (shortcutsOpen) { setShortcutsOpen(false); e.preventDefault(); return; }
+        if (searchOpen) { setSearchOpen(false); e.preventDefault(); return; }
+        if (settingsOpen) { useCanvasStore.getState().setSettingsOpen(false); e.preventDefault(); return; }
+        if (detailsPanelNodeId) { setDetailsPanelNodeId(null); e.preventDefault(); return; }
+        if (dailyNotesOpen) { setDailyNotesOpen(false); e.preventDefault(); return; }
+        if (!inInput) deselectAll();
+        return;
+      }
+
+      // Ctrl+F / Cmd+F: Search
+      if ((e.key === "f" || e.key === "F") && (e.metaKey || e.ctrlKey)) {
+        e.preventDefault();
+        setSearchOpen(true);
+        return;
+      }
+
+      // Ctrl+Shift+D: Daily notes
+      if ((e.key === "d" || e.key === "D") && (e.metaKey || e.ctrlKey) && e.shiftKey) {
+        e.preventDefault();
+        setDailyNotesOpen(!dailyNotesOpen);
+        return;
+      }
+
+      // Shift+?: Keyboard shortcuts
+      if (e.key === "?" && e.shiftKey && !inInput) {
+        e.preventDefault();
+        setShortcutsOpen(!shortcutsOpen);
+        return;
+      }
+
+      // Shift+E: Open notes panel for selected node
+      if (e.key === "E" && e.shiftKey && !inInput && !e.metaKey && !e.ctrlKey) {
+        e.preventDefault();
+        const selectedNode = getNodes().find((n) => n.selected);
+        if (selectedNode) {
+          setDetailsPanelNodeId(
+            detailsPanelNodeId === selectedNode.id ? null : selectedNode.id
+          );
+        }
+        return;
+      }
+
+      // Shift+T: Open tasks panel for selected node
+      if (e.key === "T" && e.shiftKey && !inInput && !e.metaKey && !e.ctrlKey) {
+        e.preventDefault();
+        const selectedNode = getNodes().find((n) => n.selected);
+        if (selectedNode) {
+          setDetailsPanelNodeId(selectedNode.id);
+        }
+        return;
+      }
+
+      // P: Presentation mode (when not in input)
+      if ((e.key === "p" || e.key === "P") && !inInput && !e.metaKey && !e.ctrlKey && !e.shiftKey) {
+        e.preventDefault();
+        setPresentationMode(true);
+        return;
+      }
+
+      // F: Focus mode on selected node (when not in input)
+      if ((e.key === "f" || e.key === "F") && !inInput && !e.metaKey && !e.ctrlKey && !e.shiftKey) {
+        e.preventDefault();
+        const selectedNode = getNodes().find((n) => n.selected);
+        const { focusedBranchNodeId } = useCanvasStore.getState();
+        if (focusedBranchNodeId) {
+          setFocusedBranchNodeId(null);
+        } else if (selectedNode) {
+          setFocusedBranchNodeId(selectedNode.id);
+        }
+        return;
+      }
 
       // Tool switching (only when not in input and no modifier keys)
       if (!inInput && !e.metaKey && !e.ctrlKey) {
@@ -83,12 +177,17 @@ export function KeyboardHandler({
         } else {
           selectAll();
         }
-      } else if (e.key === "c" && (e.metaKey || e.ctrlKey)) {
+      } else if (e.key === "c" && (e.metaKey || e.ctrlKey) && !inInput) {
         e.preventDefault();
         copy();
-      } else if (e.key === "v" && (e.metaKey || e.ctrlKey)) {
+      } else if (e.key === "v" && (e.metaKey || e.ctrlKey) && !inInput) {
         e.preventDefault();
         paste();
+      } else if (e.key === "x" && (e.metaKey || e.ctrlKey) && !inInput) {
+        e.preventDefault();
+        copy();
+        pushUndo?.();
+        deleteSelected();
       } else if (isUndoRedo && (e.key === "z" || e.key === "Z" || e.keyCode === 90)) {
         e.preventDefault();
         e.stopPropagation();
@@ -101,8 +200,6 @@ export function KeyboardHandler({
         e.preventDefault();
         e.stopPropagation();
         redo?.();
-      } else if (e.key === "Escape") {
-        if (!inInput) deselectAll();
       } else if (e.key === "Backspace" || e.key === "Delete") {
         if (!inInput) {
           e.preventDefault();
@@ -113,7 +210,7 @@ export function KeyboardHandler({
     };
     document.addEventListener("keydown", handleKeyDown, true);
     return () => document.removeEventListener("keydown", handleKeyDown, true);
-  }, [copy, paste, deleteSelected, pushUndo, undo, redo, selectAll, deselectAll]);
+  }, [copy, paste, deleteSelected, pushUndo, undo, redo, selectAll, deselectAll, setSearchOpen, setShortcutsOpen, setDetailsPanelNodeId, setDailyNotesOpen, setPresentationMode, setFocusedBranchNodeId, getNodes, setActiveTool]);
 
   return null;
 }

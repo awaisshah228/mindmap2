@@ -4,6 +4,7 @@ import { memo, useCallback } from "react";
 import { Handle, useReactFlow, Position, type NodeProps } from "@xyflow/react";
 import { Plus } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { useCanvasStore } from "@/lib/store/canvas-store";
 import { BaseNode } from "./BaseNode";
 import { EditableTableCell } from "./EditableTableCell";
 import { PALETTE_COLORS } from "@/lib/branch-colors";
@@ -17,18 +18,21 @@ const DEFAULT_HEIGHT = 160;
 
 function TableNodeComponent({ id, data, selected }: NodeProps) {
   const { updateNodeData } = useReactFlow();
+  const pushUndo = useCanvasStore((s) => s.pushUndo);
   const rows = Math.max(MIN_ROWS, (data.tableRows as number) ?? DEFAULT_ROWS);
   const cols = Math.max(MIN_COLS, (data.tableCols as number) ?? DEFAULT_COLS);
   const cells = (data.cells as Record<string, string>) ?? {};
   const bgColor = (data.color as string) ?? PALETTE_COLORS[0];
 
   const addRow = useCallback(() => {
+    pushUndo();
     updateNodeData(id, { tableRows: rows + 1 });
-  }, [id, rows, updateNodeData]);
+  }, [id, rows, updateNodeData, pushUndo]);
 
   const addColumn = useCallback(() => {
+    pushUndo();
     updateNodeData(id, { tableCols: cols + 1 });
-  }, [id, cols, updateNodeData]);
+  }, [id, cols, updateNodeData, pushUndo]);
 
   return (
     <BaseNode
