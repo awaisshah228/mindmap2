@@ -12,7 +12,7 @@ const db = drizzle({ client: sql });
 
 const plans = [
   { id: "free", name: "Free Trial", credits_per_month: 0, free_trial_credits: 5, price_cents_monthly: null, price_cents_yearly: null, sort_order: 0 },
-  { id: "starter", name: "Starter", credits_per_month: 50, free_trial_credits: 0, price_cents_monthly: 900, price_cents_yearly: 9000, sort_order: 1 },
+  { id: "starter", name: "Starter", credits_per_month: 50, free_trial_credits: 0, price_cents_monthly: 500, price_cents_yearly: 5000, sort_order: 1 },
   { id: "pro", name: "Pro", credits_per_month: 200, free_trial_credits: 0, price_cents_monthly: 2900, price_cents_yearly: 29000, sort_order: 2 },
 ];
 

@@ -1,6 +1,11 @@
 /**
  * Plan IDs and defaults. Sync with DB seed / Stripe products.
  * Cost basis: ~$0.02–0.05 per diagram (LLM + infra); we price to cover cost + margin.
+ *
+ * Pricing:
+ * - Free trial: 5 diagrams
+ * - $5/mo: 50 credits/month (expire each month) — time-limited, cheaper
+ * - $9 one-time: 50 credits (never expire) — non-expiring costs more
  */
 export const PLAN_IDS = {
   FREE: "free",
@@ -23,8 +28,8 @@ export const DEFAULT_PLANS = [
     name: "Starter",
     creditsPerMonth: 50,
     freeTrialCredits: 0,
-    priceCentsMonthly: 900, // $9
-    priceCentsYearly: 9000, // $90
+    priceCentsMonthly: 500, // $5/mo — 50 credits expire each month
+    priceCentsYearly: 5000, // $50/yr
     sortOrder: 1,
   },
   {
@@ -41,6 +46,9 @@ export const DEFAULT_PLANS = [
 /** Credits per diagram generation (deducted per request). */
 export const CREDITS_PER_GENERATION = 1;
 
-/** On-demand: $5 per 50 credits = 10¢/credit. */
+/** On-demand: $9 per 50 credits (never expire) — non-expiring costs more than monthly. */
 export const ON_DEMAND_CREDITS_BUNDLE = 50;
-export const ON_DEMAND_PRICE_CENTS = 500;
+export const ON_DEMAND_PRICE_CENTS = 900;
+
+/** Price per credit (cents) — buy as many as you want. $0.18/credit = $9 per 50. */
+export const PRICE_PER_CREDIT_CENTS = 18;

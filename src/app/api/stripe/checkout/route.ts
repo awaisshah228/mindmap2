@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { requireAuth } from "@/lib/auth";
 import Stripe from "stripe";
-import { ON_DEMAND_CREDITS_BUNDLE, ON_DEMAND_PRICE_CENTS } from "@/lib/plans";
+import { ON_DEMAND_CREDITS_BUNDLE, PRICE_PER_CREDIT_CENTS } from "@/lib/plans";
 
 function getStripe() {
   const key = process.env.STRIPE_SECRET_KEY;
@@ -25,9 +25,9 @@ export async function POST(request: Request) {
   const successUrl = body.successUrl ?? `${baseUrl}/editor?credits=success`;
   const cancelUrl = body.cancelUrl ?? `${baseUrl}/editor`;
 
-  // On-demand credits: default 50 credits for $5
-  const credits = Math.max(10, Math.min(500, body.amount ?? ON_DEMAND_CREDITS_BUNDLE));
-  const amountCents = Math.round((credits / ON_DEMAND_CREDITS_BUNDLE) * ON_DEMAND_PRICE_CENTS) || ON_DEMAND_PRICE_CENTS;
+  // On-demand credits: price per credit, buy as many as you want (10–5000)
+  const credits = Math.max(10, Math.min(5000, body.amount ?? ON_DEMAND_CREDITS_BUNDLE));
+  const amountCents = Math.round(credits * PRICE_PER_CREDIT_CENTS);
 
   const checkoutSession = await stripe.checkout.sessions.create({
     mode: "payment",

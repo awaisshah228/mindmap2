@@ -99,8 +99,8 @@ export default function LandingPage() {
 
             <div className="p-6 rounded-xl bg-white dark:bg-gray-800 border border-violet-200 dark:border-violet-800">
               <h3 className="font-semibold text-gray-900 dark:text-white">Starter</h3>
-              <p className="text-2xl font-bold text-gray-900 dark:text-white mt-2">$9<span className="text-sm font-normal text-gray-500">/mo</span></p>
-              <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">50 diagrams/month</p>
+              <p className="text-2xl font-bold text-gray-900 dark:text-white mt-2">$5<span className="text-sm font-normal text-gray-500">/mo</span></p>
+              <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">50 diagrams/month (expire each month)</p>
               <ul className="mt-4 space-y-2 text-sm text-gray-600 dark:text-gray-400">
                 <li>• Cloud project sync</li>
                 <li>• Export & share</li>
@@ -130,12 +130,12 @@ export default function LandingPage() {
             </div>
 
             <div className="p-6 rounded-xl bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700">
-              <h3 className="font-semibold text-gray-900 dark:text-white">On-demand</h3>
-              <p className="text-2xl font-bold text-gray-900 dark:text-white mt-2">$5</p>
-              <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">50 credits (one-time)</p>
+              <h3 className="font-semibold text-gray-900 dark:text-white">Credit pack</h3>
+              <p className="text-2xl font-bold text-gray-900 dark:text-white mt-2">$9</p>
+              <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">50 credits (never expire)</p>
               <ul className="mt-4 space-y-2 text-sm text-gray-600 dark:text-gray-400">
                 <li>• Top up anytime</li>
-                <li>• No subscription</li>
+                <li>• No subscription, credits don&apos;t expire</li>
               </ul>
               <Link
                 href="/editor"
