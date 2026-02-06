@@ -152,6 +152,20 @@ export const adminUsers = pgTable("admin_users", {
   createdAt: timestamp("created_at").defaultNow(),
 });
 
+/** Admin-configured AI models for paid users (no own API key). Keys stay in env per provider. */
+export const aiModels = pgTable("ai_models", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  provider: text("provider").notNull(), // openai | openrouter | anthropic | google | custom
+  model: text("model").notNull(), // e.g. gpt-4o-mini, openai/gpt-4o-mini
+  label: text("label").notNull(), // display name
+  /** Custom base URL (e.g. self-hosted). Empty = use env default per provider. */
+  baseUrl: text("base_url"),
+  isDefault: boolean("is_default").notNull().default(false),
+  sortOrder: integer("sort_order").notNull().default(0),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
 /** Chat / prompt history: links each prompt to the diagram it generated. Per project + per diagram. */
 export const diagramPromptHistory = pgTable("diagram_prompt_history", {
   id: uuid("id").primaryKey().defaultRandom(),
@@ -180,3 +194,5 @@ export type DiagramPreset = typeof diagramPresets.$inferSelect;
 export type NewDiagramPreset = typeof diagramPresets.$inferInsert;
 export type DiagramPromptHistory = typeof diagramPromptHistory.$inferSelect;
 export type NewDiagramPromptHistory = typeof diagramPromptHistory.$inferInsert;
+export type AIModel = typeof aiModels.$inferSelect;
+export type NewAIModel = typeof aiModels.$inferInsert;

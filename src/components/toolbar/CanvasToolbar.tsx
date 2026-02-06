@@ -30,6 +30,7 @@ import {
   ImagePlus,
   Group,
   Ungroup,
+  Loader2,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { SHAPE_TYPES, SHAPE_LABELS, SHAPE_PATHS, type ShapeType } from "@/lib/shape-types";
@@ -38,6 +39,7 @@ import { useCanvasStore } from "@/lib/store/canvas-store";
 import type { Tool } from "@/lib/store/canvas-store";
 import type { PendingEdgeType } from "@/lib/store/canvas-store";
 import { setDragPayload, type DragNodePayload } from "@/lib/dnd-payload";
+import { uploadWithProgress } from "@/lib/upload-with-progress";
 
 function getDragPayloadForTool(tool: Tool): DragNodePayload | null {
   switch (tool) {
@@ -130,6 +132,11 @@ const EDGE_TYPE_OPTIONS: { type: PendingEdgeType; label: string; icon: React.Rea
 ];
 
 const EMOJIS = ["😀","😃","😄","😁","😆","😅","🤣","😊","😇","🙂","😉","😍","🤩","🤔","😎","🤯","💡","✅","⚠️","❌","⭐","🔥","💬","📌","📁","📦","📝"];
+const EMOJI_KEYWORDS: Record<string, string> = {
+  "😀":"smile grin happy","😃":"grin happy","😄":"smile happy","😁":"beam happy","😆":"squint happy","😅":"sweat smile","🤣":"rofl laugh","😊":"blush smile",
+  "😇":"halo angel","🙂":"slight smile","😉":"wink","😍":"heart eyes love","🤩":"star eyes","🤔":"thinking","😎":"cool sunglasses","🤯":"mind blown",
+  "💡":"lightbulb idea","✅":"check done","⚠️":"warning","❌":"x cross","⭐":"star","🔥":"fire hot","💬":"chat message","📌":"pin","📁":"folder","📦":"box package","📝":"memo note",
+};
 
 const IMAGE_PRESETS: { seed: string; label: string }[] = [
   { seed: "user", label: "User" },
@@ -239,38 +246,76 @@ export default function CanvasToolbar({ activeTool, onToolChange }: CanvasToolba
   const customIconInputRef = useRef<HTMLInputElement>(null);
   const customImageInputRef = useRef<HTMLInputElement>(null);
   const [customEmojiInput, setCustomEmojiInput] = useState("");
+  const [uploadProgress, setUploadProgress] = useState<{ type: "icon" | "image"; name: string; progress: number } | null>(null);
 
-  const handleCustomIconUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const uploadApi = typeof window !== "undefined" ? `${window.location.origin}/api/upload` : "/api/upload";
+
+  const handleCustomIconUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
+    e.target.value = "";
     if (!file || !file.type.startsWith("image/")) return;
-    const reader = new FileReader();
-    reader.onload = () => {
-      const dataUrl = reader.result as string;
+
+    setUploadProgress({ type: "icon", name: file.name, progress: 0 });
+    const result = await uploadWithProgress(file, uploadApi, "icons", (loaded, total) => {
+      setUploadProgress((p) => p?.type === "icon" ? { ...p, progress: total ? (loaded / total) * 100 : 0 } : p);
+    });
+    setUploadProgress(null);
+
+    if (result.ok) {
       setPendingIconId(null);
       setPendingEmoji(null);
       setPendingImage(null);
-      useCanvasStore.getState().setPendingCustomIcon(dataUrl);
+      useCanvasStore.getState().setPendingCustomIcon(result.url);
       onToolChange("emoji");
       setIconsImagesOpen(false);
-    };
-    reader.readAsDataURL(file);
-    e.target.value = "";
+    } else {
+      const useFallback = /Upload not configured|Unauthorized|401|403|Forbidden/i.test(result.error ?? "");
+      if (useFallback) {
+        const reader = new FileReader();
+        reader.onload = () => {
+          setPendingIconId(null);
+          setPendingEmoji(null);
+          setPendingImage(null);
+          useCanvasStore.getState().setPendingCustomIcon(reader.result as string);
+          onToolChange("emoji");
+          setIconsImagesOpen(false);
+        };
+        reader.readAsDataURL(file);
+      }
+    }
   };
 
-  const handleCustomImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleCustomImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
+    e.target.value = "";
     if (!file || !file.type.startsWith("image/")) return;
-    const reader = new FileReader();
-    reader.onload = () => {
-      const dataUrl = reader.result as string;
-      setPendingImage(dataUrl, file.name.replace(/\.[^.]+$/, ""));
+
+    setUploadProgress({ type: "image", name: file.name, progress: 0 });
+    const result = await uploadWithProgress(file, uploadApi, "icons", (loaded, total) => {
+      setUploadProgress((p) => p?.type === "image" ? { ...p, progress: total ? (loaded / total) * 100 : 0 } : p);
+    });
+    setUploadProgress(null);
+
+    if (result.ok) {
+      setPendingImage(result.url, file.name.replace(/\.[^.]+$/, ""));
       setPendingIconId(null);
       setPendingEmoji(null);
       onToolChange("image");
       setIconsImagesOpen(false);
-    };
-    reader.readAsDataURL(file);
-    e.target.value = "";
+    } else {
+      const useFallback = /Upload not configured|Unauthorized|401|403|Forbidden/i.test(result.error ?? "");
+      if (useFallback) {
+        const reader = new FileReader();
+        reader.onload = () => {
+          setPendingImage(reader.result as string, file.name.replace(/\.[^.]+$/, ""));
+          setPendingIconId(null);
+          setPendingEmoji(null);
+          onToolChange("image");
+          setIconsImagesOpen(false);
+        };
+        reader.readAsDataURL(file);
+      }
+    }
   };
 
   const handleCustomEmojiSubmit = () => {
@@ -298,6 +343,16 @@ export default function CanvasToolbar({ activeTool, onToolChange }: CanvasToolba
       (p) =>
         p.label.toLowerCase().includes(q) || p.seed.toLowerCase().includes(q)
     );
+  }, [searchIconsImages]);
+
+  const filteredEmojis = useMemo(() => {
+    const q = searchIconsImages.trim().toLowerCase();
+    if (!q) return EMOJIS;
+    return EMOJIS.filter((emoji) => {
+      if (emoji.includes(q)) return true;
+      const kw = EMOJI_KEYWORDS[emoji];
+      return kw?.toLowerCase().includes(q);
+    });
   }, [searchIconsImages]);
 
   const isSelectGroup = activeTool === "select" || activeTool === "selection";
@@ -555,7 +610,7 @@ export default function CanvasToolbar({ activeTool, onToolChange }: CanvasToolba
                   <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
                   <input
                     type="text"
-                    placeholder="Search icons or images..."
+                    placeholder="Search icons, emojis or images..."
                     value={searchIconsImages}
                     onChange={(e) => setSearchIconsImages(e.target.value)}
                     className="w-full pl-8 pr-3 py-2 text-sm rounded-lg border border-gray-200 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-200 focus:ring-2 focus:ring-violet-500 focus:border-transparent"
@@ -572,25 +627,43 @@ export default function CanvasToolbar({ activeTool, onToolChange }: CanvasToolba
               </div>
               <div className="flex-1 overflow-y-auto p-2 min-h-0">
                 {/* ── Upload custom icon / image ── */}
-                <div className="flex gap-1.5 mb-3">
-                  <input ref={customIconInputRef} type="file" accept="image/*" className="hidden" onChange={handleCustomIconUpload} />
-                  <input ref={customImageInputRef} type="file" accept="image/*" className="hidden" onChange={handleCustomImageUpload} />
-                  <button
-                    type="button"
-                    onClick={() => customIconInputRef.current?.click()}
-                    className="flex-1 flex items-center justify-center gap-1.5 px-2 py-2 text-xs rounded-lg border border-dashed border-gray-300 dark:border-gray-600 hover:bg-violet-50 dark:hover:bg-violet-900/20 hover:border-violet-400 text-gray-600 dark:text-gray-400 transition-colors"
-                  >
-                    <Upload className="w-3.5 h-3.5" />
-                    Upload Icon
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => customImageInputRef.current?.click()}
-                    className="flex-1 flex items-center justify-center gap-1.5 px-2 py-2 text-xs rounded-lg border border-dashed border-gray-300 dark:border-gray-600 hover:bg-violet-50 dark:hover:bg-violet-900/20 hover:border-violet-400 text-gray-600 dark:text-gray-400 transition-colors"
-                  >
-                    <ImagePlus className="w-3.5 h-3.5" />
-                    Upload Image
-                  </button>
+                <div className="flex flex-col gap-1.5 mb-3">
+                  <div className="flex gap-1.5">
+                    <input ref={customIconInputRef} type="file" accept="image/*" className="hidden" onChange={handleCustomIconUpload} />
+                    <input ref={customImageInputRef} type="file" accept="image/*" className="hidden" onChange={handleCustomImageUpload} />
+                    <button
+                      type="button"
+                      disabled={!!uploadProgress}
+                      onClick={() => customIconInputRef.current?.click()}
+                      className="flex-1 flex items-center justify-center gap-1.5 px-2 py-2 text-xs rounded-lg border border-dashed border-gray-300 dark:border-gray-600 hover:bg-violet-50 dark:hover:bg-violet-900/20 hover:border-violet-400 text-gray-600 dark:text-gray-400 transition-colors disabled:opacity-60"
+                    >
+                      {uploadProgress?.type === "icon" ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Upload className="w-3.5 h-3.5" />}
+                      {uploadProgress?.type === "icon" ? "Uploading…" : "Upload Icon"}
+                    </button>
+                    <button
+                      type="button"
+                      disabled={!!uploadProgress}
+                      onClick={() => customImageInputRef.current?.click()}
+                      className="flex-1 flex items-center justify-center gap-1.5 px-2 py-2 text-xs rounded-lg border border-dashed border-gray-300 dark:border-gray-600 hover:bg-violet-50 dark:hover:bg-violet-900/20 hover:border-violet-400 text-gray-600 dark:text-gray-400 transition-colors disabled:opacity-60"
+                    >
+                      {uploadProgress?.type === "image" ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <ImagePlus className="w-3.5 h-3.5" />}
+                      {uploadProgress?.type === "image" ? "Uploading…" : "Upload Image"}
+                    </button>
+                  </div>
+                  {uploadProgress && (
+                    <div className="px-2 py-1">
+                      <div className="flex items-center justify-between text-[10px] text-gray-500 mb-0.5">
+                        <span className="truncate max-w-[180px]">{uploadProgress.name}</span>
+                        <span>{Math.round(uploadProgress.progress)}%</span>
+                      </div>
+                      <div className="w-full h-1 bg-gray-200 dark:bg-gray-600 rounded-full overflow-hidden">
+                        <div
+                          className="h-full bg-violet-500 rounded-full transition-all duration-200"
+                          style={{ width: `${uploadProgress.progress}%` }}
+                        />
+                      </div>
+                    </div>
+                  )}
                 </div>
 
                 <div className="text-xs font-medium text-gray-500 dark:text-gray-400 px-1 py-1.5 border-b border-gray-100 dark:border-gray-700 mb-2">Icons</div>
@@ -631,7 +704,7 @@ export default function CanvasToolbar({ activeTool, onToolChange }: CanvasToolba
                   </button>
                 </div>
                 <div className="grid grid-cols-8 gap-1 mb-4">
-                  {EMOJIS.map((emoji) => (
+                  {filteredEmojis.map((emoji) => (
                     <button
                       key={emoji}
                       type="button"

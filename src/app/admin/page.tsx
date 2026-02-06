@@ -11,6 +11,7 @@ import {
   Pencil,
   Trash2,
   X,
+  Cpu,
 } from "lucide-react";
 
 type Stats = {
@@ -35,6 +36,21 @@ type PresetRow = {
   hasNodes: boolean;
 };
 
+type AIModelRow = {
+  id: string;
+  provider: string;
+  model: string;
+  label: string;
+  baseUrl?: string | null;
+  isDefault: boolean;
+  sortOrder: number;
+};
+
+type EnvModelsData = {
+  envProviders: { provider: string; configured: boolean; label: string }[];
+  defaultModelInUse: { source: string; label: string; provider: string; model: string } | null;
+};
+
 const LEVELS = [
   "high-level-flow",
   "high-level-system-design",
@@ -51,7 +67,29 @@ export default function AdminDashboard() {
   const [stats, setStats] = useState<Stats | null>(null);
   const [users, setUsers] = useState<UserRow[]>([]);
   const [presets, setPresets] = useState<PresetRow[]>([]);
+  const [aiModels, setAiModels] = useState<AIModelRow[]>([]);
   const [loading, setLoading] = useState(true);
+  const [envModels, setEnvModels] = useState<EnvModelsData | null>(null);
+  const [aiModelForm, setAiModelForm] = useState<{
+    open: boolean;
+    id: string | null;
+    provider: string;
+    model: string;
+    label: string;
+    baseUrl: string;
+    isDefault: boolean;
+    sortOrder: number;
+  }>({
+    open: false,
+    id: null,
+    provider: "openrouter",
+    model: "openai/gpt-4o-mini",
+    label: "GPT-4o Mini",
+    baseUrl: "",
+    isDefault: true,
+    sortOrder: 0,
+  });
+
   const [presetForm, setPresetForm] = useState<{
     open: boolean;
     id: string | null;
@@ -85,10 +123,12 @@ export default function AdminDashboard() {
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const [statsRes, usersRes, presetsRes] = await Promise.all([
+      const [statsRes, usersRes, presetsRes, aiModelsRes, envModelsRes] = await Promise.all([
         fetch("/api/admin/stats", { credentials: "include" }),
         fetch("/api/admin/users", { credentials: "include" }),
         fetch("/api/admin/presets", { credentials: "include" }),
+        fetch("/api/admin/ai-models", { credentials: "include" }),
+        fetch("/api/admin/env-models", { credentials: "include" }),
       ]);
       if (statsRes.ok) setStats(await statsRes.json());
       if (usersRes.ok) {
@@ -98,6 +138,14 @@ export default function AdminDashboard() {
       if (presetsRes.ok) {
         const data = await presetsRes.json();
         setPresets(data.presets ?? []);
+      }
+      if (aiModelsRes.ok) {
+        const data = await aiModelsRes.json();
+        setAiModels(data.models ?? []);
+      }
+      if (envModelsRes.ok) {
+        const data = await envModelsRes.json();
+        setEnvModels(data);
       }
     } finally {
       setLoading(false);
@@ -262,6 +310,95 @@ export default function AdminDashboard() {
         </div>
       </section>
 
+      {/* AI Models (for paid users without API key) */}
+      <section>
+        <div className="flex items-center justify-between mb-3">
+          <h2 className="text-sm font-semibold text-gray-400 uppercase tracking-wider flex items-center gap-2">
+            <Cpu className="w-4 h-4" />
+            AI Models (paid users)
+          </h2>
+          <button
+            type="button"
+            onClick={() => setAiModelForm({ open: true, id: null, provider: "openrouter", model: "openai/gpt-4o-mini", label: "GPT-4o Mini", baseUrl: "", isDefault: aiModels.length === 0, sortOrder: aiModels.length })}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-violet-600 hover:bg-violet-500 text-white text-sm"
+          >
+            <Plus className="w-4 h-4" /> Add model
+          </button>
+        </div>
+        <p className="text-xs text-gray-500 mb-2">
+          Models available when users have no API key (use credits). Configure API keys in env (OPENAI_API_KEY, OPENROUTER_API_KEY, etc).
+        </p>
+        {envModels && (
+          <div className="rounded-lg border border-gray-800 p-3 mb-3 bg-gray-900/50">
+            <p className="text-xs font-medium text-gray-400 mb-2">Env status (which providers have keys)</p>
+            <div className="flex flex-wrap gap-3 mb-2">
+              {envModels.envProviders?.map((p) => (
+                <span key={p.provider} className={`text-xs ${p.configured ? "text-green-500" : "text-gray-500"}`}>
+                  {p.label}: {p.configured ? "✓" : "—"}
+                </span>
+              ))}
+            </div>
+            {envModels.defaultModelInUse && (
+              <p className="text-xs text-amber-400">
+                Default model in use when no admin models: <strong>{envModels.defaultModelInUse.label}</strong> (via {envModels.defaultModelInUse.source})
+              </p>
+            )}
+          </div>
+        )}
+        <div className="rounded-lg border border-gray-800 overflow-hidden">
+          <table className="w-full text-sm">
+            <thead className="bg-gray-900 text-left text-gray-400">
+              <tr>
+                <th className="px-4 py-2">Label</th>
+                <th className="px-4 py-2">Provider</th>
+                <th className="px-4 py-2">Model</th>
+                <th className="px-4 py-2">Base URL</th>
+                <th className="px-4 py-2">Default</th>
+                <th className="px-4 py-2 w-24">Actions</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-800">
+              {aiModels.length === 0 ? (
+                <tr><td colSpan={6} className="px-4 py-4 text-gray-500">No AI models. Add one or use env fallback.</td></tr>
+              ) : (
+                aiModels.map((m) => (
+                  <tr key={m.id} className="hover:bg-gray-900/50">
+                    <td className="px-4 py-2">{m.label}</td>
+                    <td className="px-4 py-2 text-gray-500">{m.provider}</td>
+                    <td className="px-4 py-2 font-mono text-xs">{m.model}</td>
+                    <td className="px-4 py-2 font-mono text-[10px] max-w-[120px] truncate" title={m.baseUrl ?? undefined}>{m.baseUrl || "—"}</td>
+                    <td className="px-4 py-2">{m.isDefault ? "Yes" : "No"}</td>
+                    <td className="px-4 py-2 flex gap-1">
+                      <button
+                        type="button"
+                        onClick={() => setAiModelForm({ open: true, id: m.id, provider: m.provider, model: m.model, label: m.label, baseUrl: m.baseUrl ?? "", isDefault: m.isDefault, sortOrder: m.sortOrder })}
+                        className="p-1.5 rounded hover:bg-gray-700 text-gray-400 hover:text-gray-200"
+                        title="Edit"
+                      >
+                        <Pencil className="w-3.5 h-3.5" />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={async () => {
+                          if (!confirm("Delete this model?")) return;
+                          const res = await fetch(`/api/admin/ai-models/${m.id}`, { method: "DELETE", credentials: "include" });
+                          if (res.ok) load();
+                          else alert("Failed to delete");
+                        }}
+                        className="p-1.5 rounded hover:bg-red-900/30 text-gray-400 hover:text-red-400"
+                        title="Delete"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    </td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
+      </section>
+
       {/* Presets */}
       <section>
         <div className="flex items-center justify-between mb-3">
@@ -323,6 +460,74 @@ export default function AdminDashboard() {
           </table>
         </div>
       </section>
+
+      {/* AI Model form modal */}
+      {aiModelForm.open && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70">
+          <div className="bg-gray-900 border border-gray-700 rounded-xl shadow-xl w-full max-w-md overflow-hidden flex flex-col">
+            <div className="flex items-center justify-between px-4 py-3 border-b border-gray-800">
+              <h3 className="font-semibold">{aiModelForm.id ? "Edit AI model" : "New AI model"}</h3>
+              <button type="button" onClick={() => setAiModelForm((f) => ({ ...f, open: false }))} className="p-2 rounded-lg hover:bg-gray-800 text-gray-400">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            <div className="p-4 space-y-3">
+              <div>
+                <label className="block text-xs font-medium text-gray-500 mb-1">Provider</label>
+                <select
+                  value={aiModelForm.provider}
+                  onChange={(e) => setAiModelForm((f) => ({ ...f, provider: e.target.value }))}
+                  className="w-full px-3 py-2 rounded-lg bg-gray-800 border border-gray-700 text-sm"
+                >
+                  <option value="openai">OpenAI</option>
+                  <option value="openrouter">OpenRouter</option>
+                  <option value="anthropic">Anthropic</option>
+                  <option value="google">Google</option>
+                  <option value="custom">Custom (self-hosted)</option>
+                </select>
+              </div>
+              <LabelInput label="Model ID (e.g. gpt-4o-mini or openai/gpt-4o-mini)" value={aiModelForm.model} onChange={(v) => setAiModelForm((f) => ({ ...f, model: v }))} />
+              <LabelInput label="Label (display name)" value={aiModelForm.label} onChange={(v) => setAiModelForm((f) => ({ ...f, label: v }))} />
+              <LabelInput label="Base URL (optional, for custom/self-hosted; leave empty to use env default)" value={aiModelForm.baseUrl} onChange={(v) => setAiModelForm((f) => ({ ...f, baseUrl: v }))} />
+              <LabelInput label="Sort order" type="number" value={String(aiModelForm.sortOrder)} onChange={(v) => setAiModelForm((f) => ({ ...f, sortOrder: parseInt(v, 10) || 0 }))} />
+              <div className="flex items-center gap-2">
+                <input
+                  type="checkbox"
+                  id="aiModelDefault"
+                  checked={aiModelForm.isDefault}
+                  onChange={(e) => setAiModelForm((f) => ({ ...f, isDefault: e.target.checked }))}
+                  className="rounded border-gray-600 bg-gray-800"
+                />
+                <label htmlFor="aiModelDefault" className="text-sm">Default model for paid users</label>
+              </div>
+            </div>
+            <div className="flex justify-end gap-2 px-4 py-3 border-t border-gray-800">
+              <button type="button" onClick={() => setAiModelForm((f) => ({ ...f, open: false }))} className="px-3 py-1.5 rounded-lg border border-gray-600 hover:bg-gray-800 text-sm">
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={async () => {
+                  if (!aiModelForm.model.trim()) return alert("Model ID is required");
+                  const body = { provider: aiModelForm.provider, model: aiModelForm.model.trim(), label: aiModelForm.label.trim() || aiModelForm.model, baseUrl: aiModelForm.baseUrl.trim() || null, isDefault: aiModelForm.isDefault, sortOrder: aiModelForm.sortOrder };
+                  const url = aiModelForm.id ? `/api/admin/ai-models/${aiModelForm.id}` : "/api/admin/ai-models";
+                  const method = aiModelForm.id ? "PATCH" : "POST";
+                  const res = await fetch(url, { method, headers: { "Content-Type": "application/json" }, credentials: "include", body: JSON.stringify(body) });
+                  if (!res.ok) {
+                    const e = await res.json().catch(() => ({}));
+                    return alert((e as { error?: string }).error || "Failed to save");
+                  }
+                  setAiModelForm((f) => ({ ...f, open: false }));
+                  load();
+                }}
+                className="px-3 py-1.5 rounded-lg bg-violet-600 hover:bg-violet-500 text-white text-sm"
+              >
+                Save
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Preset form modal */}
       {presetForm.open && (

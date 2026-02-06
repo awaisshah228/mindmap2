@@ -6,8 +6,14 @@ import { getS3Bucket, getAwsRegion } from "@/lib/env";
 import { db } from "@/db";
 import { userFiles } from "@/db/schema";
 
-const MAX_SIZE = 5 * 1024 * 1024; // 5MB
-const ALLOWED_TYPES = ["image/png", "image/jpeg", "image/gif", "image/webp", "image/svg+xml"];
+const MAX_SIZE_ICONS = 5 * 1024 * 1024; // 5MB for icons
+const MAX_SIZE_ATTACHMENTS = 20 * 1024 * 1024; // 20MB for attachments
+const ALLOWED_ICON_TYPES = ["image/png", "image/jpeg", "image/gif", "image/webp", "image/svg+xml"];
+const ALLOWED_ATTACHMENT_TYPES = [
+  "image/png", "image/jpeg", "image/gif", "image/webp", "image/svg+xml",
+  "application/pdf", "application/msword", "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  "text/plain", "text/csv", "application/json",
+];
 /** S3 presigned URLs max 7 days; we use 7 days for icon URLs. Use GET /api/upload/presign to refresh. */
 const PRESIGN_EXPIRY_SECONDS = 7 * 24 * 60 * 60; // 7 days
 
@@ -44,11 +50,14 @@ export async function POST(request: Request) {
   if (!file || !(file instanceof File)) {
     return NextResponse.json({ error: "No file" }, { status: 400 });
   }
-  if (file.size > MAX_SIZE) {
-    return NextResponse.json({ error: "File too large (max 5MB)" }, { status: 400 });
+  const isAttachment = folder === "attachments";
+  const maxSize = isAttachment ? MAX_SIZE_ATTACHMENTS : MAX_SIZE_ICONS;
+  const allowedTypes = isAttachment ? ALLOWED_ATTACHMENT_TYPES : ALLOWED_ICON_TYPES;
+  if (file.size > maxSize) {
+    return NextResponse.json({ error: `File too large (max ${maxSize / 1024 / 1024}MB)` }, { status: 400 });
   }
-  if (!ALLOWED_TYPES.includes(file.type)) {
-    return NextResponse.json({ error: "Invalid type. Allowed: PNG, JPEG, GIF, WebP, SVG" }, { status: 400 });
+  if (!allowedTypes.includes(file.type)) {
+    return NextResponse.json({ error: "Invalid file type" }, { status: 400 });
   }
 
   const ext = file.name.split(".").pop() || "bin";

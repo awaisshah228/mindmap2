@@ -275,7 +275,7 @@ export default function EditorLayout() {
     }
     setConvertDrawioLoading(true);
     try {
-      const { llmProvider, llmModel, llmApiKey } = useCanvasStore.getState();
+      const { llmProvider, llmModel, llmApiKey, cloudModelId } = useCanvasStore.getState();
       const res = await fetch("/api/diagrams/convert-to-excalidraw", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -286,6 +286,7 @@ export default function EditorLayout() {
           llmProvider,
           llmModel,
           llmApiKey: llmApiKey || undefined,
+          cloudModelId: !llmApiKey ? cloudModelId ?? undefined : undefined,
         }),
       });
       if (!res.ok) {
@@ -351,7 +352,7 @@ export default function EditorLayout() {
     }
     setConvertExcalidrawLoading(true);
     try {
-      const { llmProvider, llmModel, llmApiKey } = useCanvasStore.getState();
+      const { llmProvider, llmModel, llmApiKey, cloudModelId } = useCanvasStore.getState();
       const res = await fetch("/api/diagrams/convert-to-excalidraw", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -362,6 +363,7 @@ export default function EditorLayout() {
           llmProvider,
           llmModel,
           llmApiKey: llmApiKey || undefined,
+          cloudModelId: !llmApiKey ? cloudModelId ?? undefined : undefined,
         }),
       });
       if (!res.ok) {

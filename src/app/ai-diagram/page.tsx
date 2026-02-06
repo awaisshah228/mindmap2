@@ -50,12 +50,39 @@ export type PresetOption = {
   targetCanvas?: "reactflow" | "excalidraw" | "drawio";
 };
 
+/** Cloud model option (admin-configured, for users without API key). */
+type CloudModelOption = { id: string; provider: string; model: string; label: string; isDefault: boolean };
+
 /** Small badge showing current model + API key status below the prompt textarea. */
 function ModelStatusBadge() {
   const llmProvider = useCanvasStore((s) => s.llmProvider);
   const llmModel = useCanvasStore((s) => s.llmModel);
   const llmApiKey = useCanvasStore((s) => s.llmApiKey);
+  const cloudModelId = useCanvasStore((s) => s.cloudModelId);
+  const setCloudModelId = useCanvasStore((s) => s.setCloudModelId);
   const hasKey = Boolean(llmApiKey);
+
+  const [cloudModels, setCloudModels] = useState<CloudModelOption[]>([]);
+  const cloudModelsInitialized = useRef(false);
+  useEffect(() => {
+    if (!hasKey) {
+      fetch("/api/ai-models")
+        .then((r) => (r.ok ? r.json() : { models: [] }))
+        .then((d) => {
+          const models = d.models ?? [];
+          setCloudModels(models);
+          // Auto-select default once when no selection and models available
+          if (!cloudModelsInitialized.current && cloudModelId == null && models.length > 0) {
+            cloudModelsInitialized.current = true;
+            const defaultModel = models.find((m: CloudModelOption) => m.isDefault) ?? models[0];
+            if (defaultModel) setCloudModelId(defaultModel.id);
+          }
+        })
+        .catch(() => setCloudModels([]));
+    } else {
+      cloudModelsInitialized.current = false;
+    }
+  }, [hasKey, cloudModelId, setCloudModelId]);
 
   const providerLabel =
     llmProvider === "openai" ? "OpenAI"
@@ -64,26 +91,39 @@ function ModelStatusBadge() {
     : llmProvider === "openrouter" ? "OpenRouter"
     : "Custom";
 
-  // Shorten model name for display
-  const modelShort = llmModel.length > 28 ? llmModel.slice(0, 26) + "…" : llmModel;
+  const selectedCloudModel = cloudModels.find((m) => m.id === cloudModelId) ?? cloudModels.find((m) => m.isDefault) ?? cloudModels[0];
+  const modelDisplay = hasKey ? (llmModel.length > 28 ? llmModel.slice(0, 26) + "…" : llmModel) : (selectedCloudModel?.label ?? "Default");
 
   return (
     <div className="flex flex-col gap-1.5">
-      <button
-        type="button"
-        onClick={() => useCanvasStore.getState().setSettingsOpen(true, "integration")}
-        className="flex items-center gap-2 text-[11px] text-gray-400 hover:text-gray-600 transition-colors"
-        title="Click to change AI model or API key"
-      >
-        <span className="flex items-center gap-1">
-          <span className={`w-1.5 h-1.5 rounded-full ${hasKey ? "bg-green-500" : "bg-amber-400"}`} />
-          {providerLabel}
-        </span>
-        <span className="text-gray-300">·</span>
-        <span className="font-mono truncate max-w-[180px]">{modelShort}</span>
-        <span className="text-gray-300">·</span>
-        <span>{hasKey ? "Own key" : "Server API"}</span>
-      </button>
+      <div className="flex items-center gap-2">
+        <button
+          type="button"
+          onClick={() => useCanvasStore.getState().setSettingsOpen(true, "integration")}
+          className="flex items-center gap-2 text-[11px] text-gray-400 hover:text-gray-600 transition-colors"
+          title="Click to change AI model or API key"
+        >
+          <span className="flex items-center gap-1">
+            <span className={`w-1.5 h-1.5 rounded-full ${hasKey ? "bg-green-500" : "bg-amber-400"}`} />
+            {hasKey ? providerLabel : "Server"}
+          </span>
+          <span className="text-gray-300">·</span>
+          <span className="font-mono truncate max-w-[180px]">{modelDisplay}</span>
+          <span className="text-gray-300">·</span>
+          <span>{hasKey ? "Own key" : "Server API"}</span>
+        </button>
+        {!hasKey && cloudModels.length > 1 && (
+          <select
+            value={cloudModelId ?? selectedCloudModel?.id ?? ""}
+            onChange={(e) => setCloudModelId(e.target.value || null)}
+            className="text-[11px] rounded px-1.5 py-0.5 bg-gray-100 dark:bg-gray-800 border border-gray-200 dark:border-gray-600 text-gray-700 dark:text-gray-300"
+          >
+            {cloudModels.map((m) => (
+              <option key={m.id} value={m.id}>{m.label}</option>
+            ))}
+          </select>
+        )}
+      </div>
       {!hasKey && (
         <button
           type="button"
@@ -300,7 +340,7 @@ function AIDiagramPage() {
       }
 
       // Read LLM settings from store
-      const { llmProvider, llmModel, llmApiKey, llmBaseUrl } = useCanvasStore.getState();
+      const { llmProvider, llmModel, llmApiKey, llmBaseUrl, cloudModelId } = useCanvasStore.getState();
 
       // ─── Draw.io: streaming generation ───
       if (effectiveTarget === "drawio") {
@@ -318,6 +358,7 @@ function AIDiagramPage() {
             llmProvider,
             llmModel,
             llmApiKey: llmApiKey || undefined,
+            cloudModelId: !llmApiKey ? cloudModelId ?? undefined : undefined,
           }),
         });
         if (!res.ok) {
@@ -394,6 +435,7 @@ function AIDiagramPage() {
             llmProvider,
             llmModel,
             llmApiKey: llmApiKey || undefined,
+            cloudModelId: !llmApiKey ? cloudModelId ?? undefined : undefined,
           }),
         });
         if (!res.ok) {
@@ -672,6 +714,8 @@ function AIDiagramPage() {
               diagramType: effectiveDiagramType,
               llmProvider,
               llmModel,
+              llmApiKey: llmApiKey || undefined,
+              cloudModelId: !llmApiKey ? cloudModelId ?? undefined : undefined,
               canvasBounds,
               mindMapStructure,
             }),

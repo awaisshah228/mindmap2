@@ -240,6 +240,8 @@ interface CanvasState {
   llmModel: string; // model id
   llmApiKey: string; // user-supplied API key (stored in browser only)
   llmBaseUrl: string; // custom base URL for "custom" provider
+  /** When no API key: selected cloud model id (from admin-configured ai_models). */
+  cloudModelId: string | null;
 
   // ─── Save status ───────────────────────────────────────────────────
   lastSavedAt: number | null;
@@ -314,6 +316,7 @@ interface CanvasState {
   setLLMModel: (model: string) => void;
   setLLMApiKey: (key: string) => void;
   setLLMBaseUrl: (url: string) => void;
+  setCloudModelId: (id: string | null) => void;
 
   // ─── Existing actions ────────────────────────────────────────────
 
@@ -405,6 +408,7 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
   llmModel: "openai/gpt-4o-mini",
   llmApiKey: "",
   llmBaseUrl: "",
+  cloudModelId: null as string | null,
 
   // ─── Save status ───────────────────────────────────────────────────
   lastSavedAt: null,
@@ -657,6 +661,7 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
   setLLMModel: (model) => set({ llmModel: model }),
   setLLMApiKey: (key) => set({ llmApiKey: key }),
   setLLMBaseUrl: (url) => set({ llmBaseUrl: url }),
+  setCloudModelId: (id) => set({ cloudModelId: id }),
 
   // ─── Existing actions ────────────────────────────────────────────
   setEditingNodeId: (id) => set({ editingNodeId: id }),

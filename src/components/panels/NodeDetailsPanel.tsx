@@ -12,9 +12,11 @@ import {
   File,
   Check,
   Square,
+  Loader2,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useCanvasStore, type NodeTask } from "@/lib/store/canvas-store";
+import { uploadWithProgress } from "@/lib/upload-with-progress";
 
 type Tab = "notes" | "tasks" | "attachments";
 
@@ -277,35 +279,81 @@ function TasksTab({ nodeId }: { nodeId: string }) {
 
 const EMPTY_ATTACHMENTS: import("@/lib/store/canvas-store").NodeAttachment[] = [];
 
+type UploadingFile = { name: string; progress: number; error?: string };
+
 function AttachmentsTab({ nodeId }: { nodeId: string }) {
   const attachmentsFromStore = useCanvasStore((s) => s.nodeAttachments[nodeId]);
   const attachments = attachmentsFromStore ?? EMPTY_ATTACHMENTS;
   const addNodeAttachment = useCanvasStore((s) => s.addNodeAttachment);
   const removeNodeAttachment = useCanvasStore((s) => s.removeNodeAttachment);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const [uploading, setUploading] = useState<Map<string, UploadingFile>>(new Map());
 
   const handleFileUpload = useCallback(
-    (e: React.ChangeEvent<HTMLInputElement>) => {
+    async (e: React.ChangeEvent<HTMLInputElement>) => {
       const files = e.target.files;
       if (!files) return;
-      Array.from(files).forEach((file) => {
-        const reader = new FileReader();
-        reader.onload = () => {
+      e.target.value = "";
+
+      const uploadApi = typeof window !== "undefined" ? `${window.location.origin}/api/upload` : "/api/upload";
+
+      for (const file of Array.from(files)) {
+        const fileKey = `${file.name}-${file.size}-${Date.now()}`;
+        setUploading((prev) => new Map(prev).set(fileKey, { name: file.name, progress: 0 }));
+
+        const result = await uploadWithProgress(
+          file,
+          uploadApi,
+          "attachments",
+          (loaded, total) => {
+            setUploading((prev) => {
+              const next = new Map(prev);
+              const cur = next.get(fileKey);
+              if (cur) next.set(fileKey, { ...cur, progress: total ? (loaded / total) * 100 : 0 });
+              return next;
+            });
+          }
+        );
+
+        setUploading((prev) => {
+          const next = new Map(prev);
+          next.delete(fileKey);
+          return next;
+        });
+
+        if (result.ok) {
           addNodeAttachment(nodeId, {
             id: `att-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
             name: file.name,
-            url: reader.result as string,
+            url: result.url,
             type: file.type,
           });
-        };
-        reader.readAsDataURL(file);
-      });
-      e.target.value = "";
+        } else {
+          const useFallback = /Upload not configured|Unauthorized|401|403|Forbidden/i.test(result.error ?? "");
+          if (useFallback) {
+            // Fallback to data URL when S3 not configured or not signed in
+            const reader = new FileReader();
+            reader.onload = () => {
+              addNodeAttachment(nodeId, {
+                id: `att-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+                name: file.name,
+                url: reader.result as string,
+                type: file.type,
+              });
+            };
+            reader.readAsDataURL(file);
+          } else {
+            setUploading((prev) => new Map(prev).set(fileKey, { name: file.name, progress: 100, error: result.error }));
+            setTimeout(() => setUploading((p) => { const n = new Map(p); n.delete(fileKey); return n; }), 3000);
+          }
+        }
+      }
     },
     [nodeId, addNodeAttachment]
   );
 
   const isImage = (type: string) => type.startsWith("image/");
+  const uploadingList = Array.from(uploading.entries());
 
   return (
     <div className="p-4 flex flex-col gap-3">
@@ -313,10 +361,11 @@ function AttachmentsTab({ nodeId }: { nodeId: string }) {
       <button
         type="button"
         onClick={() => fileInputRef.current?.click()}
-        className="flex items-center justify-center gap-2 px-4 py-3 border-2 border-dashed border-gray-300 rounded-lg hover:border-violet-400 hover:bg-violet-50/50 text-gray-500 hover:text-violet-600 transition-colors"
+        disabled={uploadingList.length > 0}
+        className="flex items-center justify-center gap-2 px-4 py-3 border-2 border-dashed border-gray-300 rounded-lg hover:border-violet-400 hover:bg-violet-50/50 text-gray-500 hover:text-violet-600 transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
       >
-        <Upload className="w-4 h-4" />
-        <span className="text-sm font-medium">Upload files</span>
+        {uploadingList.length > 0 ? <Loader2 className="w-4 h-4 animate-spin" /> : <Upload className="w-4 h-4" />}
+        <span className="text-sm font-medium">{uploadingList.length > 0 ? "Uploading..." : "Upload files"}</span>
       </button>
       <input
         ref={fileInputRef}
@@ -325,6 +374,30 @@ function AttachmentsTab({ nodeId }: { nodeId: string }) {
         onChange={handleFileUpload}
         className="hidden"
       />
+
+      {/* Upload progress */}
+      {uploadingList.length > 0 && (
+        <div className="flex flex-col gap-2">
+          {uploadingList.map(([key, { name, progress, error }]) => (
+            <div key={key} className="p-2 rounded-lg border border-gray-200 bg-gray-50">
+              <div className="flex items-center justify-between mb-1">
+                <span className="text-xs font-medium text-gray-700 truncate max-w-[200px]">{name}</span>
+                {error ? (
+                  <span className="text-xs text-red-500">{error}</span>
+                ) : (
+                  <span className="text-xs text-gray-500">{Math.round(progress)}%</span>
+                )}
+              </div>
+              <div className="w-full h-1.5 bg-gray-200 rounded-full overflow-hidden">
+                <div
+                  className="h-full bg-violet-500 rounded-full transition-all duration-200"
+                  style={{ width: `${progress}%` }}
+                />
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
 
       {/* Attachments list */}
       {attachments.length === 0 ? (

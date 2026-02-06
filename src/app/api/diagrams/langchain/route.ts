@@ -64,6 +64,7 @@ export async function POST(req: NextRequest) {
       llmProvider,
       llmModel,
       llmApiKey,
+      cloudModelId,
       canvasBounds,
       mindMapStructure,
     } = await req.json();
@@ -72,22 +73,47 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Prompt is required" }, { status: 400 });
     }
 
-    // Determine effective provider, model, and API key
-    const provider: string = llmProvider || "openrouter";
-    let effectiveModel = resolveModelName(provider, llmModel || model);
+    // When no user API key: ignore frontend model selection; use admin-configured cloud model or env default.
+    let provider: string;
+    let effectiveModel: string;
+    let resolvedBaseUrl: string | undefined;
+    if (llmApiKey) {
+      provider = llmProvider || "openrouter";
+      effectiveModel = resolveModelName(provider, llmModel || model);
+    } else {
+      const { resolveCloudModel } = await import("@/lib/ai-models");
+      const resolved = await resolveCloudModel(cloudModelId);
+      if (!resolved) {
+        provider = "openrouter";
+        effectiveModel = resolveModelName(provider, undefined);
+      } else {
+        provider = resolved.provider;
+        effectiveModel = resolveModelName(provider, resolved.model);
+        resolvedBaseUrl = resolved.baseUrl;
+      }
+    }
 
     let apiKey: string;
     let baseURL: string | undefined;
     let defaultHeaders: Record<string, string> = {};
     let usingOpenRouterFallback = false;
 
-    // Determine API key and base URL for the selected provider.
+    // Determine API key and base URL. Use resolvedBaseUrl when from admin/env cloud model.
     // If the provider-specific key is missing, fall back to the OpenRouter key
     // (which can route to any model via OpenRouter's unified API).
     const openRouterKey = getOpenRouterApiKey();
     const openAiKey = getOpenAiApiKey();
 
-    if (provider === "openrouter") {
+    if (resolvedBaseUrl) {
+      baseURL = resolvedBaseUrl;
+      if (provider === "openrouter") {
+        apiKey = llmApiKey || openRouterKey;
+        defaultHeaders = { "HTTP-Referer": getOpenRouterHttpReferer(), "X-Title": getOpenRouterAppTitle() };
+      } else if (provider === "openai") apiKey = llmApiKey || openAiKey;
+      else if (provider === "anthropic") apiKey = llmApiKey || getAnthropicApiKey() || openRouterKey || openAiKey;
+      else if (provider === "google") apiKey = llmApiKey || getGoogleApiKey() || openRouterKey || openAiKey;
+      else apiKey = llmApiKey || openAiKey || openRouterKey;
+    } else if (provider === "openrouter") {
       apiKey = llmApiKey || openRouterKey;
       baseURL = getOpenRouterBaseUrl();
       defaultHeaders = {

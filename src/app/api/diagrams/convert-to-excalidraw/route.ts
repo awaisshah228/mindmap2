@@ -81,12 +81,13 @@ export async function POST(req: NextRequest) {
     const admin = userId ? await isAdmin() : false;
 
     const body = await req.json();
-    const { nodes: rawNodes = [], edges: rawEdges = [], llmProvider, llmModel, llmApiKey } = body as {
+    const { nodes: rawNodes = [], edges: rawEdges = [], llmProvider, llmModel, llmApiKey, cloudModelId } = body as {
       nodes?: unknown[];
       edges?: unknown[];
       llmProvider?: string;
       llmModel?: string;
       llmApiKey?: string;
+      cloudModelId?: string;
     };
 
     const nodes = Array.isArray(rawNodes) ? (rawNodes as Node[]) : [];
@@ -103,14 +104,41 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    const provider = llmProvider ?? "openrouter";
+    // When no user API key: ignore frontend model selection; use admin-configured cloud model or env default.
+    let provider: string;
+    let effectiveModel: string;
+    let resolvedBaseUrl: string | undefined;
+    if (llmApiKey) {
+      provider = llmProvider ?? "openrouter";
+      effectiveModel = resolveModelName(provider, llmModel);
+    } else {
+      const { resolveCloudModel } = await import("@/lib/ai-models");
+      const resolved = await resolveCloudModel(cloudModelId);
+      if (!resolved) {
+        provider = "openrouter";
+        effectiveModel = resolveModelName(provider, undefined);
+      } else {
+        provider = resolved.provider;
+        effectiveModel = resolveModelName(provider, resolved.model);
+        resolvedBaseUrl = resolved.baseUrl;
+      }
+    }
     let apiKey: string;
     let baseURL: string | undefined;
     let defaultHeaders: Record<string, string> = {};
     const openRouterKey = getOpenRouterApiKey();
     const openAiKey = getOpenAiApiKey();
 
-    if (provider === "openrouter") {
+    if (resolvedBaseUrl) {
+      baseURL = resolvedBaseUrl;
+      if (provider === "openrouter") {
+        apiKey = llmApiKey || openRouterKey;
+        defaultHeaders = { "HTTP-Referer": getOpenRouterHttpReferer(), "X-Title": getOpenRouterAppTitle() };
+      } else if (provider === "openai") apiKey = llmApiKey || openAiKey;
+      else if (provider === "anthropic") apiKey = llmApiKey || getAnthropicApiKey() || openRouterKey || openAiKey;
+      else if (provider === "google") apiKey = llmApiKey || getGoogleApiKey() || openRouterKey || openAiKey;
+      else apiKey = llmApiKey || openAiKey || openRouterKey;
+    } else if (provider === "openrouter") {
       apiKey = llmApiKey || openRouterKey;
       baseURL = getOpenRouterBaseUrl();
       defaultHeaders = { "HTTP-Referer": getOpenRouterHttpReferer(), "X-Title": getOpenRouterAppTitle() };
@@ -135,8 +163,6 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const effectiveModel = resolveModelName(provider, llmModel);
-
     const fingerprint = JSON.stringify(
       nodes.map((n) => [n.id, n.position?.x, n.position?.y, (n.data as { label?: string })?.label]).sort((a, b) => String(a[0]).localeCompare(String(b[0])))
     ) + JSON.stringify(edges.map((e) => [e.source, e.target]).sort());
@@ -157,7 +183,7 @@ export async function POST(req: NextRequest) {
       apiKey,
       streaming: true,
       configuration: {
-        baseURL: provider === "openrouter" ? baseURL : undefined,
+        baseURL: baseURL ?? undefined,
         defaultHeaders: Object.keys(defaultHeaders).length > 0 ? defaultHeaders : undefined,
       },
     });

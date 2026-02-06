@@ -353,6 +353,7 @@ interface PersistedSettings {
   llmModel?: string;
   llmApiKey?: string;
   llmBaseUrl?: string;
+  cloudModelId?: string | null;
   aiPrompts?: unknown[];
   dailyNotes?: Record<string, string>;
   applyLayoutAtStart?: boolean;
@@ -465,6 +466,7 @@ export function useProjectPersistence() {
     if (settings.llmModel) store.setLLMModel(settings.llmModel);
     if (settings.llmApiKey) store.setLLMApiKey(settings.llmApiKey);
     if (settings.llmBaseUrl) store.setLLMBaseUrl(settings.llmBaseUrl);
+    if (settings.cloudModelId != null) store.setCloudModelId(settings.cloudModelId);
     if (settings.aiPrompts) store.setAIPrompts(settings.aiPrompts as typeof store.aiPrompts);
     if (typeof settings.applyLayoutAtStart === "boolean") store.setApplyLayoutAtStart(settings.applyLayoutAtStart);
     if (settings.dailyNotes) {
@@ -762,14 +764,15 @@ export function useProjectPersistence() {
   const llmModel = useCanvasStore((s) => s.llmModel);
   const llmApiKey = useCanvasStore((s) => s.llmApiKey);
   const llmBaseUrl = useCanvasStore((s) => s.llmBaseUrl);
+  const cloudModelId = useCanvasStore((s) => s.cloudModelId);
   const aiPrompts = useCanvasStore((s) => s.aiPrompts);
   const dailyNotes = useCanvasStore((s) => s.dailyNotes);
   const applyLayoutAtStart = useCanvasStore((s) => s.applyLayoutAtStart);
 
   useEffect(() => {
     if (!hydrated.current) return;
-    saveSettings({ theme, llmProvider, llmModel, llmApiKey, llmBaseUrl, aiPrompts, dailyNotes, applyLayoutAtStart });
-  }, [theme, llmProvider, llmModel, llmApiKey, llmBaseUrl, aiPrompts, dailyNotes, applyLayoutAtStart]);
+    saveSettings({ theme, llmProvider, llmModel, llmApiKey, llmBaseUrl, cloudModelId, aiPrompts, dailyNotes, applyLayoutAtStart });
+  }, [theme, llmProvider, llmModel, llmApiKey, llmBaseUrl, cloudModelId, aiPrompts, dailyNotes, applyLayoutAtStart]);
 
   // Force-save before the page unloads (localStorage only; cloud relies on debounced save)
   useEffect(() => {
