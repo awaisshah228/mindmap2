@@ -75,12 +75,11 @@ POSITIONING RULES — THIS IS CRITICAL:
 - For mind maps: central node at (0,0), first-level children at x ±400, y offset ±300 from center.
 - NEVER stack nodes at the same position. Each node MUST have a unique {x, y}.
 
-EDGES: id (e-src-tgt), source, target, sourceHandle ("left"|"right"|"top"|"bottom"), targetHandle ("left"|"right"|"top"|"bottom"), data.label? (e.g. "HTTP", "Calls", "Queries"), data.connectionLength? (number, the pixel distance between source and target, typically 300–500).
+EDGES: id (e-src-tgt), source, target, sourceHandle ("left"|"right"|"top"|"bottom"), targetHandle ("left"|"right"|"top"|"bottom"). data.label only when the relationship is not obvious from node names (e.g. "HTTP", "Queries", "Pub/Sub"); omit when self-explanatory. Keep edge labels short (1–3 words). data.connectionLength? (number, pixel distance between source and target, typically 300–500) — use when you add a label so the edge has room; labels are hidden on very short edges. Space nodes so labeled edges have enough length.
 
 Icon libs: lucide-react, react-icons. data.icon only from: ${ICON_IDS_FOR_PROMPT}. Defaults: lucide:server (services), lucide:database (data).
 
-Architecture: rectangle for services/DBs, layer left→right or top→bottom, set data.icon. Flowchart: rectangle/diamond/circle, flow one direction.
-Unique ids. Edge labels for non-mindMap. Only use data.icon from the list or omit.`,
+Architecture: rectangle for services/DBs, layer left→right or top→bottom, set data.icon. Flowchart: rectangle/diamond/circle, flow one direction. Unique ids. Only use data.icon from the list or omit.`,
     });
 
     return NextResponse.json(object);

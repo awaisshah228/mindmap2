@@ -32,18 +32,78 @@ export type DiagramTypeValue = (typeof DIAGRAM_TYPE_OPTIONS)[number]["value"];
 
 export const DIAGRAM_PRESETS = [
   { value: "none", label: "None (default)", prompt: "" },
-  { value: "ecommerce-mern-aws", label: "eCommerce MERN + AWS (full stack)", prompt: "Full-stack eCommerce architecture with MERN on AWS. Clear left-to-right flow, well-aligned nodes. Use only 2–4 groups if they help (e.g. Frontend, Backend, Data); do not add unnecessary groups. Include: User, React SPA (CloudFront + S3), ALB, Node.js/Express API (ECS Fargate), MongoDB Atlas, Redis (sessions/cart), AWS SQS (order queue), AWS SNS (notifications), Apache Kafka (events), Socket.io (real-time), S3 + CloudFront (images/CDN), Cognito/Auth0, Stripe, Elasticsearch. Label every edge (e.g. Requests, API calls, Queries, Pub/Sub, WebSockets, Events). Correct source/target and sourceHandle/targetHandle for clean connections. Use brand icons (AWS, MongoDB, Redis, Kafka, Stripe, React, Node)." },
-  { value: "stripe-payment", label: "Stripe payment flow", prompt: "Create a flowchart for Stripe payment flow: user selects product, cart, checkout, Stripe payment (card/redirect), success or failure, order confirmation, and email receipt." },
-  { value: "chatbot-arch", label: "Chatbot architecture", prompt: "System architecture diagram for a chatbot: User, Frontend chat UI, API Gateway, Auth service, Chat service, LLM provider (OpenAI), vector database for RAG, and Redis for session/cache." },
-  { value: "auth0-flow", label: "Auth0 auth flow", prompt: "Flowchart for Auth0 authentication: User clicks Login, redirect to Auth0, login/register, callback to app with tokens, validate token, load user session, then either show dashboard or prompt to complete profile." },
-  { value: "gig-marketplace", label: "Gig marketplace architecture", prompt: "Architecture diagram for a gig marketplace (e.g. Fiverr-style): Users (buyers/sellers), Frontend, API Gateway, Search service, Order service, Payment service, Notification service, and databases (users, orders, messages)." },
-  { value: "product-microservices", label: "Product page with microservices", prompt: "Microservices architecture for a product detail page: CDN, Frontend, API Gateway, Product service, Inventory service, Reviews service, Recommendations service, and shared Kafka for events." },
-  { value: "ecommerce-sql", label: "eCommerce SQL schema", prompt: "Entity-relationship diagram for eCommerce: Users, Orders, Order Items, Products, Categories, Cart, Payments, Shipping Addresses. Show key relationships and cardinality." },
-  { value: "twitter-data", label: "Twitter data model", prompt: "Entity-relationship diagram for a Twitter-like app: Users, Tweets, Follows, Likes, Retweets, Replies, Hashtags, Mentions. Show main entities and relationships." },
-  { value: "saas-multi-tenant", label: "SaaS multi-tenant architecture", prompt: "Architecture diagram for a multi-tenant SaaS platform: Tenants/Users → Next.js frontend → API Gateway (Kong/AWS) → Microservices (Auth, Billing, Tenant Management, Core App Logic) → PostgreSQL (tenant isolation via RLS), Redis cache, S3 file storage, Stripe billing, SendGrid email. Group by: Frontend, API Layer, Services, Data Layer, External Services." },
-  { value: "ci-cd-pipeline", label: "CI/CD pipeline", prompt: "Flowchart for a CI/CD pipeline: Developer pushes code → GitHub webhook → GitHub Actions (lint, test, build, Docker image) → Push to ECR → Deploy to ECS Staging → Run E2E tests → Manual approval gate → Deploy to ECS Production → Health check → Notify Slack. Include rollback path. Use brand icons." },
-  { value: "puppy-training", label: "Puppy training user journey", prompt: "User journey / flowchart for a puppy training platform: User signs up, chooses program (self or trainer-led), onboarding with puppy profile, daily lessons, progress tracking, optional adjust plan or add advanced training, completion and certificate." },
-  { value: "support-call-flow", label: "Support desk call flow", prompt: "Flowchart for support desk call flow: Call received, IVR menu, route to queue, agent picks up, diagnose issue, resolve or escalate, log ticket, follow-up, close ticket." },
+  {
+    value: "ecommerce-mern-aws",
+    label: "eCommerce MERN + AWS (full stack)",
+    prompt:
+      "Full-stack eCommerce architecture with MERN on AWS. Clear left-to-right flow. Use 2–4 groups (e.g. Frontend, Backend, Data). Include: User, React SPA (CloudFront + S3), ALB, Node.js/Express API (ECS Fargate), MongoDB Atlas, Redis (sessions/cart), AWS SQS (order queue), AWS SNS (notifications), Apache Kafka (events), Socket.io (real-time), S3 + CloudFront (images/CDN), Cognito/Auth0, Stripe, Elasticsearch. Add edge labels only when they add clarity (e.g. REST, Pub/Sub, WebSockets, Queries); omit for obvious flows like User→Frontend. Space nodes so edges have room. Correct source/target and sourceHandle/targetHandle. Use data.icon and data.iconUrl (AWS, MongoDB, Redis, Kafka, Stripe, React, Node).",
+  },
+  {
+    value: "stripe-payment",
+    label: "Stripe payment flow",
+    prompt:
+      "Flowchart for Stripe payment flow: User selects product → Cart → Checkout → Stripe payment (card/redirect) → Success or Failure → Order confirmation → Email receipt. Use rectangles for steps, diamond for success/failure. Label only decision edges (e.g. Yes/No) or non-obvious transitions. Short step labels. Left-to-right or top-to-bottom flow.",
+  },
+  {
+    value: "chatbot-arch",
+    label: "Chatbot architecture",
+    prompt:
+      "System architecture for a chatbot: User, Frontend chat UI, API Gateway, Auth service, Chat service, LLM provider (OpenAI), vector database for RAG, Redis for session/cache. Left-to-right flow. Edge labels only when useful (e.g. gRPC, RAG query); omit for obvious connections. Use service/rectangle nodes, data.icon and data.iconUrl on each.",
+  },
+  {
+    value: "auth0-flow",
+    label: "Auth0 auth flow",
+    prompt:
+      "Flowchart for Auth0 authentication: User clicks Login → Redirect to Auth0 → Login/register → Callback with tokens → Validate token → Load session → Dashboard or Complete profile. Rectangles for steps. Label edges only for redirect/callback or decisions; omit for simple step→step. Clear flow direction.",
+  },
+  {
+    value: "gig-marketplace",
+    label: "Gig marketplace architecture",
+    prompt:
+      "Architecture for a gig marketplace (Fiverr-style): Users (buyers/sellers), Frontend, API Gateway, Search, Order, Payment, Notification services, databases (users, orders, messages). Groups: Frontend, Services, Data. Edge labels only when they add clarity (e.g. Events, API); omit when obvious. Icons on every node.",
+  },
+  {
+    value: "product-microservices",
+    label: "Product page with microservices",
+    prompt:
+      "Microservices for a product detail page: CDN, Frontend, API Gateway, Product service, Inventory, Reviews, Recommendations services, shared Kafka for events. Left-to-right flow. Label edges only for event/pub-sub or non-obvious calls; omit for clear API→service. Use service nodes with icons.",
+  },
+  {
+    value: "ecommerce-sql",
+    label: "eCommerce SQL schema",
+    prompt:
+      "Entity-relationship diagram for eCommerce: Users, Orders, Order Items, Products, Categories, Cart, Payments, Shipping Addresses. Use databaseSchema nodes with data.columns (name, type, key). Groups for logical clusters. Edge labels for relationship names when useful (e.g. references, one-to-many); omit for trivial links. Show cardinality only when it adds value.",
+  },
+  {
+    value: "twitter-data",
+    label: "Twitter data model",
+    prompt:
+      "Entity-relationship diagram for a Twitter-like app: Users, Tweets, Follows, Likes, Retweets, Replies, Hashtags, Mentions. databaseSchema nodes with columns. Edge labels for relationship names when they add clarity; omit for obvious FK. Groups for core vs social entities.",
+  },
+  {
+    value: "saas-multi-tenant",
+    label: "SaaS multi-tenant architecture",
+    prompt:
+      "Multi-tenant SaaS architecture: Tenants/Users → Next.js frontend → API Gateway (Kong/AWS) → Microservices (Auth, Billing, Tenant Management, Core) → PostgreSQL (RLS), Redis, S3, Stripe, SendGrid. Groups: Frontend, API Layer, Services, Data, External. Edge labels only when needed (e.g. webhook, events); space nodes for clarity. Icons on each node.",
+  },
+  {
+    value: "ci-cd-pipeline",
+    label: "CI/CD pipeline",
+    prompt:
+      "Flowchart for CI/CD: Developer push → GitHub webhook → GitHub Actions (lint, test, build, Docker) → ECR → ECS Staging → E2E tests → Approval gate → ECS Production → Health check → Slack notify. Include rollback path. Label edges only for webhook/approval or decisions; omit for linear steps. Use brand icons where relevant.",
+  },
+  {
+    value: "puppy-training",
+    label: "Puppy training user journey",
+    prompt:
+      "User journey flowchart for a puppy training platform: Sign up → Choose program (self or trainer-led) → Onboarding with puppy profile → Daily lessons → Progress tracking → Optional adjust plan or advanced training → Completion and certificate. Rectangles for steps, diamond for choices. Label only decision branches (e.g. Self / Trainer); omit for linear flow.",
+  },
+  {
+    value: "support-call-flow",
+    label: "Support desk call flow",
+    prompt:
+      "Flowchart for support desk: Call received → IVR menu → Route to queue → Agent picks up → Diagnose → Resolve or Escalate → Log ticket → Follow-up → Close. Use rectangles and diamonds. Label edges for IVR options or Resolve/Escalate; omit for obvious steps. Clear top-to-bottom or left-to-right flow.",
+  },
 ] as const;
 
 export type PresetValue = (typeof DIAGRAM_PRESETS)[number]["value"];

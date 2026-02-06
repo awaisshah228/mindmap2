@@ -39,7 +39,8 @@ You decide the logical order and arrangement of nodes. Give each node a position
 Schema: nodes have id, type, position {x,y}. All nodes are top-level (no parentNode). data: label, shape?, icon?, imageUrl?, subtitle?, columns? (for databaseSchema), annotation?. For grouping: return an optional "groups" array: groups: [{ id: string, label: string, nodeIds: string[] }]. Each nodeIds lists the ids of nodes that belong to that group (e.g. "Frontend" group with nodeIds ["react-spa","cloudfront","s3"]). The app will lay out all nodes flat, then apply grouping visually. Use at most 2–4 groups when they clarify the diagram; omit groups when not needed.
 
 EDGES — CRITICAL FOR CLEAN CONNECTIONS:
-Every edge MUST have: id (unique), source (exact node id), target (exact node id), sourceHandle, targetHandle. Use handles so the flow direction is clear: e.g. left→right flow use sourceHandle "right" and targetHandle "left"; top→bottom use "bottom" and "top". Set data.label on EVERY edge so the flow is readable (e.g. "Requests", "HTTP", "Queries", "Pub/Sub", "WebSockets", "Events", "Sync", "Async"). Accurate source/target and handles prevent tangled connections. Keep the graph simple: avoid one node connecting to too many others; prefer a clear left-to-right or top-to-bottom flow so the diagram is easily understandable.
+Every edge MUST have: id (unique), source (exact node id), target (exact node id), sourceHandle, targetHandle. Use handles so the flow direction is clear: e.g. left→right flow use sourceHandle "right" and targetHandle "left"; top→bottom use "bottom" and "top".
+Edge labels (data.label): Add ONLY when the relationship is not obvious from the node names — e.g. protocol (HTTP, gRPC), event type (OrderCreated), relationship (references, belongs to), or flow type (Pub/Sub, WebSockets). Omit data.label when self-explanatory (e.g. User → Login, API → Database "Queries" can help; Frontend → API often needs no label). Keep labels short (1–3 words). When you do add a label, space the nodes so the edge has enough length (avoid very short edges between labeled connections); the UI hides labels on edges that are too short to keep the edge visible. Accurate source/target and handles prevent tangled connections. Keep the graph simple: avoid one node connecting to too many others; prefer a clear left-to-right or top-to-bottom flow.
 
 Icons — ICON FALLBACK CHAIN (follow this priority):
 1. FIRST try our installed icon library: Set data.icon to one of: ${ICON_IDS_FOR_PROMPT}. Defaults: services "lucide:server", data stores "lucide:database". Only use ids from this list for data.icon.
@@ -78,7 +79,7 @@ Special types: databaseSchema → use ONLY for entity-relationship or schema dia
 
 Images: type "image" with data.imageUrl = https://picsum.photos/seed/<word>/200/150 (seed: user, api, database, server, etc.). data.label = short caption.
 
-Rules: Unique node ids. Every edge: source and target exact node ids; sourceHandle and targetHandle; data.label on every edge. Short node labels (2–5 words). Every node: data.icon, data.iconUrl, or data.emoji. For architecture/system design: high-level view only — use service/rectangle for databases (e.g. MongoDB, Redis), never databaseSchema with columns. Use databaseSchema only for entity-relationship or schema diagram type. Place nodes for clear flow; auto-layout will arrange.
+Rules: Unique node ids. Every edge: source, target, sourceHandle, targetHandle; data.label only when it adds information (omit when self-explanatory); keep edge labels 1–3 words; space nodes so edges have room when you add a label. Short node labels (2–5 words). Every node: data.icon, data.iconUrl, or data.emoji. For architecture/system design: high-level view only — use service/rectangle for databases (e.g. MongoDB, Redis), never databaseSchema with columns. Use databaseSchema only for entity-relationship or schema diagram type. Place nodes for clear flow; auto-layout will arrange.
 `.trim();
 }
 
@@ -104,14 +105,17 @@ export function buildUserMessage(params: PromptParams): string {
       ? (() => {
           const hints: Record<string, string> = {
             mindmap:
-              "Type: mind map. Central topic + branches, all nodes mindMap.",
+              "Type: mind map. One central topic at (0,0), all nodes type mindMap. Branches with clear hierarchy. Edge labels only if they name the branch theme; usually omit — node labels are enough. Good data: short labels, icons/emoji on every node.",
             architecture:
-              "Type: architecture — high-level system design only. Show components as service or rectangle nodes with short labels. Do NOT use databaseSchema or show tables/columns. Use groups array (id, label, nodeIds) for 2–4 layers if needed (e.g. Frontend, Backend). Place related nodes close together; every edge: source/target, sourceHandle/targetHandle, data.label. Clean flow and icons.",
+              "Type: architecture — high-level system design only. Service or rectangle nodes, short labels (e.g. API Gateway, Redis, PostgreSQL). No databaseSchema or table columns. Use groups array for 2–4 layers (e.g. Frontend, Backend, Data, External). Left-to-right or top-to-bottom flow. Edge labels only when they add clarity (e.g. REST, gRPC, Pub/Sub, Queries); omit for obvious flows (User→Frontend, API→DB). Space nodes so labeled edges have room. Good data: data.icon + data.iconUrl on every node, 2–4 groups with clear nodeIds.",
             flowchart:
-              "Type: flowchart. Rectangles (steps), diamonds (decisions), circles (start/end). Use groups array to group related steps into phases if needed.",
-            sequence: "Type: sequence. Actors and interactions, clear lanes. Group actors by team/system.",
-            "entity-relationship": "Type: ER. Entities and relationships. Use databaseSchema nodes with columns. Use groups array for related entities if needed.",
-            bpmn: "Type: BPMN. Tasks, gateways, flows. Use groups array for swim lanes if needed.",
+              "Type: flowchart. Rectangles = steps, diamonds = decisions, circles = start/end. One clear direction (top→bottom or left→right). Use groups array to group phases (e.g. Input, Process, Output). Label edges only for decision outcomes (Yes/No) or when the transition needs explanation; omit for simple step→step. Good data: short step labels, optional data.shape for diamond/circle.",
+            sequence:
+              "Type: sequence. Actors (left column or top row), interactions between them. Use groups to separate actors/systems. Edge labels for message or action (e.g. request, response, notify) when not obvious; omit when arrow direction is enough. Good data: actor labels, clear source/target and handles.",
+            "entity-relationship":
+              "Type: ER. databaseSchema nodes with data.columns (name, type?, key?). Groups for logical clusters (e.g. Core, Billing). Edge labels for relationship names when useful (e.g. references, one-to-many); omit for trivial FK links. Good data: columns with name/type/key, groups with nodeIds.",
+            bpmn:
+              "Type: BPMN. Tasks (rectangles), gateways (diamonds), events (circles). Groups for swim lanes (e.g. by role or system). Label edges for conditions or flow type when needed; omit when flow is clear. Good data: short task names, groups for lanes.",
           };
           return hints[diagramType] ?? "";
         })()

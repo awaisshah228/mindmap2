@@ -20,6 +20,10 @@ import { CUSTOM_MARKER_IDS, MARKER_SHAPES, renderDynamicMarker } from "./CustomM
 const EDGE_STROKE_WIDTH = 6;
 /** Offset toolbar above the label so it doesn't cover placeholder/input */
 const TOOLBAR_OFFSET_Y = -52;
+/** Min edge length (px) to show a label so the edge stays visible; also require edge >= label width + this padding */
+const MIN_EDGE_LENGTH_FOR_LABEL_PX = 72;
+const LABEL_WIDTH_APPROX_PX_PER_CHAR = 7;
+const LABEL_PADDING_PX = 32;
 
 type ConnectorType = "smoothstep" | "default" | "straight" | "step";
 
@@ -157,8 +161,14 @@ function LabeledConnectorEdge({
   const edgePath = hasCustomPath
     ? buildCustomPath(aSourceX, aSourceY, aTargetX, aTargetY, effectivePathPoints)
     : defaultPathResult?.[0] ?? "";
-  const labelX = defaultPathResult?.[1] ?? (aSourceX + aTargetX) / 2;
-  const labelY = defaultPathResult?.[2] ?? (aSourceY + aTargetY) / 2;
+  const rawLabelX = defaultPathResult?.[1] ?? (aSourceX + aTargetX) / 2;
+  const rawLabelY = defaultPathResult?.[2] ?? (aSourceY + aTargetY) / 2;
+  const edgeLength = Math.hypot(aTargetX - aSourceX, aTargetY - aSourceY);
+  const labelWidthApprox = (label?.length ?? 0) * LABEL_WIDTH_APPROX_PX_PER_CHAR;
+  const minLengthToShowLabel = Math.max(MIN_EDGE_LENGTH_FOR_LABEL_PX, labelWidthApprox + LABEL_PADDING_PX);
+  const showLabelByLength = !label || edgeLength >= minLengthToShowLabel;
+  const labelX = rawLabelX;
+  const labelY = rawLabelY;
 
   const setConnectorType = useCallback(
     (type: ConnectorType) => {
@@ -986,8 +996,8 @@ function LabeledConnectorEdge({
             </>
           );
         })()}
-        {/* Edge label — only render when editing or label exists */}
-        {(label || isEditingLabel) && (
+        {/* Edge label — only when edge is long enough for the label (or user is editing) so the edge stays visible */}
+        {((label && showLabelByLength) || isEditingLabel) && (
         <div
           style={{
             position: "absolute",

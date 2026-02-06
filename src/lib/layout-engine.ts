@@ -5,7 +5,16 @@ export type LayoutDirection = "TB" | "LR" | "BT" | "RL";
 
 export type LayoutSpacing = [number, number];
 
-export type LayoutAlgorithm = "dagre" | "d3-tree" | "d3-cluster";
+export type LayoutAlgorithm =
+  | "dagre"
+  | "d3-tree"
+  | "d3-cluster"
+  | "elk-layered"
+  | "elk-mrtree"
+  | "elk-box"
+  | "elk-force"
+  | "elk-radial"
+  | "elk-stress";
 
 const DEFAULT_NODE_WIDTH = 150;
 const DEFAULT_NODE_HEIGHT = 50;
