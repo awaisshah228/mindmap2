@@ -7,6 +7,7 @@ import {
   MiniMap,
   useNodesState,
   useEdgesState,
+  reconnectEdge,
   type Connection,
   type Node,
   type Edge,
@@ -218,8 +219,9 @@ export default function DiagramCanvas() {
   const visibleEdges = useMemo(
     () =>
       edges.map((e) => {
+        const base = { ...e, reconnectable: true as const }; // allow reconnecting source or target on every edge
         if (hiddenNodeIds.has(e.source) || hiddenNodeIds.has(e.target))
-          return { ...e, hidden: true as const };
+          return { ...base, hidden: true as const };
 
         // In presentation mode, highlight edges connected to focused node, dim others
         if (presentationMode && presentationFocusedNodeId) {
@@ -227,7 +229,7 @@ export default function DiagramCanvas() {
             e.source === presentationFocusedNodeId ||
             e.target === presentationFocusedNodeId;
           return {
-            ...e,
+            ...base,
             style: {
               ...e.style,
               opacity: isConnected ? 1 : 0.1,
@@ -235,7 +237,7 @@ export default function DiagramCanvas() {
             },
           };
         }
-        return e;
+        return base;
       }),
     [edges, hiddenNodeIds, presentationMode, presentationFocusedNodeId]
   );
@@ -602,6 +604,20 @@ export default function DiagramCanvas() {
       });
     },
     [setEdges, setStoreEdges]
+  );
+
+  // Called when user drags edge handle to reconnect to another node (source or target)
+  const onReconnect = useCallback(
+    (oldEdge: Edge, newConnection: Connection) => {
+      pushUndo();
+      setEdges((eds) => {
+        const updated = reconnectEdge(oldEdge, newConnection, eds);
+        fromCanvasRef.current++;
+        queueMicrotask(() => setStoreEdges(updated));
+        return updated;
+      });
+    },
+    [setEdges, setStoreEdges, pushUndo]
   );
 
   const pendingEdgeType = useCanvasStore((s) => s.pendingEdgeType);
@@ -1594,6 +1610,7 @@ export default function DiagramCanvas() {
           onInit={onInit}
           onNodesChange={onNodesChange}
           onEdgesChange={onEdgesChange}
+          onReconnect={onReconnect}
           onConnect={onConnect}
           onConnectEnd={onConnectEnd}
           onNodeClick={onNodeClick}
@@ -1609,6 +1626,7 @@ export default function DiagramCanvas() {
           fitView
           nodesDraggable={!presentationMode && activeTool !== "freeDraw" && activeTool !== "connector"}
           nodesConnectable={!presentationMode && activeTool !== "freeDraw"}
+          edgesReconnectable={!presentationMode && activeTool !== "freeDraw"}
           elementsSelectable={activeTool !== "freeDraw"}
           edgesFocusable={activeTool !== "freeDraw"}
           zoomOnScroll={!presentationMode}
@@ -1631,10 +1649,12 @@ export default function DiagramCanvas() {
           defaultEdgeOptions={{
             type: "labeledConnector",
             data: { connectorType: "default" },
+            reconnectable: true, // allow reconnecting from both source and target
           }}
           snapGrid={[16, 16]}
           snapToGrid
           connectionRadius={40}
+          reconnectRadius={16}
           connectOnClick
           connectionMode={ConnectionMode.Loose}
           proOptions={{ hideAttribution: true }}

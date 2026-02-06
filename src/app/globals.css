@@ -150,3 +150,18 @@ body {
   background: transparent !important;
   padding: 0 !important;
 }
+
+/* Edge reconnect handles — visible when edge is selected or when hovering near source/target */
+.react-flow__edge.selected .react-flow__edgeupdater,
+.react-flow__edge.updating .react-flow__edgeupdater {
+  fill: rgba(255, 255, 255, 0.95) !important;
+  stroke: rgba(139, 92, 246, 0.8) !important;
+  stroke-width: 2px !important;
+  cursor: move !important;
+}
+
+.react-flow__edge.selected .react-flow__edgeupdater:hover,
+.react-flow__edge.updating .react-flow__edgeupdater:hover {
+  fill: #ede9fe !important;
+  stroke: #8b5cf6 !important;
+}
