@@ -24,6 +24,7 @@ import { KeyboardHandler } from "./KeyboardHandler";
 import { PresentationMode } from "@/components/panels/PresentationMode";
 import { HelperLines } from "./HelperLines";
 import { getLayoutedElements, type LayoutDirection } from "@/lib/layout-engine";
+import { useAutoLayout } from "@/hooks/useAutoLayout";
 import { resolveCollisions } from "@/lib/resolve-collisions";
 import { getHiddenNodeIds } from "@/lib/mindmap-utils";
 import "@xyflow/react/dist/style.css";
@@ -63,6 +64,7 @@ import { AIContextMenu } from "@/components/panels/AIContextMenu";
 import { CanvasBottomBar } from "./CanvasBottomBar";
 
 const EDGE_ANCHOR_SIZE = 12;
+const LAYOUT_EXCLUDED_TYPES = new Set(["freeDraw", "edgeAnchor"]);
 
 const nodeTypes = {
   stickyNote: StickyNoteNode,
@@ -1464,89 +1466,46 @@ export default function DiagramCanvas() {
 
   // Note: localStorage persistence is now handled by useProjectPersistence() in EditorLayout.
 
-  /** Node types excluded from layout algorithms (they have freeform positions). */
-  const LAYOUT_EXCLUDED_TYPES = new Set(["freeDraw", "edgeAnchor", "group"]);
+  const { layoutAll, layoutSelection } = useAutoLayout({
+    nodes,
+    edges,
+    setNodes: useCallback(
+      (updater) => {
+        setNodes((prev) => {
+          const next = typeof updater === "function" ? updater(prev) : updater;
+          fromCanvasRef.current++;
+          queueMicrotask(() => setStoreNodes(next));
+          return next;
+        });
+      },
+      [setNodes, setStoreNodes]
+    ),
+    setEdges: useCallback(
+      (updater) => {
+        setEdges((prev) => {
+          const next = typeof updater === "function" ? updater(prev) : updater;
+          fromCanvasRef.current++;
+          queueMicrotask(() => setStoreEdges(next));
+          return next;
+        });
+      },
+      [setEdges, setStoreEdges]
+    ),
+    fitView: useCallback(
+      () => reactFlowRef.current?.fitView({ padding: 0.2, duration: 300 }),
+      []
+    ),
+  });
 
   const handleLayoutSelectedNodes = useCallback(async () => {
-    if (selectedNodeIds.length < 2) return;
-
-    const selectedSet = new Set(selectedNodeIds);
-    const subNodes = nodes.filter(
-      (n) => selectedSet.has(n.id) && !LAYOUT_EXCLUDED_TYPES.has(n.type ?? "")
-    );
-    const subEdges = edges.filter(
-      (e) => selectedSet.has(e.source) && selectedSet.has(e.target)
-    );
-
-    if (subNodes.length < 2) return;
-
-    const direction: LayoutDirection = "LR";
-    const { nodes: layoutedNodes, edges: layoutedEdges } =
-      await getLayoutedElements(subNodes, subEdges, direction, [140, 120], "elk-layered");
-
-    setNodes((all) =>
-      all.map((n) => {
-        const ln = layoutedNodes.find((x) => x.id === n.id);
-        return ln ? { ...n, position: ln.position } : n;
-      })
-    );
-    setEdges((all) =>
-      all.map((e) => {
-        const le = layoutedEdges.find((x) => x.id === e.id);
-        return le
-          ? {
-              ...e,
-              sourceHandle: le.sourceHandle ?? e.sourceHandle,
-              targetHandle: le.targetHandle ?? e.targetHandle,
-            }
-          : e;
-      })
-    );
-  }, [selectedNodeIds, nodes, edges, setNodes, setEdges]);
+    pushUndo();
+    await layoutSelection();
+  }, [layoutSelection, pushUndo]);
 
   const handleLayoutAllNodes = useCallback(async () => {
-    // Filter out freehand / anchor / group nodes — only layout structured nodes
-    const layoutableNodes = nodes.filter((n) => !LAYOUT_EXCLUDED_TYPES.has(n.type ?? ""));
-    if (layoutableNodes.length < 2) return;
-
     pushUndo();
-
-    const direction: LayoutDirection = mindMapLayout.direction;
-    const spacing: [number, number] = [mindMapLayout.spacingX, mindMapLayout.spacingY];
-
-    const layoutableIds = new Set(layoutableNodes.map((n) => n.id));
-    const layoutableEdges = edges.filter(
-      (e) => layoutableIds.has(e.source) && layoutableIds.has(e.target)
-    );
-
-    const { nodes: layoutedNodes, edges: layoutedEdges } = await getLayoutedElements(
-      layoutableNodes,
-      layoutableEdges,
-      direction,
-      spacing,
-      mindMapLayout.algorithm
-    );
-
-    // Merge back — only update nodes that were layouted; leave freehand/groups untouched
-    setNodes((all) =>
-      all.map((n) => {
-        const ln = layoutedNodes.find((x) => x.id === n.id);
-        return ln ? { ...n, position: ln.position } : n;
-      })
-    );
-    setEdges((all) =>
-      all.map((e) => {
-        const le = layoutedEdges.find((x) => x.id === e.id);
-        return le
-          ? {
-              ...e,
-              sourceHandle: le.sourceHandle ?? e.sourceHandle,
-              targetHandle: le.targetHandle ?? e.targetHandle,
-            }
-          : e;
-      })
-    );
-  }, [nodes, edges, mindMapLayout, setNodes, setEdges, pushUndo]);
+    await layoutAll();
+  }, [layoutAll, pushUndo]);
 
   return (
     <MindMapLayoutProvider

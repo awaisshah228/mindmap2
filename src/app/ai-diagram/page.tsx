@@ -9,6 +9,8 @@ import {
   normalizeMindMapEdgeHandles,
   fitGroupBoundsAndCenterChildren,
   applyGroupingFromMetadata,
+  layoutChildrenInsideGroups,
+  ensureExtentForGroupedNodes,
   type LayoutDirection,
   type LayoutAlgorithm,
 } from "@/lib/layout-engine";
@@ -476,12 +478,12 @@ function AIDiagramPage() {
       let layoutedNodes = layoutResult.nodes;
       let layoutedEdges = layoutResult.edges;
 
-      // Apply grouping from LLM metadata: create group nodes and set parentId on listed nodes
-      // (like user selecting nodes and Ctrl+G). Then run layout again so groups are positioned with gaps.
+      // Apply grouping from LLM metadata: create group nodes and set parentId + extent: "parent"
+      // on every child so nodes cannot be dragged outside the group until ungrouped (⌘⇧G).
       if (!isMindMapDiagram && groupMetadata.length > 0) {
         const withGroups = applyGroupingFromMetadata(layoutedNodes, groupMetadata);
         layoutedNodes = fitGroupBoundsAndCenterChildren(withGroups);
-        // Run layout again (same as first render) so compound graph has proper alignment and gaps between groups
+        // Run layout again so compound graph has proper alignment and gaps between groups
         const afterGroupLayout = await getLayoutedElements(
           layoutedNodes,
           layoutedEdges,
@@ -491,7 +493,14 @@ function AIDiagramPage() {
         );
         layoutedNodes = afterGroupLayout.nodes;
         layoutedEdges = afterGroupLayout.edges;
-        layoutedNodes = fitGroupBoundsAndCenterChildren(layoutedNodes);
+        // Layout children inside each group with proper padding and extent
+        layoutedNodes = await layoutChildrenInsideGroups(
+          layoutedNodes,
+          layoutedEdges,
+          direction,
+          [40, 32]
+        );
+        layoutedNodes = ensureExtentForGroupedNodes(layoutedNodes);
       }
 
       // Apply layout (ELK) for alignment — for mind map or when diagram type is "any" (auto).

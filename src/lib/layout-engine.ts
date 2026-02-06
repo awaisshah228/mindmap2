@@ -244,14 +244,94 @@ async function layoutWithElk(
     return { ...n, targetPosition: targetPos, sourcePosition: sourcePos };
   });
 
-  const normalizedEdges = normalizeMindMapEdgeHandles(allNodes, edges, direction);
+  const layoutedIds = new Set(nodes.map((n) => n.id));
+  const normalizedEdges = normalizeEdgeHandlesForDirection(layoutedIds, edges, direction);
   return { nodes: allNodes, edges: normalizedEdges };
 }
 
 const GROUP_PADDING = 64;
 const GROUP_HEADER_INSET = 44;
+const CHILD_PADDING = 24;
 
 export type GroupMetadata = { id: string; label: string; nodeIds: string[] };
+
+/**
+ * Layout children inside each group with proper spacing and padding.
+ * Ensures extent: "parent" on all grouped children so they cannot be dragged outside.
+ */
+export async function layoutChildrenInsideGroups(
+  nodes: Node[],
+  edges: Edge[],
+  direction: LayoutDirection = "LR",
+  spacing: LayoutSpacing = [40, 32]
+): Promise<Node[]> {
+  const groupIds = new Set(nodes.filter((n) => n.type === "group").map((n) => n.id));
+  if (groupIds.size === 0) return nodes;
+
+  let result = nodes.map((n) => ({ ...n }));
+
+  for (const groupId of groupIds) {
+    const children = result.filter((n) => n.parentId === groupId);
+    if (children.length === 0) continue;
+
+    const childIds = new Set(children.map((c) => c.id));
+    const childEdges = edges.filter(
+      (e) => childIds.has(e.source) && childIds.has(e.target)
+    );
+
+    let layoutedChildren: Node[];
+    if (children.length >= 2 || childEdges.length > 0) {
+      const { nodes: laid } = await getLayoutedElements(
+        children,
+        childEdges,
+        direction,
+        spacing,
+        "elk-layered"
+      );
+      layoutedChildren = laid;
+    } else {
+      layoutedChildren = children;
+    }
+
+    let minX = Infinity;
+    let minY = Infinity;
+    for (const c of layoutedChildren) {
+      const x = c.position?.x ?? 0;
+      const y = c.position?.y ?? 0;
+      minX = Math.min(minX, x);
+      minY = Math.min(minY, y);
+    }
+
+    const offsetX = CHILD_PADDING - minX;
+    const offsetY = GROUP_HEADER_INSET + CHILD_PADDING - minY;
+
+    for (let i = 0; i < result.length; i++) {
+      if (result[i].parentId !== groupId) continue;
+      const laid = layoutedChildren.find((c) => c.id === result[i].id);
+      if (!laid) continue;
+      result[i] = {
+        ...result[i],
+        extent: "parent" as const,
+        position: {
+          x: (laid.position?.x ?? 0) + offsetX,
+          y: (laid.position?.y ?? 0) + offsetY,
+        },
+      };
+    }
+  }
+
+  result = fitGroupBoundsAndCenterChildren(result);
+  return ensureExtentForGroupedNodes(result);
+}
+
+/**
+ * Ensure every node with parentId has extent: "parent" so it cannot be dragged outside the group.
+ */
+export function ensureExtentForGroupedNodes(nodes: Node[]): Node[] {
+  return nodes.map((n) =>
+    n.parentId ? { ...n, extent: "parent" as const } : n
+  );
+}
 
 /**
  * Apply grouping at render time: create group nodes from metadata and set parentId
@@ -380,6 +460,7 @@ export function fitGroupBoundsAndCenterChildren(nodes: Node[]): Node[] {
       if (result[i].parentId === groupId && result[i].position) {
         result[i] = {
           ...result[i],
+          extent: "parent" as const,
           position: {
             x: result[i].position!.x + offsetX,
             y: result[i].position!.y + offsetY,
@@ -394,9 +475,8 @@ export function fitGroupBoundsAndCenterChildren(nodes: Node[]): Node[] {
 
 /** Shift all nodes left so the leftmost node is at padding (root pulled back on x-axis). */
 function shiftLayoutLeft(nodes: Node[], leftPadding: number): Node[] {
-  const mindMapNodes = nodes.filter((n) => n.type === "mindMap");
-  if (mindMapNodes.length === 0) return nodes;
-  const minX = Math.min(...mindMapNodes.map((n) => n.position.x));
+  if (nodes.length === 0) return nodes;
+  const minX = Math.min(...nodes.map((n) => n.position.x));
   const dx = minX - leftPadding;
   if (Math.abs(dx) < 1) return nodes;
   return nodes.map((n) => ({
@@ -405,17 +485,27 @@ function shiftLayoutLeft(nodes: Node[], leftPadding: number): Node[] {
   }));
 }
 
+/** Normalize edge handle IDs to match layout direction for proper connector routing. */
+export function normalizeEdgeHandlesForDirection(
+  layoutedNodeIds: Set<string>,
+  edges: Edge[],
+  direction: LayoutDirection
+): Edge[] {
+  const { target: targetId, source: sourceId } = getHandleIds(direction);
+  return edges.map((e) => {
+    const inLayout = layoutedNodeIds.has(e.source) || layoutedNodeIds.has(e.target);
+    return inLayout ? { ...e, sourceHandle: sourceId, targetHandle: targetId } : e;
+  });
+}
+
+/** @deprecated Use normalizeEdgeHandlesForDirection with layouted node ids. */
 export function normalizeMindMapEdgeHandles(
   nodes: Node[],
   edges: Edge[],
   direction: LayoutDirection
 ): Edge[] {
-  const mindMapIds = new Set(nodes.filter((n) => n.type === "mindMap").map((n) => n.id));
-  const { target: targetId, source: sourceId } = getHandleIds(direction);
-  return edges.map((e) => {
-    if (!mindMapIds.has(e.source) && !mindMapIds.has(e.target)) return e;
-    return { ...e, sourceHandle: sourceId, targetHandle: targetId };
-  });
+  const ids = new Set(nodes.filter((n) => n.type === "mindMap").map((n) => n.id));
+  return normalizeEdgeHandlesForDirection(ids, edges, direction);
 }
 
 async function layoutWithDagre(
@@ -430,16 +520,17 @@ async function layoutWithDagre(
   const layoutFn = (dagre as { layout?: (g: unknown) => void }).layout;
   if (!Graph || !layoutFn) {
     const { target: targetPos, source: sourcePos } = getHandlePositions(direction);
+    const layoutableIds = new Set(nodes.map((n) => n.id));
     const layoutedNodes = nodes.map((node) => ({
       ...node,
       targetPosition: targetPos,
       sourcePosition: sourcePos,
     }));
-    return { nodes: layoutedNodes, edges: normalizeMindMapEdgeHandles(layoutedNodes, edges, direction) };
+    return { nodes: layoutedNodes, edges: normalizeEdgeHandlesForDirection(layoutableIds, edges, direction) };
   }
 
-  const mindMapIds = new Set(nodes.filter((n) => n.type === "mindMap").map((n) => n.id));
-  const mindMapEdges = edges.filter((e) => mindMapIds.has(e.source) && mindMapIds.has(e.target));
+  const layoutableIds = new Set(nodes.map((n) => n.id));
+  const layoutableEdges = edges.filter((e) => layoutableIds.has(e.source) && layoutableIds.has(e.target));
   const dagreGraph = new Graph().setDefaultEdgeLabel(() => ({}));
 
   const { target: targetPos, source: sourcePos } = getHandlePositions(direction);
@@ -450,12 +541,11 @@ async function layoutWithDagre(
   });
 
   nodes.forEach((node) => {
-    if (!mindMapIds.has(node.id)) return;
     const { width, height } = getNodeSize(node);
     dagreGraph.setNode(node.id, { width, height });
   });
 
-  mindMapEdges.forEach((edge) => {
+  layoutableEdges.forEach((edge) => {
     dagreGraph.setEdge(edge.source, edge.target);
   });
 
@@ -463,7 +553,7 @@ async function layoutWithDagre(
 
   const layoutedNodes: Node[] = nodes.map((node) => {
     const { width, height } = getNodeSize(node);
-    const nodeWithPosition = mindMapIds.has(node.id) ? dagreGraph.node(node.id) : null;
+    const nodeWithPosition = dagreGraph.node(node.id);
     const hasPosition = nodeWithPosition && typeof nodeWithPosition.x === "number" && typeof nodeWithPosition.y === "number";
     return {
       ...node,
@@ -476,9 +566,11 @@ async function layoutWithDagre(
   });
 
   const shifted = shiftLayoutLeft(layoutedNodes, ROOT_LEFT_PADDING);
-  const normalizedEdges = normalizeMindMapEdgeHandles(shifted, edges, direction);
+  const normalizedEdges = normalizeEdgeHandlesForDirection(layoutableIds, edges, direction);
   return { nodes: shifted, edges: normalizedEdges };
 }
+
+const VIRTUAL_ROOT_ID = "__layout_root__";
 
 async function layoutWithD3Hierarchy(
   nodes: Node[],
@@ -488,16 +580,27 @@ async function layoutWithD3Hierarchy(
   variant: "tree" | "cluster"
 ): Promise<{ nodes: Node[]; edges: Edge[] }> {
   const d3 = await import("d3-hierarchy");
-  const rootId = nodes.find((n) => n.type === "mindMap" && !edges.some((e) => e.target === n.id))?.id;
-  if (!rootId) return { nodes, edges };
+  const roots = nodes.filter((n) => !edges.some((e) => e.target === n.id));
+  if (roots.length === 0) return { nodes, edges };
 
-  const data = nodes.map((n) => ({
-    id: n.id,
-    parentId: edges.find((e) => e.target === n.id)?.source ?? (n.id === rootId ? "" : null),
-  }));
+  const layoutableIds = new Set(nodes.map((n) => n.id));
+  const data: { id: string; parentId: string | null }[] = nodes.map((n) => {
+    const incoming = edges.find((e) => e.target === n.id);
+    const parentId = incoming ? incoming.source : null;
+    return { id: n.id, parentId };
+  });
+
+  if (roots.length > 1) {
+    data.push({ id: VIRTUAL_ROOT_ID, parentId: null });
+    for (const r of roots) {
+      const idx = data.findIndex((d) => d.id === r.id);
+      if (idx >= 0) data[idx].parentId = VIRTUAL_ROOT_ID;
+    }
+  }
+
   const root = d3.stratify<{ id: string; parentId: string | null }>()
     .id((d) => d.id)
-    .parentId((d) => (d.parentId === "" ? null : d.parentId))(data);
+    .parentId((d) => d.parentId)(data);
 
   const [nodeW, nodeH] = spacing;
   const rootAsUnknown = root as import("d3-hierarchy").HierarchyNode<unknown>;
@@ -509,34 +612,40 @@ async function layoutWithD3Hierarchy(
   const { target: targetPos, source: sourcePos } = getHandlePositions(direction);
   const nodeMap = new Map(nodes.map((n) => [n.id, n]));
 
-  const layoutedNodes: Node[] = layoutRoot.descendants().map((d) => {
-    const node = nodeMap.get((d.data as { id: string }).id)!;
-    const { width, height } = getNodeSize(node);
-    let x = d.x - width / 2;
-    let y = d.y - height / 2;
-    switch (direction) {
-      case "LR":
-        [x, y] = [d.y - height / 2, d.x - width / 2];
-        break;
-      case "RL":
-        [x, y] = [-d.y - height / 2, d.x - width / 2];
-        break;
-      case "BT":
-        [x, y] = [d.x - width / 2, -d.y - height / 2];
-        break;
-      default:
-        break;
-    }
-    return {
-      ...node,
-      targetPosition: targetPos,
-      sourcePosition: sourcePos,
-      position: { x, y },
-    };
-  });
+  const layoutedNodes: Node[] = layoutRoot
+    .descendants()
+    .filter((d) => (d.data as { id: string }).id !== VIRTUAL_ROOT_ID)
+    .flatMap((d) => {
+      const node = nodeMap.get((d.data as { id: string }).id);
+      if (!node) return [];
+      const { width, height } = getNodeSize(node);
+      let x = d.x - width / 2;
+      let y = d.y - height / 2;
+      switch (direction) {
+        case "LR":
+          [x, y] = [d.y - height / 2, d.x - width / 2];
+          break;
+        case "RL":
+          [x, y] = [-d.y - height / 2, d.x - width / 2];
+          break;
+        case "BT":
+          [x, y] = [d.x - width / 2, -d.y - height / 2];
+          break;
+        default:
+          break;
+      }
+      return [
+        {
+          ...node,
+          targetPosition: targetPos,
+          sourcePosition: sourcePos,
+          position: { x, y },
+        },
+      ];
+    });
 
   const shifted = shiftLayoutLeft(layoutedNodes, ROOT_LEFT_PADDING);
-  const normalizedEdges = normalizeMindMapEdgeHandles(shifted, edges, direction);
+  const normalizedEdges = normalizeEdgeHandlesForDirection(layoutableIds, edges, direction);
   return { nodes: shifted, edges: normalizedEdges };
 }
 
@@ -548,6 +657,79 @@ const ELK_ALGORITHM_MAP: Record<string, string> = {
   "elk-radial": "radial",
   "elk-stress": "stress",
 };
+
+export type AutoLayoutOptions = {
+  algorithm: LayoutAlgorithm;
+  direction: LayoutDirection;
+  spacing: LayoutSpacing;
+};
+
+/**
+ * Detects if the graph contains cycles (for layout algorithm selection).
+ */
+function hasCycle(nodeIds: Set<string>, edges: Edge[]): boolean {
+  const adj = new Map<string, string[]>();
+  for (const e of edges) {
+    if (!nodeIds.has(e.source) || !nodeIds.has(e.target)) continue;
+    const list = adj.get(e.source) ?? [];
+    list.push(e.target);
+    adj.set(e.source, list);
+  }
+  const visited = new Set<string>();
+  const stack = new Set<string>();
+  const visit = (id: string): boolean => {
+    visited.add(id);
+    stack.add(id);
+    for (const to of adj.get(id) ?? []) {
+      if (!visited.has(to)) {
+        if (visit(to)) return true;
+      } else if (stack.has(to)) return true;
+    }
+    stack.delete(id);
+    return false;
+  };
+  for (const id of nodeIds) {
+    if (!visited.has(id) && visit(id)) return true;
+  }
+  return false;
+}
+
+/**
+ * Analyzes the graph and returns the best layout algorithm and direction.
+ * Use for auto-layout to get optimal results without user configuration.
+ */
+export function chooseBestLayoutOptions(
+  nodes: Node[],
+  edges: Edge[],
+  nodeIds?: Set<string>
+): AutoLayoutOptions {
+  const ids = nodeIds ?? new Set(nodes.map((n) => n.id));
+  const relevantEdges = edges.filter((e) => ids.has(e.source) && ids.has(e.target));
+
+  const roots = nodes.filter((n) => ids.has(n.id) && !relevantEdges.some((e) => e.target === n.id));
+  const rootCount = roots.length;
+  const hasGroups = nodes.some((n) => ids.has(n.id) && n.type === "group");
+  const cyclic = hasCycle(ids, relevantEdges);
+  const nodeCount = ids.size;
+
+  let algorithm: LayoutAlgorithm;
+  if (cyclic || nodeCount > 50) {
+    algorithm = "elk-force";
+  } else if (hasGroups) {
+    algorithm = "elk-layered";
+  } else if (rootCount === 1 && !cyclic) {
+    algorithm = "elk-layered";
+  } else if (rootCount > 1 && !cyclic) {
+    algorithm = "elk-layered";
+  } else {
+    algorithm = "elk-layered";
+  }
+
+  const direction: LayoutDirection = "LR";
+  const spacing: LayoutSpacing = [80, 60];
+
+  return { algorithm, direction, spacing };
+}
 
 export async function getLayoutedElements(
   nodes: Node[],
