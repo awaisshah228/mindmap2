@@ -59,21 +59,28 @@ export async function POST(req: NextRequest) {
 
     // Determine effective provider, model, and API key
     const provider: string = llmProvider || "openrouter";
-    const effectiveModel = resolveModelName(provider, llmModel || model);
+    let effectiveModel = resolveModelName(provider, llmModel || model);
 
     let apiKey: string;
     let baseURL: string | undefined;
     let defaultHeaders: Record<string, string> = {};
+    let usingOpenRouterFallback = false;
+
+    // Determine API key and base URL for the selected provider.
+    // If the provider-specific key is missing, fall back to the OpenRouter key
+    // (which can route to any model via OpenRouter's unified API).
+    const openRouterKey = getOpenRouterApiKey();
+    const openAiKey = getOpenAiApiKey();
 
     if (provider === "openrouter") {
-      apiKey = llmApiKey || getOpenRouterApiKey();
+      apiKey = llmApiKey || openRouterKey;
       baseURL = getOpenRouterBaseUrl();
       defaultHeaders = {
         "HTTP-Referer": getOpenRouterHttpReferer(),
         "X-Title": getOpenRouterAppTitle(),
       };
     } else if (provider === "openai") {
-      apiKey = llmApiKey || getOpenAiApiKey();
+      apiKey = llmApiKey || openAiKey;
       baseURL = PROVIDER_BASE_URLS.openai;
     } else if (provider === "anthropic") {
       apiKey = llmApiKey || "";
@@ -83,16 +90,31 @@ export async function POST(req: NextRequest) {
       baseURL = PROVIDER_BASE_URLS.google;
     } else {
       // custom — user must supply key; baseURL is OpenAI-compatible by default
-      apiKey = llmApiKey || getOpenAiApiKey();
+      apiKey = llmApiKey || openAiKey;
       baseURL = PROVIDER_BASE_URLS.openai;
+    }
+
+    // Fallback: if provider-specific key is not available, route through OpenRouter instead
+    if (!apiKey && openRouterKey) {
+      apiKey = openRouterKey;
+      baseURL = getOpenRouterBaseUrl();
+      defaultHeaders = {
+        "HTTP-Referer": getOpenRouterHttpReferer(),
+        "X-Title": getOpenRouterAppTitle(),
+      };
+      usingOpenRouterFallback = true;
+      // Re-resolve model name for OpenRouter format (needs prefix like "openai/gpt-4o-mini")
+      effectiveModel = resolveModelName("openrouter", llmModel || model);
     }
 
     if (!apiKey) {
       return NextResponse.json(
-        { error: `API key not configured for provider "${provider}". Add your key in Settings → Integration.` },
-        { status: 500 }
+        { error: `No API key available. Add your key in Settings → Integration to use AI features.` },
+        { status: 400 }
       );
     }
+
+    console.log(`[AI Route] provider=${usingOpenRouterFallback ? "openrouter(fallback)" : provider}, model=${effectiveModel}`);
 
     const llm = new ChatOpenAI({
       model: effectiveModel,

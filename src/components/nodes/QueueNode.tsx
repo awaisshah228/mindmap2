@@ -6,12 +6,24 @@ import { BaseNode } from "./BaseNode";
 import { EditableNodeContent } from "./EditableNodeContent";
 import { MessageSquare } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { getIconById } from "@/lib/icon-registry";
 
 const DEFAULT_WIDTH = 140;
 const DEFAULT_HEIGHT = 64;
 
 function QueueNode({ id, data, selected }: NodeProps) {
   const label = (data.label as string) || "Queue";
+  const iconDef = getIconById(data.icon as string);
+  const IconComp = iconDef?.Icon;
+  const iconUrl = data.iconUrl as string | undefined;
+  const emoji = data.emoji as string | undefined;
+
+  const renderIcon = () => {
+    if (IconComp) return <IconComp className="w-4 h-4 text-emerald-700" />;
+    if (iconUrl) return <img src={iconUrl} alt="" className="w-4 h-4 object-contain" onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }} />;
+    if (emoji) return <span className="text-base leading-none">{emoji}</span>;
+    return <MessageSquare className="w-4 h-4 text-emerald-700" />;
+  };
 
   return (
     <BaseNode
@@ -32,7 +44,7 @@ function QueueNode({ id, data, selected }: NodeProps) {
 
       <div className="h-full flex items-center gap-3 px-3 py-2 bg-gradient-to-br from-emerald-50 to-emerald-100/80">
         <div className="shrink-0 w-9 h-9 rounded-lg bg-emerald-200/80 flex items-center justify-center">
-          <MessageSquare className="w-4 h-4 text-emerald-700" />
+          {renderIcon()}
         </div>
         <div className="nodrag nokey min-w-0 flex-1">
           <EditableNodeContent

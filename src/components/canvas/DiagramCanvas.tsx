@@ -620,8 +620,13 @@ export default function DiagramCanvas() {
   const fromCanvasRef = useRef(0);
 
   useEffect(() => {
+    // When canvas-originated changes update the Zustand store (via setStoreNodes /
+    // setStoreEdges), the counter is incremented. React 18 batches multiple setState
+    // calls into a single render, so multiple store updates can happen before this
+    // effect runs. Resetting to 0 (instead of decrementing) correctly handles any
+    // number of batched updates.
     if (fromCanvasRef.current > 0) {
-      fromCanvasRef.current--;
+      fromCanvasRef.current = 0;
       return;
     }
     setNodes(storeNodes);
@@ -717,7 +722,6 @@ export default function DiagramCanvas() {
       // Read current nodes from React Flow (avoids stale closure)
       const currentNodes = reactFlowRef.current.getNodes();
       const fromNodeData = currentNodes.find((n) => n.id === connectionState.fromNode?.id);
-      const isFromMindMap = fromNodeData?.type === "mindMap";
 
       const { clientX, clientY } =
         "changedTouches" in event ? (event as TouchEvent).changedTouches[0] : (event as MouseEvent);
@@ -725,10 +729,20 @@ export default function DiagramCanvas() {
       pushUndo();
 
       const newNodeId = `node-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
-      const fromType = fromNodeData?.type;
+      const fromType = fromNodeData?.type ?? "rectangle";
 
-      // Create a new node matching the type of the source node
+      // ── Create a new node matching the type of the source node ──
+      // All shape variants (diamond, circle, document, roundedRect, hexagon, etc.)
+      // are normalised to type:"rectangle" with data.shape holding the visual variant.
+      // This matches the toolbar's node-creation behaviour and ensures 4 handles (top,
+      // bottom, left, right) via ShapeNode.
+
+      // Set of React Flow node types that are all rendered by ShapeNode.
+      // No matter which type the source node has, the NEW node always uses "rectangle".
+      const SHAPE_RF_TYPES = new Set(["rectangle", "diamond", "circle", "document"]);
+
       let newNode: Node;
+
       if (fromType === "mindMap") {
         newNode = {
           id: newNodeId,
@@ -761,12 +775,28 @@ export default function DiagramCanvas() {
           position: { x: position.x - 80, y: position.y - 80 },
           data: { label: "" },
         };
+      } else if (fromType === "text") {
+        newNode = {
+          id: newNodeId,
+          type: "text",
+          position: { x: position.x - 80, y: position.y - 20 },
+          data: { label: "Text" },
+        };
       } else if (fromType === "databaseSchema") {
         newNode = {
           id: newNodeId,
           type: "databaseSchema",
           position: { x: position.x - 100, y: position.y - 50 },
           data: { label: "new_table", columns: [] },
+        };
+      } else if (fromType === "table") {
+        newNode = {
+          id: newNodeId,
+          type: "table",
+          position: { x: position.x - 120, y: position.y - 80 },
+          data: { tableRows: 3, tableCols: 3, cells: {} },
+          width: 240,
+          height: 160,
         };
       } else if (fromType === "service" || fromType === "queue" || fromType === "actor") {
         newNode = {
@@ -775,25 +805,34 @@ export default function DiagramCanvas() {
           position: { x: position.x - 60, y: position.y - 40 },
           data: { label: "New node" },
         };
-      } else {
-        // Default: rectangle shape node
-        const fromShape = fromNodeData?.data?.shape as string | undefined;
+      } else if (fromType === "group") {
         newNode = {
           id: newNodeId,
-          type: fromShape || "rectangle",
+          type: "group",
+          position: { x: position.x - 140, y: position.y - 100 },
+          data: { label: "Group" },
+          style: { width: 280, height: 200 },
+        };
+      } else {
+        // Default: shape node. Always create as type:"rectangle" with the correct
+        // data.shape so ShapeNode renders 4 handles. Works for any shape variant
+        // (roundedRect, hexagon, cylinder, parallelogram, trapezoid, stadium,
+        // triangle, diamond, circle, document, etc.) regardless of the React Flow
+        // type the source node was registered under.
+        const fromShape = (fromNodeData?.data?.shape as string | undefined)
+          || (SHAPE_RF_TYPES.has(fromType) ? fromType : "rectangle");
+        newNode = {
+          id: newNodeId,
+          type: "rectangle",
           position: { x: position.x - 70, y: position.y - 36 },
-          data: { label: "New node", shape: fromShape || "rectangle" },
+          data: { label: "New node", shape: fromShape },
         };
       }
 
       // ── Determine best source / target handle pair ──
-      // ShapeNode handles: top(target), left(target), bottom(source), right(source)
-      // When user drags from a "target" handle (top/left), the edge direction is reversed:
-      //   new node → fromNode  (new node is source, fromNode is target)
-      // When user drags from a "source" handle (bottom/right), direction is normal:
-      //   fromNode → new node  (fromNode is source, new node is target)
+      // All node handles are type="source" with ConnectionMode.Loose enabled.
+      // Edge direction is always: fromNode → newNode.
       const rawHandle = connectionState.fromHandle?.id ?? undefined;
-      const rawHandleType = connectionState.fromHandle?.type ?? "source";
 
       const knownHandles = ["top", "bottom", "left", "right"];
       const oppositeHandle: Record<string, string> = {
@@ -803,7 +842,6 @@ export default function DiagramCanvas() {
         right: "left",
       };
 
-      // Determine which handle on fromNode and which on newNode
       let fromNodeHandle: string;
       let newNodeHandle: string;
 
@@ -829,31 +867,23 @@ export default function DiagramCanvas() {
         newNodeHandle = oppositeHandle[fromNodeHandle] ?? "left";
       }
 
-      // If the user dragged from a "target"-type handle, the edge direction is reversed:
-      // the new node becomes the source and fromNode becomes the target.
-      const isFromTargetHandle = rawHandleType === "target";
-
-      const edgeSource = isFromTargetHandle ? newNodeId : connectionState.fromNode.id;
-      const edgeTarget = isFromTargetHandle ? connectionState.fromNode.id : newNodeId;
-      const edgeSourceHandle = isFromTargetHandle ? newNodeHandle : fromNodeHandle;
-      const edgeTargetHandle = isFromTargetHandle ? fromNodeHandle : newNodeHandle;
-
-      const edgeId = `e-${edgeSource}-${edgeSourceHandle}-${edgeTarget}-${edgeTargetHandle}-${Date.now()}`;
+      // Edge always goes fromNode → newNode (all handles are type="source",
+      // ConnectionMode.Loose allows any handle to act as either endpoint).
+      const edgeId = `edge-${connectionState.fromNode.id}-${fromNodeHandle}-${newNodeId}-${newNodeHandle}-${Date.now()}`;
       const newEdge: Edge = {
         id: edgeId,
-        source: edgeSource,
-        target: edgeTarget,
-        sourceHandle: edgeSourceHandle,
-        targetHandle: edgeTargetHandle,
+        source: connectionState.fromNode.id,
+        target: newNodeId,
+        sourceHandle: fromNodeHandle,
+        targetHandle: newNodeHandle,
         type: "labeledConnector",
         data: { connectorType: pendingEdgeType },
       };
 
-      // Add both node and edge atomically in a single update cycle.
-      // React Flow handles rendering edges to newly-added nodes within the
-      // same batch (see React Flow "Add Node on Edge Drop" example).
-      // Increment counter twice: once for nodes store update, once for edges store update.
-      fromCanvasRef.current += 2;
+      // Add both node and edge in a single batched update.
+      // React 18 batches setNodes + setEdges into one render, so the store→canvas
+      // sync useEffect fires once. Increment by 1 to skip that single sync.
+      fromCanvasRef.current += 1;
       setNodes((nds) => {
         const updated = [...nds, { ...newNode, selected: false }];
         setStoreNodes(updated);

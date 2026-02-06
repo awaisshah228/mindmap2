@@ -6,12 +6,24 @@ import { BaseNode } from "./BaseNode";
 import { EditableNodeContent } from "./EditableNodeContent";
 import { User } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { getIconById } from "@/lib/icon-registry";
 
 const DEFAULT_WIDTH = 100;
 const DEFAULT_HEIGHT = 100;
 
 function ActorNode({ id, data, selected }: NodeProps) {
   const label = (data.label as string) || "Actor";
+  const iconDef = getIconById(data.icon as string);
+  const IconComp = iconDef?.Icon;
+  const iconUrl = data.iconUrl as string | undefined;
+  const emoji = data.emoji as string | undefined;
+
+  const renderIcon = () => {
+    if (IconComp) return <IconComp className="w-6 h-6 text-slate-600" />;
+    if (iconUrl) return <img src={iconUrl} alt="" className="w-6 h-6 object-contain" onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }} />;
+    if (emoji) return <span className="text-xl leading-none">{emoji}</span>;
+    return <User className="w-6 h-6 text-slate-600" />;
+  };
 
   return (
     <BaseNode
@@ -34,7 +46,7 @@ function ActorNode({ id, data, selected }: NodeProps) {
             selected ? "border-violet-400 bg-violet-50" : "border-slate-300 bg-slate-50"
           )}
         >
-          <User className="w-6 h-6 text-slate-600" />
+          {renderIcon()}
         </div>
         <div className="nodrag nokey text-center min-w-0 w-full px-1">
           <EditableNodeContent

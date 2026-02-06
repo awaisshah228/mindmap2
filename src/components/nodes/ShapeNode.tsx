@@ -18,6 +18,7 @@ function ShapeNode({ id, data, selected }: NodeProps) {
   const bgColor = (data.color as string) ?? PALETTE_COLORS[0];
   const pathD = (SHAPE_PATHS[shape as ShapeType] ?? SHAPE_PATHS.rectangle);
   const customIcon = data.customIcon as string | undefined;
+  const iconUrl = data.iconUrl as string | undefined;
   const iconDef = getIconById(data.icon as string);
   const IconComponent = iconDef?.Icon;
 
@@ -54,6 +55,8 @@ function ShapeNode({ id, data, selected }: NodeProps) {
             <span className="pointer-events-none shrink-0 text-gray-600">
               <IconComponent className="w-5 h-5" />
             </span>
+          ) : iconUrl ? (
+            <img src={iconUrl} alt="" className="w-5 h-5 object-contain shrink-0 pointer-events-none" onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }} />
           ) : null}
           <div className="pointer-events-auto nodrag nokey w-full min-w-0 text-center">
             <EditableNodeContent

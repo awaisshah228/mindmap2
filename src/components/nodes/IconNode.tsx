@@ -9,10 +9,11 @@ interface IconNodeData {
   iconId?: string;
   emoji?: string;
   customIcon?: string;
+  iconUrl?: string;
 }
 
 function IconNode({ id, data, selected }: NodeProps) {
-  const { iconId, emoji, customIcon } = (data || {}) as unknown as IconNodeData;
+  const { iconId, emoji, customIcon, iconUrl } = (data || {}) as unknown as IconNodeData;
   const def = iconId ? getIconById(iconId) : null;
   const IconComponent = def?.Icon;
 
@@ -32,10 +33,12 @@ function IconNode({ id, data, selected }: NodeProps) {
       <div className="w-full h-full flex items-center justify-center">
         {customIcon ? (
           <img src={customIcon} alt="" className="max-w-full max-h-full object-contain" />
-        ) : emoji ? (
-          <span className="text-4xl leading-none select-none">{emoji}</span>
         ) : IconComponent ? (
           <IconComponent className="w-3/4 h-3/4" />
+        ) : iconUrl ? (
+          <img src={iconUrl} alt="" className="max-w-full max-h-full object-contain" onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }} />
+        ) : emoji ? (
+          <span className="text-4xl leading-none select-none">{emoji}</span>
         ) : null}
       </div>
     </BaseNode>

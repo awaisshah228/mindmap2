@@ -37,15 +37,33 @@ Schema: nodes have id, type, position {x,y}. For groups: type "group", style {wi
 
 EDGES: id, source, target, sourceHandle ("left"|"right"|"top"|"bottom"), targetHandle ("left"|"right"|"top"|"bottom"). data.label? (e.g. "HTTP", "Calls", "Queries"). data.connectionLength? (number, the pixel distance between source and target nodes — typically 300–500). Always set sourceHandle and targetHandle to match the flow direction.
 
-Icons: We use lucide-react and react-icons (si, fa). Set data.icon only to one of: ${ICON_IDS_FOR_PROMPT}. Defaults: services "lucide:server", data stores "lucide:database". Never use an icon not in this list.
+Icons — ICON FALLBACK CHAIN (follow this priority):
+1. FIRST try our installed icon library: Set data.icon to one of: ${ICON_IDS_FOR_PROMPT}. Defaults: services "lucide:server", data stores "lucide:database". Only use ids from this list for data.icon.
+2. ALSO provide data.iconUrl — a publicly accessible URL to a relevant icon/logo image (PNG/SVG). Use real, well-known CDN icon URLs. Examples:
+   - AWS: "https://cdn.simpleicons.org/amazonaws/FF9900"
+   - Docker: "https://cdn.simpleicons.org/docker/2496ED"
+   - Kubernetes: "https://cdn.simpleicons.org/kubernetes/326CE5"
+   - PostgreSQL: "https://cdn.simpleicons.org/postgresql/4169E1"
+   - Redis: "https://cdn.simpleicons.org/redis/DC382D"
+   - Node.js: "https://cdn.simpleicons.org/nodedotjs/5FA04E"
+   - React: "https://cdn.simpleicons.org/react/61DAFB"
+   - Python: "https://cdn.simpleicons.org/python/3776AB"
+   - GitHub: "https://cdn.simpleicons.org/github/181717"
+   - GraphQL: "https://cdn.simpleicons.org/graphql/E10098"
+   - Nginx: "https://cdn.simpleicons.org/nginx/009639"
+   - Linux: "https://cdn.simpleicons.org/linux/FCC624"
+   Use https://cdn.simpleicons.org/<slug>/<hex-color> for technology icons. For generic concepts, use data.icon from the library above or data.emoji instead.
+3. If neither works, provide data.emoji (a single emoji character like "🔥", "🚀", "📦", "🔒").
 
-Icon nodes: type "icon" with data.iconId (from the icons list) or data.emoji (single emoji character, e.g. "🔥"). Use for decorative elements, markers, or standalone icons on the canvas. Size: 64x64.
+EVERY node should have at least one of: data.icon, data.iconUrl, or data.emoji. Never leave nodes without a visual icon.
+
+Icon nodes: type "icon" with data.iconId (from the icons list) or data.emoji (single emoji character, e.g. "🔥") or data.iconUrl (URL to icon image). Use for decorative elements, markers, or standalone icons on the canvas. Size: 64x64.
 
 Annotations: Any node can have data.annotation — a short floating label that appears below the node (e.g. "v2.1", "Primary", "Deprecated", "Production"). Use annotations to add context without cluttering the main label.
 
 Mind map (only when user asks for mind map): type "mindMap", central node at (0,0). First-level children at x ±400, y offset ±300 from center. Each subsequent level adds ±350 x offset. If mode=mindmap-refine and focusNodeId set: add only children of that node; source=focusNodeId for every new edge.
 
-Architecture: rectangle for services/queues/gateways, document/text for notes, circle for start/end. Clear path (e.g. User→Frontend→API→Services→DB). Set data.icon on every rectangle/circle/document so no plain text-only nodes.
+Architecture: rectangle for services/queues/gateways, document/text for notes, circle for start/end. Clear path (e.g. User→Frontend→API→Services→DB). Set data.icon AND data.iconUrl on every rectangle/circle/document/service so no plain text-only nodes. Use brand icons via iconUrl (e.g. "https://cdn.simpleicons.org/amazonaws/FF9900" for AWS).
 
 SUBFLOWS & GROUPING (USE EXTENSIVELY):
 Groups organize related nodes into logical clusters. USE GROUPS LIBERALLY — real-world systems have clear boundaries:
@@ -67,7 +85,7 @@ Special types: databaseSchema → data.columns [{name, type?, key?}]. service �
 
 Images: type "image" with data.imageUrl = https://picsum.photos/seed/<word>/200/150 (seed: user, api, database, server, etc.). data.label = short caption.
 
-Rules: Short labels (2–5 words). Unique ids. Edges reference node ids. Non-mindMap: add edge.data.label where helpful (e.g. "HTTP", "REST", "gRPC", "Pub/Sub"). Add data.connectionLength on each edge (300–500 pixels). Always add data.icon or imageUrl for most nodes; never all plain rectangles. Use diverse node types (mix rectangle, circle, databaseSchema, service, queue, actor, icon, image) for visual variety.
+Rules: Short labels (2–5 words). Unique ids. Edges reference node ids. Non-mindMap: add edge.data.label where helpful (e.g. "HTTP", "REST", "gRPC", "Pub/Sub"). Add data.connectionLength on each edge (300–500 pixels). EVERY node MUST have at least one visual icon — set data.icon (from library), data.iconUrl (CDN URL to relevant icon/logo), or data.emoji. Never leave a node without an icon. Use diverse node types (mix rectangle, circle, databaseSchema, service, queue, actor, icon, image) for visual variety.
 `.trim();
 }
 

@@ -7,6 +7,7 @@ import { EditableNodeContent } from "./EditableNodeContent";
 import { Database, Plus, Trash2, Key, Link } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useCanvasStore } from "@/lib/store/canvas-store";
+import { getIconById } from "@/lib/icon-registry";
 
 export interface SchemaColumn {
   name: string;
@@ -39,6 +40,9 @@ function DatabaseSchemaNode({ id, data, selected }: NodeProps) {
   const setNodes = useCanvasStore((s) => s.setNodes);
   const pushUndo = useCanvasStore((s) => s.pushUndo);
   const tableName = (data.label as string) || "Table";
+  const iconDef = getIconById(data.icon as string);
+  const IconComp = iconDef?.Icon;
+  const iconUrl = data.iconUrl as string | undefined;
   const columns: SchemaColumn[] = useMemo(
     () =>
       Array.isArray(data.columns)
@@ -127,7 +131,13 @@ function DatabaseSchemaNode({ id, data, selected }: NodeProps) {
       <div className="flex flex-col h-full overflow-hidden rounded-lg">
         {/* Header */}
         <div className="flex items-center gap-2 px-3 py-2.5 bg-gradient-to-r from-slate-700 to-slate-800 shrink-0">
-          <Database className="w-4 h-4 text-emerald-400 shrink-0" />
+          {IconComp ? (
+            <IconComp className="w-4 h-4 text-emerald-400 shrink-0" />
+          ) : iconUrl ? (
+            <img src={iconUrl} alt="" className="w-4 h-4 object-contain shrink-0" onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }} />
+          ) : (
+            <Database className="w-4 h-4 text-emerald-400 shrink-0" />
+          )}
           <div className="nodrag nokey min-w-0 flex-1">
             <EditableNodeContent
               nodeId={id}

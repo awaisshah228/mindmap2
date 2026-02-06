@@ -28,6 +28,7 @@ export type DiagramTypeValue = (typeof DIAGRAM_TYPE_OPTIONS)[number]["value"];
 
 export const DIAGRAM_PRESETS = [
   { value: "none", label: "None (default)", prompt: "" },
+  { value: "ecommerce-mern-aws", label: "eCommerce MERN + AWS (full stack)", prompt: "Full-stack eCommerce architecture with MERN stack on AWS. Group by layers: Frontend (React SPA on CloudFront + S3), Backend (Node.js/Express API on ECS Fargate behind ALB), Database (MongoDB Atlas, Redis ElastiCache for sessions/cart), Messaging (AWS SQS for order processing queue, AWS SNS for notifications to email/SMS/push, Apache Kafka for real-time event streaming — inventory updates, analytics, activity feed), Real-time (Socket.io server on ECS for live order tracking, chat support, price alerts via WebSockets), Storage (S3 for product images, CloudFront CDN), Auth (Cognito or Auth0), Payment (Stripe), Search (Elasticsearch). Show edges: user → CloudFront → ALB → API → MongoDB/Redis/SQS/SNS/Kafka/Socket.io. Use brand icons for AWS, MongoDB, Redis, Kafka, Stripe, React, Node.js." },
   { value: "stripe-payment", label: "Stripe payment flow", prompt: "Create a flowchart for Stripe payment flow: user selects product, cart, checkout, Stripe payment (card/redirect), success or failure, order confirmation, and email receipt." },
   { value: "chatbot-arch", label: "Chatbot architecture", prompt: "System architecture diagram for a chatbot: User, Frontend chat UI, API Gateway, Auth service, Chat service, LLM provider (OpenAI), vector database for RAG, and Redis for session/cache." },
   { value: "auth0-flow", label: "Auth0 auth flow", prompt: "Flowchart for Auth0 authentication: User clicks Login, redirect to Auth0, login/register, callback to app with tokens, validate token, load user session, then either show dashboard or prompt to complete profile." },
@@ -35,6 +36,8 @@ export const DIAGRAM_PRESETS = [
   { value: "product-microservices", label: "Product page with microservices", prompt: "Microservices architecture for a product detail page: CDN, Frontend, API Gateway, Product service, Inventory service, Reviews service, Recommendations service, and shared Kafka for events." },
   { value: "ecommerce-sql", label: "eCommerce SQL schema", prompt: "Entity-relationship diagram for eCommerce: Users, Orders, Order Items, Products, Categories, Cart, Payments, Shipping Addresses. Show key relationships and cardinality." },
   { value: "twitter-data", label: "Twitter data model", prompt: "Entity-relationship diagram for a Twitter-like app: Users, Tweets, Follows, Likes, Retweets, Replies, Hashtags, Mentions. Show main entities and relationships." },
+  { value: "saas-multi-tenant", label: "SaaS multi-tenant architecture", prompt: "Architecture diagram for a multi-tenant SaaS platform: Tenants/Users → Next.js frontend → API Gateway (Kong/AWS) → Microservices (Auth, Billing, Tenant Management, Core App Logic) → PostgreSQL (tenant isolation via RLS), Redis cache, S3 file storage, Stripe billing, SendGrid email. Group by: Frontend, API Layer, Services, Data Layer, External Services." },
+  { value: "ci-cd-pipeline", label: "CI/CD pipeline", prompt: "Flowchart for a CI/CD pipeline: Developer pushes code → GitHub webhook → GitHub Actions (lint, test, build, Docker image) → Push to ECR → Deploy to ECS Staging → Run E2E tests → Manual approval gate → Deploy to ECS Production → Health check → Notify Slack. Include rollback path. Use brand icons." },
   { value: "puppy-training", label: "Puppy training user journey", prompt: "User journey / flowchart for a puppy training platform: User signs up, chooses program (self or trainer-led), onboarding with puppy profile, daily lessons, progress tracking, optional adjust plan or add advanced training, completion and certificate." },
   { value: "support-call-flow", label: "Support desk call flow", prompt: "Flowchart for support desk call flow: Call received, IVR menu, route to queue, agent picks up, diagnose issue, resolve or escalate, log ticket, follow-up, close ticket." },
 ] as const;
@@ -59,21 +62,35 @@ function ModelStatusBadge() {
   const modelShort = llmModel.length > 28 ? llmModel.slice(0, 26) + "…" : llmModel;
 
   return (
-    <button
-      type="button"
-      onClick={() => useCanvasStore.getState().setSettingsOpen(true, "integration")}
-      className="flex items-center gap-2 text-[11px] text-gray-400 hover:text-gray-600 transition-colors"
-      title="Click to change AI model or API key"
-    >
-      <span className="flex items-center gap-1">
-        <span className={`w-1.5 h-1.5 rounded-full ${hasKey ? "bg-green-500" : "bg-amber-400"}`} />
-        {providerLabel}
-      </span>
-      <span className="text-gray-300">·</span>
-      <span className="font-mono truncate max-w-[180px]">{modelShort}</span>
-      <span className="text-gray-300">·</span>
-      <span>{hasKey ? "Own key" : "Server key"}</span>
-    </button>
+    <div className="flex flex-col gap-1.5">
+      <button
+        type="button"
+        onClick={() => useCanvasStore.getState().setSettingsOpen(true, "integration")}
+        className="flex items-center gap-2 text-[11px] text-gray-400 hover:text-gray-600 transition-colors"
+        title="Click to change AI model or API key"
+      >
+        <span className="flex items-center gap-1">
+          <span className={`w-1.5 h-1.5 rounded-full ${hasKey ? "bg-green-500" : "bg-amber-400"}`} />
+          {providerLabel}
+        </span>
+        <span className="text-gray-300">·</span>
+        <span className="font-mono truncate max-w-[180px]">{modelShort}</span>
+        <span className="text-gray-300">·</span>
+        <span>{hasKey ? "Own key" : "Server API"}</span>
+      </button>
+      {!hasKey && (
+        <button
+          type="button"
+          onClick={() => useCanvasStore.getState().setSettingsOpen(true, "integration")}
+          className="flex items-center gap-1.5 px-2 py-1 rounded-md bg-amber-50 border border-amber-200 text-amber-700 text-[11px] hover:bg-amber-100 transition-colors"
+        >
+          <svg className="w-3 h-3 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+          </svg>
+          <span>Configure your own API key for faster, private AI generation</span>
+        </button>
+      )}
+    </div>
   );
 }
 
@@ -463,7 +480,13 @@ function AIDiagramPage() {
       setPendingFitView(true);
       router.push("/");
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Something went wrong");
+      const msg = err instanceof Error ? err.message : "Something went wrong";
+      // For API-key-related errors, provide a friendlier message
+      if (msg.toLowerCase().includes("api key") || msg.toLowerCase().includes("no api key")) {
+        setError("No API key configured. Add your key in Settings → Integration to use AI generation.");
+      } else {
+        setError(msg);
+      }
     } finally {
       setLoading(false);
     }
@@ -603,7 +626,20 @@ function AIDiagramPage() {
             {/* Current model + API key status */}
             <ModelStatusBadge />
             {error && (
-              <p className="text-xs text-red-600">{error}</p>
+              error.toLowerCase().includes("api key") ? (
+                <button
+                  type="button"
+                  onClick={() => useCanvasStore.getState().setSettingsOpen(true, "integration")}
+                  className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-amber-50 border border-amber-200 text-amber-700 text-xs hover:bg-amber-100 transition-colors text-left"
+                >
+                  <svg className="w-3.5 h-3.5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                  </svg>
+                  <span>No API key configured. Click here to add your key in Settings for AI features.</span>
+                </button>
+              ) : (
+                <p className="text-xs text-red-600">{error}</p>
+              )
             )}
             <div className="mt-auto flex justify-end gap-2 pt-2">
               <button

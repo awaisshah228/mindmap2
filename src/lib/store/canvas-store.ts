@@ -158,6 +158,10 @@ interface CanvasState {
   /** Presentation mode */
   presentationMode: boolean;
   presentationNodeIndex: number;
+  /** Custom node order for presentation (array of node IDs). Empty = default order. */
+  presentationOrder: string[];
+  /** Whether the presentation flow editor panel is open */
+  presentationEditorOpen: boolean;
 
   /** Search */
   searchOpen: boolean;
@@ -223,6 +227,8 @@ interface CanvasState {
 
   setPresentationMode: (active: boolean) => void;
   setPresentationNodeIndex: (index: number) => void;
+  setPresentationOrder: (order: string[]) => void;
+  setPresentationEditorOpen: (open: boolean) => void;
 
   setSearchOpen: (open: boolean) => void;
   setSearchQuery: (query: string) => void;
@@ -303,6 +309,8 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
   detailsPanelNodeId: null,
   presentationMode: false,
   presentationNodeIndex: 0,
+  presentationOrder: [],
+  presentationEditorOpen: false,
   searchOpen: false,
   searchQuery: "",
   theme: "light",
@@ -313,8 +321,8 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
   dailyNotes: {},
   dailyNotesOpen: false,
   aiPrompts: DEFAULT_AI_PROMPTS,
-  llmProvider: "openai" as LLMProvider,
-  llmModel: "gpt-4o-mini",
+  llmProvider: "openrouter" as LLMProvider,
+  llmModel: "openai/gpt-4o-mini",
   llmApiKey: "",
   llmBaseUrl: "",
 
@@ -510,6 +518,8 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
 
   setPresentationMode: (active) => set({ presentationMode: active, presentationNodeIndex: 0 }),
   setPresentationNodeIndex: (index) => set({ presentationNodeIndex: index }),
+  setPresentationOrder: (order) => set({ presentationOrder: order }),
+  setPresentationEditorOpen: (open) => set({ presentationEditorOpen: open }),
 
   setSearchOpen: (open) => set({ searchOpen: open, searchQuery: open ? get().searchQuery : "" }),
   setSearchQuery: (query) => set({ searchQuery: query }),

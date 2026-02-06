@@ -10,6 +10,7 @@ import { NodeDetailsPanel } from "@/components/panels/NodeDetailsPanel";
 import { KeyboardShortcutsPanel } from "@/components/panels/KeyboardShortcutsPanel";
 import { SearchPanel } from "@/components/panels/SearchPanel";
 // PresentationMode is rendered inside DiagramCanvas
+import { PresentationFlowEditor } from "@/components/panels/PresentationMode";
 import { SettingsPanel } from "@/components/panels/SettingsPanel";
 import { DailyNotesPanel } from "@/components/panels/DailyNotesPanel";
 import { ExportImportPanel } from "@/components/panels/ExportImportPanel";
@@ -23,6 +24,7 @@ import {
   Download,
   Focus,
   Play,
+  ListOrdered,
 } from "lucide-react";
 import { useMediaQuery } from "@/hooks/useMediaQuery";
 
@@ -39,6 +41,7 @@ export default function EditorLayout() {
   const setFocusedBranchNodeId = useCanvasStore((s) => s.setFocusedBranchNodeId);
   const presentationMode = useCanvasStore((s) => s.presentationMode);
   const setPresentationMode = useCanvasStore((s) => s.setPresentationMode);
+  const setPresentationEditorOpen = useCanvasStore((s) => s.setPresentationEditorOpen);
   const activeProjectId = useCanvasStore((s) => s.activeProjectId);
   const projects = useCanvasStore((s) => s.projects);
   const renameProject = useCanvasStore((s) => s.renameProject);
@@ -163,6 +166,14 @@ export default function EditorLayout() {
               </button>
               <button
                 type="button"
+                onClick={() => setPresentationEditorOpen(true)}
+                className="p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
+                title="Edit presentation flow"
+              >
+                <ListOrdered className="w-4 h-4 text-gray-500 dark:text-gray-400" />
+              </button>
+              <button
+                type="button"
                 onClick={() => setDailyNotesOpen(true)}
                 className="p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
                 title="Daily Notes (Ctrl+Shift+D)"
@@ -223,6 +234,7 @@ export default function EditorLayout() {
         <SettingsPanel />
         <DailyNotesPanel />
         <ExportImportPanel open={exportOpen} onClose={() => setExportOpen(false)} />
+        <PresentationFlowEditor />
       </div>
     </ThemeProvider>
   );
