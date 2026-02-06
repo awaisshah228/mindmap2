@@ -13,6 +13,68 @@ export interface CanvasBounds {
   nodeCount: number;
 }
 
+export interface MindMapStructure {
+  pathFromRoot: { id: string; label: string }[];
+  focusNode: { id: string; label: string };
+  existingChildren: { id: string; label: string }[];
+}
+
+/** Build path from root to focus and list of existing children for mindmap-refine context. */
+export function getMindMapStructure(
+  nodes: { id: string; data?: { label?: string }; [k: string]: unknown }[],
+  edges: { source: string; target: string; [k: string]: unknown }[],
+  focusNodeId: string
+): MindMapStructure | null {
+  const nodeMap = new Map(nodes.map((n) => [n.id, n]));
+  const focus = nodeMap.get(focusNodeId);
+  if (!focus) return null;
+
+  const targets = new Set(edges.map((e) => e.target));
+  const roots = nodes.filter((n) => !targets.has(n.id));
+  const parent = new Map<string, string>();
+  for (const e of edges) parent.set(e.target, e.source);
+
+  const getPathTo = (fromRootId: string, toId: string): string[] | null => {
+    const path: string[] = [];
+    let cur: string | undefined = toId;
+    while (cur) {
+      path.push(cur);
+      if (cur === fromRootId) return path.reverse();
+      cur = parent.get(cur);
+    }
+    return null;
+  };
+
+  let pathIds: string[] = [];
+  for (const r of roots) {
+    const p = getPathTo(r.id, focusNodeId);
+    if (p) {
+      pathIds = p;
+      break;
+    }
+  }
+  if (pathIds.length === 0) pathIds = [focusNodeId];
+
+  const pathFromRoot = pathIds.map((id) => {
+    const n = nodeMap.get(id);
+    return { id, label: (n?.data as { label?: string } | undefined)?.label ?? id };
+  });
+
+  const existingChildren = edges
+    .filter((e) => e.source === focusNodeId)
+    .map((e) => {
+      const n = nodeMap.get(e.target);
+      return { id: e.target, label: (n?.data as { label?: string } | undefined)?.label ?? e.target };
+    });
+
+  const focusLabel = (focus.data as { label?: string } | undefined)?.label ?? focusNodeId;
+  return {
+    pathFromRoot,
+    focusNode: { id: focusNodeId, label: focusLabel },
+    existingChildren,
+  };
+}
+
 export interface PromptParams {
   prompt: string;
   layoutDirection?: string;
@@ -22,6 +84,7 @@ export interface PromptParams {
   previousPrompt?: string | null;
   previousDiagram?: Record<string, unknown> | null;
   canvasBounds?: CanvasBounds | null;
+  mindMapStructure?: MindMapStructure | null;
 }
 
 export function buildSystemPrompt(layoutDirection?: string): string {
@@ -72,7 +135,8 @@ Icon nodes: type "icon" with data.iconId (from the icons list) or data.emoji (si
 
 Annotations: Any node can have data.annotation — a short floating label that appears below the node (e.g. "v2.1", "Primary", "Deprecated", "Production"). Use annotations to add context without cluttering the main label.
 
-Mind map (only when user asks for mind map): type "mindMap", central node at (0,0). First-level children at x ±400, y offset ±300 from center. Each subsequent level adds ±350 x offset. If mode=mindmap-refine and focusNodeId set: add only children of that node; source=focusNodeId for every new edge.
+Mind map (only when user asks for mind map): type "mindMap", central node at (0,0). First-level children at x ±400, y offset ±300 from center. Each subsequent level adds ±350 x offset.
+MIND MAP REFINE (mode=mindmap-refine): The user selected a node and wants to extend or redraw that branch. You will receive the current branch structure (path from root, focus node, existing children). Interpret the user prompt: (1) If they ask to "add children", "more ideas", "expand", "sub-topics" — return ONLY new child nodes and edges (source=focusNodeId for every new edge). (2) If they ask to "redraw", "rework", "improve" this branch — return new nodes that replace or extend the branch, keeping context from the path when relevant. (3) Always use the exact focusNodeId as source for every new edge. Return valid diagram JSON (nodes + edges). New nodes should have type "mindMap", short labels, and data.icon or data.emoji. Do not duplicate existing children; add new ideas that fit the focus node topic.
 
 Architecture / system design: HIGH-LEVEL VIEW ONLY. Show components as services, rectangles, queues — not as detailed schemas. For databases and data stores (MongoDB, Redis, PostgreSQL, etc.) use type "service" or "rectangle" with a short label (e.g. "MongoDB Atlas", "Redis", "PostgreSQL"). Do NOT use type "databaseSchema" or list tables/columns in architecture diagrams. Save databaseSchema (tables with columns) only for entity-relationship or database schema diagram types. Clear path (e.g. User→Frontend→API→Services→DB). Set data.icon AND data.iconUrl on every node. Use brand icons via iconUrl.
 
@@ -130,14 +194,30 @@ export function buildUserMessage(params: PromptParams): string {
   const typeBlock = diagramTypeHint ? `${diagramTypeHint}\n\n` : "";
   const meta = `Mode: ${isMindmapRefine ? "mindmap-refine" : "diagram"}. focusNodeId: ${focusNodeId ?? "—"}. layout: ${preferredLayoutDirection}.`;
 
+  // Mind map refine: inject current tree structure so AI can add children or redraw with context
+  let mindMapContext = "";
+  const { mindMapStructure } = params;
+  if (isMindmapRefine && mindMapStructure) {
+    const pathLabels = mindMapStructure.pathFromRoot.map((n) => n.label).join(" → ");
+    const childLabels = mindMapStructure.existingChildren.map((n) => n.label).join(", ") || "(none yet)";
+    mindMapContext = `
+
+MIND MAP REFINE — CURRENT TREE STRUCTURE (use this context):
+- Path from root to selected node: ${pathLabels}
+- Focus node (selected): id="${mindMapStructure.focusNode.id}", label="${mindMapStructure.focusNode.label}"
+- Existing children of this node: ${childLabels}
+
+Interpret the user prompt below: if they want to add more ideas or children, return ONLY new child nodes with edges from focus node (source="${mindMapStructure.focusNode.id}"). If they want to redraw or expand the branch, return new nodes that fit the topic and keep the path context when relevant. Do not duplicate existing children.`;
+  }
+
   // Tell the AI about existing canvas content so it places nodes in blank areas
   let canvasContext = "";
-  if (canvasBounds && canvasBounds.nodeCount > 0) {
+  if (canvasBounds && canvasBounds.nodeCount > 0 && !isMindmapRefine) {
     canvasContext = `\n\nCANVAS CONTEXT: The canvas already has ${canvasBounds.nodeCount} nodes occupying the area from (${Math.round(canvasBounds.minX)}, ${Math.round(canvasBounds.minY)}) to (${Math.round(canvasBounds.maxX)}, ${Math.round(canvasBounds.maxY)}). Place your new diagram BELOW the existing content — start your first node at approximately (${Math.round(canvasBounds.minX)}, ${Math.round(canvasBounds.maxY + 400)}). Do NOT overlap with existing nodes.`;
   }
 
   if (previousDiagram && Object.keys(previousDiagram).length > 0) {
-    return `${typeBlock}${prompt}\n\n${meta}${canvasContext}\n\nPrevious prompt: ${previousPrompt ?? "—"}\n\nPrevious diagram:\n${JSON.stringify(previousDiagram)}\n\nReturn full diagram JSON only.${isMindmapRefine ? " Extend only the focused node's branch." : ""}`;
+    return `${typeBlock}${prompt}\n\n${meta}${mindMapContext}${canvasContext}\n\nPrevious prompt: ${previousPrompt ?? "—"}\n\nPrevious diagram:\n${JSON.stringify(previousDiagram)}\n\nReturn full diagram JSON only.${isMindmapRefine ? " New edges from the focus node must have source=\"" + (focusNodeId ?? "") + "\"." : ""}`;
   }
-  return `${typeBlock}${prompt}\n\n${meta}${canvasContext}\n\nReturn diagram JSON only.`;
+  return `${typeBlock}${prompt}\n\n${meta}${mindMapContext}${canvasContext}\n\nReturn diagram JSON only.${isMindmapRefine ? " New edges from the focus node must have source=\"" + (focusNodeId ?? "") + "\"." : ""}`;
 }

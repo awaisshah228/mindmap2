@@ -16,7 +16,7 @@ import {
   type LayoutDirection,
   type LayoutAlgorithm,
 } from "@/lib/layout-engine";
-import { buildSystemPrompt, buildUserMessage, type CanvasBounds } from "@/lib/ai/prompt-builder";
+import { buildSystemPrompt, buildUserMessage, getMindMapStructure, type CanvasBounds } from "@/lib/ai/prompt-builder";
 import { streamDiagramGeneration } from "@/lib/ai/frontend-ai";
 import EditorLayout from "@/components/layout/EditorLayout";
 import { saveNow } from "@/lib/store/project-storage";
@@ -173,6 +173,10 @@ function AIDiagramPage() {
       // ─── Compute bounding box of existing canvas nodes ─────────
       const existingNodes = Array.isArray(canvasNodes) ? canvasNodes : [];
       const existingEdges = Array.isArray(canvasEdges) ? canvasEdges : [];
+      const mindMapStructure =
+        mode === "mindmap-refine" && focusNodeId && existingNodes.length > 0
+          ? getMindMapStructure(existingNodes as { id: string; data?: { label?: string } }[], existingEdges as { source: string; target: string }[], focusNodeId)
+          : null;
       let canvasBounds: CanvasBounds | null = null;
       if (existingNodes.length > 0) {
         const DEFAULT_W = 150;
@@ -367,6 +371,7 @@ function AIDiagramPage() {
             previousPrompt: lastAIPrompt,
             previousDiagram: lastAIDiagram as Record<string, unknown> | null,
             canvasBounds,
+            mindMapStructure,
           });
           full = await streamDiagramGeneration({
             provider: llmProvider,
@@ -394,6 +399,7 @@ function AIDiagramPage() {
               llmProvider,
               llmModel,
               canvasBounds,
+              mindMapStructure,
             }),
           });
           if (!res.ok || !res.body) {

@@ -57,6 +57,7 @@ export async function POST(req: NextRequest) {
       llmModel,
       llmApiKey,
       canvasBounds,
+      mindMapStructure,
     } = await req.json();
 
     if (!prompt || typeof prompt !== "string") {
@@ -143,6 +144,7 @@ export async function POST(req: NextRequest) {
       previousPrompt,
       previousDiagram,
       canvasBounds: canvasBounds ?? null,
+      mindMapStructure: mindMapStructure ?? null,
     });
 
     const stream = await llm.stream([
