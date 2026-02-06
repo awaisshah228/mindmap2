@@ -205,6 +205,9 @@ interface CanvasState {
   hasUnsavedChanges: boolean;
   setLastSavedAt: (ts: number) => void;
   setHasUnsavedChanges: (v: boolean) => void;
+  /** When true, bottom bar Save button shows "Save layout" (set after Layout all/selection). */
+  showSaveLayoutLabel: boolean;
+  setShowSaveLayoutLabel: (v: boolean) => void;
 
   // ─── Projects ──────────────────────────────────────────────────────
   projects: Project[];
@@ -347,6 +350,8 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
   hasUnsavedChanges: false,
   setLastSavedAt: (ts) => set({ lastSavedAt: ts }),
   setHasUnsavedChanges: (v) => set({ hasUnsavedChanges: v }),
+  showSaveLayoutLabel: false,
+  setShowSaveLayoutLabel: (v) => set({ showSaveLayoutLabel: v }),
 
   // ─── Projects ──────────────────────────────────────────────────────
   projects: [],

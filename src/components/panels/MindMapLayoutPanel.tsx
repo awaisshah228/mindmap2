@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Panel, useStore, useStoreApi } from "@xyflow/react";
-import { Settings2, ArrowRight, ArrowDown, ArrowLeft, ArrowUp, Layout, X, PanelRight, Save } from "lucide-react";
+import { Settings2, ArrowRight, ArrowDown, ArrowLeft, ArrowUp, Layout, X, PanelRight, Save, Check } from "lucide-react";
 import { useCanvasStore } from "@/lib/store/canvas-store";
 import {
   ALGORITHM_FAMILIES,
@@ -48,6 +48,7 @@ export function MindMapLayoutPanel({
 
   const isMobile = useMediaQuery("(max-width: 768px)");
   const [panelVisible, setPanelVisible] = useState(true);
+  const [savedFeedback, setSavedFeedback] = useState(false);
 
   useEffect(() => {
     if (isMobile) setPanelVisible(false);
@@ -278,12 +279,19 @@ export function MindMapLayoutPanel({
           )}
           <button
             type="button"
-            onClick={() => saveNow()}
-            className="w-full py-2 px-3 text-sm font-medium rounded bg-gray-600 hover:bg-gray-500 text-gray-200 transition-colors flex items-center justify-center gap-2"
+            onClick={() => {
+              saveNow();
+              setSavedFeedback(true);
+              window.setTimeout(() => setSavedFeedback(false), 2000);
+            }}
+            className={cn(
+              "w-full py-2 px-3 text-sm font-medium rounded transition-colors flex items-center justify-center gap-2",
+              savedFeedback ? "bg-green-600 text-white" : "bg-gray-600 hover:bg-gray-500 text-gray-200"
+            )}
             title="Save current positions to project (Ctrl/Cmd+S)"
           >
-            <Save className="w-4 h-4" />
-            Save layout
+            {savedFeedback ? <Check className="w-4 h-4" /> : <Save className="w-4 h-4" />}
+            {savedFeedback ? "Saved!" : "Save layout"}
           </button>
         </div>
       </div>

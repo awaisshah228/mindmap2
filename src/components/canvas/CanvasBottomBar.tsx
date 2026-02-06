@@ -45,6 +45,8 @@ function CanvasBottomBarInner({
   const redoStack = useCanvasStore((s) => s.redoStack);
   const lastSavedAt = useCanvasStore((s) => s.lastSavedAt);
   const hasUnsavedChanges = useCanvasStore((s) => s.hasUnsavedChanges);
+  const showSaveLayoutLabel = useCanvasStore((s) => s.showSaveLayoutLabel);
+  const setShowSaveLayoutLabel = useCanvasStore((s) => s.setShowSaveLayoutLabel);
 
   // Update relative time display periodically
   const [, setTick] = useState(0);
@@ -55,7 +57,8 @@ function CanvasBottomBarInner({
 
   const handleSave = useCallback(() => {
     saveNow();
-  }, []);
+    setShowSaveLayoutLabel(false);
+  }, [setShowSaveLayoutLabel]);
 
   // Listen for Ctrl+S
   useEffect(() => {
@@ -63,6 +66,7 @@ function CanvasBottomBarInner({
       if ((e.metaKey || e.ctrlKey) && e.key === "s") {
         e.preventDefault();
         saveNow();
+        useCanvasStore.getState().setShowSaveLayoutLabel(false);
       }
     };
     window.addEventListener("keydown", handler);
@@ -95,14 +99,15 @@ function CanvasBottomBarInner({
           type="button"
           onClick={handleSave}
           className={cn(
-            "p-1.5 rounded-lg transition-colors",
+            "p-1.5 rounded-lg transition-colors flex items-center gap-1",
             hasUnsavedChanges
               ? "bg-violet-100 dark:bg-violet-900/30 text-violet-600 dark:text-violet-400 hover:bg-violet-200 dark:hover:bg-violet-900/50"
               : "text-gray-400 dark:text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-700"
           )}
-          title="Save (Ctrl/Cmd+S)"
+          title={showSaveLayoutLabel ? "Save positions (Ctrl/Cmd+S)" : "Save (Ctrl/Cmd+S)"}
         >
-          <Save className="w-4 h-4" />
+          <Save className="w-4 h-4 shrink-0" />
+          {showSaveLayoutLabel && <span className="text-[11px] font-medium whitespace-nowrap">Save layout</span>}
         </button>
 
         <div className="w-px h-5 bg-gray-200 dark:bg-gray-600 mx-1" />
@@ -110,7 +115,11 @@ function CanvasBottomBarInner({
         {/* Layout buttons */}
         <button
           type="button"
-          onClick={onLayoutSelection}
+          onClick={() => {
+            onLayoutSelection();
+            setShowSaveLayoutLabel(true);
+            window.setTimeout(() => setShowSaveLayoutLabel(false), 8000);
+          }}
           className="text-[11px] px-2 py-1 rounded-lg bg-violet-50 dark:bg-violet-900/20 text-violet-700 dark:text-violet-300 hover:bg-violet-100 dark:hover:bg-violet-900/40 disabled:opacity-40 disabled:cursor-not-allowed transition-colors font-medium"
           disabled={selectedNodeCount < 2}
           title="Layout selected nodes"
@@ -119,7 +128,11 @@ function CanvasBottomBarInner({
         </button>
         <button
           type="button"
-          onClick={onLayoutAll}
+          onClick={() => {
+            onLayoutAll();
+            setShowSaveLayoutLabel(true);
+            window.setTimeout(() => setShowSaveLayoutLabel(false), 8000);
+          }}
           className="text-[11px] px-2 py-1 rounded-lg bg-slate-50 dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors font-medium"
           title="Auto-layout all nodes"
         >
