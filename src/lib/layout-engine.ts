@@ -249,9 +249,9 @@ async function layoutWithElk(
   return { nodes: allNodes, edges: normalizedEdges };
 }
 
-const GROUP_PADDING = 64;
+const GROUP_PADDING = 80;
 const GROUP_HEADER_INSET = 44;
-const CHILD_PADDING = 24;
+const CHILD_PADDING = 40;
 
 export type GroupMetadata = { id: string; label: string; nodeIds: string[] };
 
@@ -364,8 +364,10 @@ export function applyGroupingFromMetadata(
       if (y + height > maxY) maxY = y + height;
     }
 
-    const groupW = maxX - minX + 2 * GROUP_PADDING;
-    const groupH = maxY - minY + 2 * GROUP_PADDING + GROUP_HEADER_INSET;
+    const contentW = Math.max(0, maxX - minX);
+    const contentH = Math.max(0, maxY - minY);
+    const groupW = Math.max(GROUP_NODE_DEFAULT_WIDTH, contentW + 2 * GROUP_PADDING);
+    const groupH = Math.max(GROUP_NODE_DEFAULT_HEIGHT, contentH + 2 * GROUP_PADDING + GROUP_HEADER_INSET);
     const groupX = minX - GROUP_PADDING;
     const groupY = minY - GROUP_HEADER_INSET - GROUP_PADDING;
 
@@ -374,6 +376,8 @@ export function applyGroupingFromMetadata(
       type: "group",
       position: { x: groupX, y: groupY },
       data: { label: g.label ?? g.id },
+      width: groupW,
+      height: groupH,
       style: { width: groupW, height: groupH },
     };
     result.push(groupNode);
@@ -413,9 +417,9 @@ export function applyGroupingFromMetadata(
 }
 
 /**
- * Fit each group's style {width, height} to its children's bounding box + padding
- * (like React Flow Selection Grouping). Children are aligned and positioned below
- * the group header.
+ * Fit each group's width and height to its children's bounding box + padding.
+ * Group dimensions scale automatically so there is always space around the content
+ * (top, bottom, left, right). Children are centered within the padded area.
  * @see https://reactflow.dev/examples/grouping/selection-grouping
  */
 export function fitGroupBoundsAndCenterChildren(nodes: Node[]): Node[] {
@@ -438,10 +442,10 @@ export function fitGroupBoundsAndCenterChildren(nodes: Node[]): Node[] {
       if (y + height > maxY) maxY = y + height;
     }
 
-    const contentW = maxX - minX;
-    const contentH = maxY - minY;
-    const groupW = contentW + 2 * GROUP_PADDING;
-    const groupH = contentH + 2 * GROUP_PADDING + GROUP_HEADER_INSET;
+    const contentW = Math.max(0, maxX - minX);
+    const contentH = Math.max(0, maxY - minY);
+    const groupW = Math.max(GROUP_NODE_DEFAULT_WIDTH, contentW + 2 * GROUP_PADDING);
+    const groupH = Math.max(GROUP_NODE_DEFAULT_HEIGHT, contentH + 2 * GROUP_PADDING + GROUP_HEADER_INSET);
 
     const centerX = (minX + maxX) / 2;
     const offsetX = groupW / 2 - centerX;
@@ -449,9 +453,12 @@ export function fitGroupBoundsAndCenterChildren(nodes: Node[]): Node[] {
 
     for (let i = 0; i < result.length; i++) {
       if (result[i].id === groupId) {
+        const groupNode = result[i];
         result[i] = {
-          ...result[i],
-          style: { ...result[i].style, width: groupW, height: groupH },
+          ...groupNode,
+          width: groupW,
+          height: groupH,
+          style: { ...(groupNode.style as object), width: groupW, height: groupH },
         };
         break;
       }

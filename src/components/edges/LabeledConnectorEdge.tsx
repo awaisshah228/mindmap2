@@ -152,7 +152,7 @@ function LabeledConnectorEdge({
     : connectorType === "straight"
       ? getStraightPath({ sourceX: aSourceX, sourceY: aSourceY, targetX: aTargetX, targetY: aTargetY })
       : connectorType === "default"
-        ? getBezierPath(params)
+        ? getBezierPath({ ...params, curvature: 0.2 })
         : getSmoothStepPath({
             ...params,
             borderRadius: connectorType === "step" ? 0 : 5,
