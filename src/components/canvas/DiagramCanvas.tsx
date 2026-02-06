@@ -113,6 +113,8 @@ export default function DiagramCanvas() {
   const pendingEmoji = useCanvasStore((s) => s.pendingEmoji);
   const setPendingEmoji = useCanvasStore((s) => s.setPendingEmoji);
   const pendingIconId = useCanvasStore((s) => s.pendingIconId);
+  const pendingIconLabel = useCanvasStore((s) => s.pendingIconLabel);
+  const setPendingIconLabel = useCanvasStore((s) => s.setPendingIconLabel);
   const setPendingIconId = useCanvasStore((s) => s.setPendingIconId);
   const pendingImageUrl = useCanvasStore((s) => s.pendingImageUrl);
   const pendingImageLabel = useCanvasStore((s) => s.pendingImageLabel);
@@ -1112,6 +1114,7 @@ export default function DiagramCanvas() {
 
       if (activeTool === "emoji") {
         const pendingCustomIcon = useCanvasStore.getState().pendingCustomIcon;
+        const iconLabel = pendingIconLabel ?? undefined;
         if (pendingCustomIcon) {
           pushUndo();
           const id = `icon-${Date.now()}`;
@@ -1120,7 +1123,7 @@ export default function DiagramCanvas() {
             id,
             type: "icon",
             position: { x: flowX - size / 2, y: flowY - size / 2 },
-            data: { customIcon: pendingCustomIcon },
+            data: { customIcon: pendingCustomIcon, ...(iconLabel && { label: iconLabel }) },
             width: size,
             height: size,
           };
@@ -1128,6 +1131,7 @@ export default function DiagramCanvas() {
           setNodes((nds) => [...nds, { ...newNode, selected: true }]);
           setActiveTool("select");
           useCanvasStore.getState().setPendingCustomIcon(null);
+          setPendingIconLabel(null);
         } else if (pendingIconId) {
           pushUndo();
           const id = `icon-${Date.now()}`;
@@ -1136,7 +1140,7 @@ export default function DiagramCanvas() {
             id,
             type: "icon",
             position: { x: flowX - size / 2, y: flowY - size / 2 },
-            data: { iconId: pendingIconId },
+            data: { iconId: pendingIconId, ...(iconLabel && { label: iconLabel }) },
             width: size,
             height: size,
           };
@@ -1144,6 +1148,7 @@ export default function DiagramCanvas() {
           setNodes((nds) => [...nds, { ...newNode, selected: true }]);
           setActiveTool("select");
           setPendingIconId(null);
+          setPendingIconLabel(null);
         } else if (pendingEmoji) {
           pushUndo();
           const id = `emoji-${Date.now()}`;
@@ -1152,7 +1157,7 @@ export default function DiagramCanvas() {
             id,
             type: "icon",
             position: { x: flowX - size / 2, y: flowY - size / 2 },
-            data: { emoji: pendingEmoji },
+            data: { emoji: pendingEmoji, ...(iconLabel && { label: iconLabel }) },
             width: size,
             height: size,
           };
@@ -1160,6 +1165,7 @@ export default function DiagramCanvas() {
           setNodes((nds) => [...nds, { ...newNode, selected: true }]);
           setActiveTool("select");
           setPendingEmoji(null);
+          setPendingIconLabel(null);
         }
         return;
       }
@@ -1294,15 +1300,19 @@ export default function DiagramCanvas() {
 
       if (payload.type === "icon" && payload.data) {
         const size = 64;
+        const dropIconLabel = useCanvasStore.getState().pendingIconLabel ?? payload.data.label ?? undefined;
         newNode = {
           id,
           type: "icon",
           position: { x: flowX - size / 2, y: flowY - size / 2 },
-          data: payload.data.customIcon
-            ? { customIcon: payload.data.customIcon }
-            : payload.data.iconId
-              ? { iconId: payload.data.iconId }
-              : { emoji: payload.data.emoji ?? "" },
+          data: {
+            ...(payload.data.customIcon
+              ? { customIcon: payload.data.customIcon }
+              : payload.data.iconId
+                ? { iconId: payload.data.iconId }
+                : { emoji: payload.data.emoji ?? "" }),
+            ...(dropIconLabel && { label: dropIconLabel }),
+          },
           width: size,
           height: size,
         };

@@ -33,7 +33,26 @@ export function getOpenAiApiKey(): string {
   return process.env.OPENAI_API_KEY ?? "";
 }
 
-/** Database URL; fallback to placeholder so db client doesn't see undefined. */
+/** Database URL — only call from server (API routes, Server Actions, server components). Never expose to client. */
 export function getDatabaseUrl(): string {
   return process.env.DATABASE_URL ?? FALLBACK.DATABASE_URL;
+}
+
+/** Stripe secret key. */
+export function getStripeSecretKey(): string {
+  return process.env.STRIPE_SECRET_KEY ?? "";
+}
+
+/** Stripe webhook secret for verifying webhooks. */
+export function getStripeWebhookSecret(): string {
+  return process.env.STRIPE_WEBHOOK_SECRET ?? "";
+}
+
+/** S3 bucket for user uploads (icons, attachments). */
+export function getS3Bucket(): string {
+  return process.env.S3_BUCKET ?? "";
+}
+
+export function getAwsRegion(): string {
+  return process.env.AWS_REGION ?? "us-east-1";
 }

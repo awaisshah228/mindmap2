@@ -120,6 +120,8 @@ interface CanvasState {
   pendingShape: ShapeType | null;
   pendingEmoji: string | null;
   pendingIconId: string | null;
+  /** Optional label for the next icon/emoji placed (click or drag). */
+  pendingIconLabel: string | null;
   /** Custom icon data URL (uploaded image used as icon). */
   pendingCustomIcon: string | null;
   /** When set, next canvas click adds an image node with this URL and optional label. */
@@ -206,6 +208,9 @@ interface CanvasState {
   // ─── Projects ──────────────────────────────────────────────────────
   projects: Project[];
   activeProjectId: string | null;
+  /** Set by persistence layer: "local" (localStorage) or "cloud" (API). */
+  persistenceSource: "local" | "cloud";
+  setPersistenceSource: (source: "local" | "cloud") => void;
 
   createProject: (name: string) => string;
   deleteProject: (id: string) => void;
@@ -266,6 +271,7 @@ interface CanvasState {
   setPendingShape: (shape: ShapeType | null) => void;
   setPendingEmoji: (emoji: string | null) => void;
   setPendingIconId: (id: string | null) => void;
+  setPendingIconLabel: (label: string | null) => void;
   setPendingCustomIcon: (dataUrl: string | null) => void;
   setPendingImage: (url: string | null, label?: string | null) => void;
   setPendingEdgeType: (type: PendingEdgeType) => void;
@@ -296,6 +302,7 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
   pendingShape: null,
   pendingEmoji: null,
   pendingIconId: null,
+  pendingIconLabel: null,
   pendingCustomIcon: null,
   pendingImageUrl: null,
   pendingImageLabel: null,
@@ -343,6 +350,8 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
   // ─── Projects ──────────────────────────────────────────────────────
   projects: [],
   activeProjectId: null,
+  persistenceSource: "local",
+  setPersistenceSource: (source) => set({ persistenceSource: source }),
 
   createProject: (name) => {
     const id = `proj-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
@@ -575,6 +584,7 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
   setPendingShape: (shape) => set({ pendingShape: shape }),
   setPendingEmoji: (emoji) => set({ pendingEmoji: emoji }),
   setPendingIconId: (id) => set({ pendingIconId: id }),
+  setPendingIconLabel: (label) => set({ pendingIconLabel: label }),
   setPendingCustomIcon: (dataUrl) => set({ pendingCustomIcon: dataUrl }),
   setPendingImage: (url, label) =>
     set({ pendingImageUrl: url ?? null, pendingImageLabel: label ?? null }),

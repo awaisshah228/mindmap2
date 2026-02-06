@@ -11,6 +11,11 @@ import {
 
 export const runtime = "nodejs";
 
+/**
+ * No auth required — allows testing and use without login.
+ * When the client sends no API key, the server uses OPENROUTER_API_KEY (or OPENAI_API_KEY) so AI works for unsigned users.
+ */
+
 /** Provider → base URL mapping for non-OpenRouter providers */
 const PROVIDER_BASE_URLS: Record<string, string> = {
   openai: "https://api.openai.com/v1",

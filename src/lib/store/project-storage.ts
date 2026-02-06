@@ -3,13 +3,19 @@
 /**
  * Project persistence layer.
  *
- * Stores projects + settings to localStorage and auto-saves on state changes.
- * Also migrates legacy "ai-diagram-state-v1" data into a default project.
+ * - When authenticated: load/save projects via API (Postgres); settings still in localStorage.
+ * - When not authenticated: load/save projects to localStorage.
  */
 
 import { useEffect, useRef } from "react";
+import { useAuth } from "@clerk/nextjs";
 import { useCanvasStore, DEFAULT_MIND_MAP_LAYOUT, type Project } from "./canvas-store";
 import type { Node, Edge } from "@xyflow/react";
+
+const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+function isApiProjectId(id: string) {
+  return UUID_REGEX.test(id);
+}
 
 const PROJECTS_KEY = "ai-diagram-projects-v1";
 const SETTINGS_KEY = "ai-diagram-settings-v1";
@@ -135,15 +141,19 @@ function getDefaultMindMapTemplate(): { nodes: Node[]; edges: Edge[] } {
 
 export function useProjectPersistence() {
   const hydrated = useRef(false);
+  const { isSignedIn, userId } = useAuth();
+  const sessionStatus = isSignedIn === undefined ? "loading" : isSignedIn ? "authenticated" : "unauthenticated";
+  const sessionUser = isSignedIn && userId ? { id: userId } : null;
 
-  // Hydrate from localStorage on first mount
+  // Hydrate once we know session status (authenticated → API, else localStorage)
   useEffect(() => {
+    if (sessionStatus === "loading") return;
     if (hydrated.current) return;
     hydrated.current = true;
 
     const store = useCanvasStore.getState();
 
-    // Load settings
+    // Load settings (always from localStorage)
     const settings = loadSettings();
     if (settings.theme) store.setTheme(settings.theme as "light" | "dark" | "system");
     if (settings.llmProvider) store.setLLMProvider(settings.llmProvider as typeof store.llmProvider);
@@ -157,19 +167,132 @@ export function useProjectPersistence() {
       });
     }
 
-    // Load projects
-    let projects = loadProjects();
-
-    // Migrate legacy single-diagram if no projects exist yet
-    if (projects.length === 0) {
-      const migrated = migrateLegacy();
-      if (migrated) {
-        projects = [migrated];
-      }
+    if (sessionUser) {
+      // Authenticated: fetch projects from API
+      fetch("/api/projects", { credentials: "include" })
+        .then((res) => (res.ok ? res.json() : []))
+        .then((projects: Project[]) => {
+          let list = Array.isArray(projects) ? projects : [];
+          if (list.length === 0) {
+            const now = Date.now();
+            const template = getDefaultMindMapTemplate();
+            const newProj = {
+              id: "", // will be set by POST response
+              name: "Untitled",
+              createdAt: now,
+              updatedAt: now,
+              isFavorite: false,
+              nodes: template.nodes as Project["nodes"],
+              edges: template.edges as Project["edges"],
+              nodeNotes: {} as Record<string, string>,
+              nodeTasks: {} as Record<string, Project["nodeTasks"][string]>,
+              nodeAttachments: {} as Record<string, Project["nodeAttachments"][string]>,
+            };
+            fetch("/api/projects", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              credentials: "include",
+              body: JSON.stringify({
+                name: newProj.name,
+                nodes: newProj.nodes,
+                edges: newProj.edges,
+                nodeNotes: newProj.nodeNotes,
+                nodeTasks: newProj.nodeTasks,
+                nodeAttachments: newProj.nodeAttachments,
+              }),
+            })
+              .then((r) => r.json())
+              .then((created) => {
+                const p: Project = {
+                  ...newProj,
+                  id: created.id,
+                  createdAt: created.createdAt ?? now,
+                  updatedAt: created.updatedAt ?? now,
+                };
+                useCanvasStore.setState({
+                  projects: [p],
+                  activeProjectId: p.id,
+                  nodes: p.nodes,
+                  edges: p.edges,
+                  nodeNotes: p.nodeNotes,
+                  nodeTasks: p.nodeTasks,
+                  nodeAttachments: p.nodeAttachments,
+                  persistenceSource: "cloud",
+                });
+              })
+              .catch(() => {
+                useCanvasStore.setState({
+                  projects: [newProj],
+                  activeProjectId: newProj.id,
+                  nodes: newProj.nodes,
+                  edges: newProj.edges,
+                  nodeNotes: newProj.nodeNotes,
+                  nodeTasks: newProj.nodeTasks,
+                  nodeAttachments: newProj.nodeAttachments,
+                  persistenceSource: "local",
+                });
+              });
+            return;
+          }
+          const sorted = [...list].sort((a, b) => b.updatedAt - a.updatedAt);
+          const active = sorted[0];
+          useCanvasStore.setState({
+            projects: list,
+            activeProjectId: active.id,
+            nodes: active.nodes,
+            edges: active.edges,
+            nodeNotes: active.nodeNotes,
+            nodeTasks: active.nodeTasks,
+            nodeAttachments: active.nodeAttachments,
+            persistenceSource: "cloud",
+          });
+        })
+        .catch(() => {
+          // Fallback to local
+          let projects = loadProjects();
+          if (projects.length === 0) {
+            const migrated = migrateLegacy();
+            if (migrated) projects = [migrated];
+          }
+          if (projects.length === 0) {
+            const now = Date.now();
+            const template = getDefaultMindMapTemplate();
+            projects = [{
+              id: `proj-default-${now}`,
+              name: "Untitled",
+              createdAt: now,
+              updatedAt: now,
+              isFavorite: false,
+              nodes: template.nodes as Project["nodes"],
+              edges: template.edges as Project["edges"],
+              nodeNotes: {},
+              nodeTasks: {},
+              nodeAttachments: {},
+            }];
+          }
+          const sorted = [...projects].sort((a, b) => b.updatedAt - a.updatedAt);
+          const active = sorted[0];
+          useCanvasStore.setState({
+            projects,
+            activeProjectId: active.id,
+            nodes: active.nodes,
+            edges: active.edges,
+            nodeNotes: active.nodeNotes,
+            nodeTasks: active.nodeTasks,
+            nodeAttachments: active.nodeAttachments,
+            persistenceSource: "local",
+          });
+        });
+      return;
     }
 
+    // Not authenticated: load from localStorage
+    let projects = loadProjects();
     if (projects.length === 0) {
-      // Create a default project with a starter mind-map template
+      const migrated = migrateLegacy();
+      if (migrated) projects = [migrated];
+    }
+    if (projects.length === 0) {
       const now = Date.now();
       const template = getDefaultMindMapTemplate();
       projects = [{
@@ -185,11 +308,8 @@ export function useProjectPersistence() {
         nodeAttachments: {},
       }];
     }
-
-    // Load the most recently updated project
     const sorted = [...projects].sort((a, b) => b.updatedAt - a.updatedAt);
     const active = sorted[0];
-
     useCanvasStore.setState({
       projects,
       activeProjectId: active.id,
@@ -198,15 +318,14 @@ export function useProjectPersistence() {
       nodeNotes: active.nodeNotes,
       nodeTasks: active.nodeTasks,
       nodeAttachments: active.nodeAttachments,
+      persistenceSource: "local",
     });
-  }, []);
+  }, [sessionStatus, userId]);
 
   // Auto-save canvas data on change (debounced).
-  // NOTE: We intentionally do NOT watch `projects` here — the save itself
-  // updates the projects array in the store, and watching it would create
-  // an infinite save loop.
   const saveTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
-  const initialSave = useRef(true); // skip marking dirty on first render after hydration
+  const initialSave = useRef(true);
+  const persistenceSource = useCanvasStore((s) => s.persistenceSource);
   const activeProjectId = useCanvasStore((s) => s.activeProjectId);
   const nodes = useCanvasStore((s) => s.nodes);
   const edges = useCanvasStore((s) => s.edges);
@@ -216,19 +335,15 @@ export function useProjectPersistence() {
 
   useEffect(() => {
     if (!hydrated.current) return;
-
-    // Skip the very first run (hydration populates these values, that's not a user change)
     if (initialSave.current) {
       initialSave.current = false;
       return;
     }
 
-    // Mark as dirty immediately so the UI shows "Unsaved changes"
     useCanvasStore.setState({ hasUnsavedChanges: true });
 
     clearTimeout(saveTimer.current);
     saveTimer.current = setTimeout(() => {
-      // Save current canvas state into the active project entry
       const s = useCanvasStore.getState();
       const now = Date.now();
       const updatedProjects = s.projects.map((p) =>
@@ -237,10 +352,29 @@ export function useProjectPersistence() {
           : p
       );
       useCanvasStore.setState({ projects: updatedProjects, lastSavedAt: now, hasUnsavedChanges: false });
-      saveProjects(updatedProjects);
+
+      if (s.persistenceSource === "cloud" && s.activeProjectId && isApiProjectId(s.activeProjectId)) {
+        const active = updatedProjects.find((x) => x.id === s.activeProjectId);
+        fetch(`/api/projects/${s.activeProjectId}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          credentials: "include",
+          body: JSON.stringify({
+            name: active?.name,
+            nodes: s.nodes,
+            edges: s.edges,
+            viewport: active?.viewport,
+            nodeNotes: s.nodeNotes,
+            nodeTasks: s.nodeTasks,
+            nodeAttachments: s.nodeAttachments,
+          }),
+        }).catch(() => {});
+      } else {
+        saveProjects(updatedProjects);
+      }
     }, 2000);
     return () => clearTimeout(saveTimer.current);
-  }, [nodes, edges, nodeNotes, nodeTasks, nodeAttachments, activeProjectId]);
+  }, [nodes, edges, nodeNotes, nodeTasks, nodeAttachments, activeProjectId, persistenceSource]);
 
   // Auto-save settings on change
   const theme = useCanvasStore((s) => s.theme);
@@ -256,7 +390,7 @@ export function useProjectPersistence() {
     saveSettings({ theme, llmProvider, llmModel, llmApiKey, llmBaseUrl, aiPrompts, dailyNotes });
   }, [theme, llmProvider, llmModel, llmApiKey, llmBaseUrl, aiPrompts, dailyNotes]);
 
-  // Force-save before the page unloads (prevents data loss during the debounce window)
+  // Force-save before the page unloads (localStorage only; cloud relies on debounced save)
   useEffect(() => {
     const handleBeforeUnload = () => {
       const s = useCanvasStore.getState();
@@ -267,7 +401,6 @@ export function useProjectPersistence() {
           ? { ...p, nodes: s.nodes, edges: s.edges, nodeNotes: s.nodeNotes, nodeTasks: s.nodeTasks, nodeAttachments: s.nodeAttachments, updatedAt: now }
           : p
       );
-      // Use synchronous localStorage write (no setState needed since page is closing)
       saveProjects(updatedProjects);
     };
     window.addEventListener("beforeunload", handleBeforeUnload);
@@ -276,7 +409,7 @@ export function useProjectPersistence() {
 }
 
 /**
- * Immediately save the active project to localStorage (manual save / Ctrl+S).
+ * Immediately save the active project (localStorage or API when authenticated).
  * Can be called from anywhere without needing React context.
  */
 export function saveNow() {
@@ -289,5 +422,24 @@ export function saveNow() {
       : p
   );
   useCanvasStore.setState({ projects: updatedProjects, lastSavedAt: now, hasUnsavedChanges: false });
-  saveProjects(updatedProjects);
+
+  if (s.persistenceSource === "cloud" && isApiProjectId(s.activeProjectId)) {
+    const active = updatedProjects.find((x) => x.id === s.activeProjectId);
+    fetch(`/api/projects/${s.activeProjectId}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      credentials: "include",
+      body: JSON.stringify({
+        name: active?.name,
+        nodes: s.nodes,
+        edges: s.edges,
+        viewport: active?.viewport,
+        nodeNotes: s.nodeNotes,
+        nodeTasks: s.nodeTasks,
+        nodeAttachments: s.nodeAttachments,
+      }),
+    }).catch(() => {});
+  } else {
+    saveProjects(updatedProjects);
+  }
 }

@@ -1,7 +1,9 @@
 "use client";
 
-import { useState, Suspense } from "react";
+import { useState, Suspense, useEffect } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
+import { useAuth } from "@clerk/nextjs";
+import Link from "next/link";
 import type { Node, Edge } from "@xyflow/react";
 import { useCanvasStore } from "@/lib/store/canvas-store";
 import {
@@ -19,6 +21,8 @@ import { streamDiagramGeneration } from "@/lib/ai/frontend-ai";
 import EditorLayout from "@/components/layout/EditorLayout";
 import { saveNow } from "@/lib/store/project-storage";
 import { Loader2, Settings } from "lucide-react";
+import { applyNodesAndEdgesInChunks } from "@/lib/chunked-nodes";
+import { parseStreamingDiagramBuffer } from "@/lib/ai/streaming-json-parser";
 
 export const DIAGRAM_TYPE_OPTIONS = [
   { value: "auto", label: "Auto detect (default)" },
@@ -32,83 +36,12 @@ export const DIAGRAM_TYPE_OPTIONS = [
 
 export type DiagramTypeValue = (typeof DIAGRAM_TYPE_OPTIONS)[number]["value"];
 
-export const DIAGRAM_PRESETS = [
-  { value: "none", label: "None (default)", prompt: "" },
-  {
-    value: "ecommerce-mern-aws",
-    label: "eCommerce MERN + AWS (full stack)",
-    prompt:
-      "Full-stack eCommerce architecture with MERN on AWS. Clear left-to-right flow. Use 2–4 groups (e.g. Frontend, Backend, Data). Include: User, React SPA (CloudFront + S3), ALB, Node.js/Express API (ECS Fargate), MongoDB Atlas, Redis (sessions/cart), AWS SQS (order queue), AWS SNS (notifications), Apache Kafka (events), Socket.io (real-time), S3 + CloudFront (images/CDN), Cognito/Auth0, Stripe, Elasticsearch. Add edge labels only when they add clarity (e.g. REST, Pub/Sub, WebSockets, Queries); omit for obvious flows like User→Frontend. Space nodes so edges have room. Correct source/target and sourceHandle/targetHandle. Use data.icon and data.iconUrl (AWS, MongoDB, Redis, Kafka, Stripe, React, Node).",
-  },
-  {
-    value: "stripe-payment",
-    label: "Stripe payment flow",
-    prompt:
-      "Flowchart for Stripe payment flow: User selects product → Cart → Checkout → Stripe payment (card/redirect) → Success or Failure → Order confirmation → Email receipt. Use rectangles for steps, diamond for success/failure. Label only decision edges (e.g. Yes/No) or non-obvious transitions. Short step labels. Left-to-right or top-to-bottom flow.",
-  },
-  {
-    value: "chatbot-arch",
-    label: "Chatbot architecture",
-    prompt:
-      "System architecture for a chatbot: User, Frontend chat UI, API Gateway, Auth service, Chat service, LLM provider (OpenAI), vector database for RAG, Redis for session/cache. Left-to-right flow. Edge labels only when useful (e.g. gRPC, RAG query); omit for obvious connections. Use service/rectangle nodes, data.icon and data.iconUrl on each.",
-  },
-  {
-    value: "auth0-flow",
-    label: "Auth0 auth flow",
-    prompt:
-      "Flowchart for Auth0 authentication: User clicks Login → Redirect to Auth0 → Login/register → Callback with tokens → Validate token → Load session → Dashboard or Complete profile. Rectangles for steps. Label edges only for redirect/callback or decisions; omit for simple step→step. Clear flow direction.",
-  },
-  {
-    value: "gig-marketplace",
-    label: "Gig marketplace architecture",
-    prompt:
-      "Architecture for a gig marketplace (Fiverr-style): Users (buyers/sellers), Frontend, API Gateway, Search, Order, Payment, Notification services, databases (users, orders, messages). Groups: Frontend, Services, Data. Edge labels only when they add clarity (e.g. Events, API); omit when obvious. Icons on every node.",
-  },
-  {
-    value: "product-microservices",
-    label: "Product page with microservices",
-    prompt:
-      "Microservices for a product detail page: CDN, Frontend, API Gateway, Product service, Inventory, Reviews, Recommendations services, shared Kafka for events. Left-to-right flow. Label edges only for event/pub-sub or non-obvious calls; omit for clear API→service. Use service nodes with icons.",
-  },
-  {
-    value: "ecommerce-sql",
-    label: "eCommerce SQL schema",
-    prompt:
-      "Entity-relationship diagram for eCommerce: Users, Orders, Order Items, Products, Categories, Cart, Payments, Shipping Addresses. Use databaseSchema nodes with data.columns (name, type, key). Groups for logical clusters. Edge labels for relationship names when useful (e.g. references, one-to-many); omit for trivial links. Show cardinality only when it adds value.",
-  },
-  {
-    value: "twitter-data",
-    label: "Twitter data model",
-    prompt:
-      "Entity-relationship diagram for a Twitter-like app: Users, Tweets, Follows, Likes, Retweets, Replies, Hashtags, Mentions. databaseSchema nodes with columns. Edge labels for relationship names when they add clarity; omit for obvious FK. Groups for core vs social entities.",
-  },
-  {
-    value: "saas-multi-tenant",
-    label: "SaaS multi-tenant architecture",
-    prompt:
-      "Multi-tenant SaaS architecture: Tenants/Users → Next.js frontend → API Gateway (Kong/AWS) → Microservices (Auth, Billing, Tenant Management, Core) → PostgreSQL (RLS), Redis, S3, Stripe, SendGrid. Groups: Frontend, API Layer, Services, Data, External. Edge labels only when needed (e.g. webhook, events); space nodes for clarity. Icons on each node.",
-  },
-  {
-    value: "ci-cd-pipeline",
-    label: "CI/CD pipeline",
-    prompt:
-      "Flowchart for CI/CD: Developer push → GitHub webhook → GitHub Actions (lint, test, build, Docker) → ECR → ECS Staging → E2E tests → Approval gate → ECS Production → Health check → Slack notify. Include rollback path. Label edges only for webhook/approval or decisions; omit for linear steps. Use brand icons where relevant.",
-  },
-  {
-    value: "puppy-training",
-    label: "Puppy training user journey",
-    prompt:
-      "User journey flowchart for a puppy training platform: Sign up → Choose program (self or trainer-led) → Onboarding with puppy profile → Daily lessons → Progress tracking → Optional adjust plan or advanced training → Completion and certificate. Rectangles for steps, diamond for choices. Label only decision branches (e.g. Self / Trainer); omit for linear flow.",
-  },
-  {
-    value: "support-call-flow",
-    label: "Support desk call flow",
-    prompt:
-      "Flowchart for support desk: Call received → IVR menu → Route to queue → Agent picks up → Diagnose → Resolve or Escalate → Log ticket → Follow-up → Close. Use rectangles and diamonds. Label edges for IVR options or Resolve/Escalate; omit for obvious steps. Clear top-to-bottom or left-to-right flow.",
-  },
-] as const;
+/** Preset option for dropdown (value is "none" or preset id from API). */
+export type PresetOption = { value: string; label: string; prompt: string; previewImageUrl?: string };
 
-export type PresetValue = (typeof DIAGRAM_PRESETS)[number]["value"];
+const DEFAULT_PRESET_OPTIONS: PresetOption[] = [
+  { value: "none", label: "None (default)", prompt: "" },
+];
 
 /** Small badge showing current model + API key status below the prompt textarea. */
 function ModelStatusBadge() {
@@ -169,12 +102,27 @@ export default function AIDiagramPageWrapper() {
 }
 
 function AIDiagramPage() {
+  const { isSignedIn } = useAuth();
   const [prompt, setPrompt] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [diagramType, setDiagramType] = useState<DiagramTypeValue>("auto");
-  const [preset, setPreset] = useState<PresetValue>("none");
+  const [preset, setPreset] = useState<string>("none");
+  const [presetOptions, setPresetOptions] = useState<PresetOption[]>(DEFAULT_PRESET_OPTIONS);
   const router = useRouter();
+
+  useEffect(() => {
+    fetch("/api/presets")
+      .then((r) => r.ok ? r.json() : [])
+      .then((list: { id: string; label: string; prompt?: string; previewImageUrl?: string }[]) => {
+        const opts: PresetOption[] = [
+          { value: "none", label: "None (default)", prompt: "" },
+          ...list.map((p) => ({ value: p.id, label: p.label, prompt: p.prompt ?? "", previewImageUrl: p.previewImageUrl })),
+        ];
+        setPresetOptions(opts);
+      })
+      .catch(() => {});
+  }, []);
   const searchParams = useSearchParams();
   const mode = searchParams.get("mode") || "diagram";
   const focusNodeId = searchParams.get("nodeId");
@@ -243,84 +191,240 @@ function AIDiagramPage() {
         canvasBounds = { minX, minY, maxX, maxY, nodeCount: existingNodes.length };
       }
 
-      let full = "";
+      let parsed: Record<string, unknown> | null = null;
+      const isNewDiagram = mode !== "mindmap-refine";
+      const refId = isNewDiagram ? `ref-${Date.now()}-${Math.random().toString(36).slice(2, 9)}` : null;
 
-      if (llmApiKey) {
-        // ─── Direct frontend call (user has API key) ──────────
-        const systemPrompt = buildSystemPrompt("horizontal");
-        const userMessage = buildUserMessage({
-          prompt: prompt.trim(),
-          layoutDirection: "horizontal",
-          mode,
-          focusNodeId,
-          diagramType: effectiveDiagramType,
-          previousPrompt: lastAIPrompt,
-          previousDiagram: lastAIDiagram as Record<string, unknown> | null,
-          canvasBounds,
-        });
+      // ─── Preset: stream response so we render nodes/edges in sequence (in chunks) ──
+      const nodeIdMap = new Map<string, string>();
+      if (preset !== "none") {
+        const presetRes = await fetch(
+          `/api/diagrams/preset/stream?preset=${encodeURIComponent(preset)}`,
+          { credentials: "include" }
+        );
+        if (!presetRes.ok || !presetRes.body) {
+          const errBody = await presetRes.text().catch(() => "");
+          let errMsg = "Failed to load preset";
+          try {
+            const j = JSON.parse(errBody);
+            if (j?.error) errMsg = String(j.error);
+          } catch {
+            if (presetRes.status === 404) errMsg = "Preset not found";
+          }
+          setError(errMsg);
+          setLoading(false);
+          return;
+        }
+        {
+          let full = "";
+          let streamBuffer = "";
+          let streamedNodeCount = 0;
+          let streamedEdgeCount = 0;
 
-        full = await streamDiagramGeneration({
-          provider: llmProvider,
-          model: llmModel,
-          apiKey: llmApiKey,
-          baseUrl: llmBaseUrl || undefined,
-          systemPrompt,
-          userMessage,
-        });
-      } else {
-        // ─── Fallback: server API route (uses server-side env keys) ──
-        const res = await fetch("/api/diagrams/langchain", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
+          const processStreamChunk = (delta: string) => {
+            streamBuffer += delta;
+            const res = parseStreamingDiagramBuffer(streamBuffer);
+            const store = useCanvasStore.getState();
+            const setNodesNow = store.setNodes;
+            const setEdgesNow = store.setEdges;
+
+            for (let i = streamedNodeCount; i < res.nodes.length; i++) {
+              const raw = res.nodes[i] as { id: string; type?: string; parentId?: string; [k: string]: unknown };
+              if (raw.type === "group") continue;
+              const newId = refId ? `${refId}-${raw.id}` : raw.id;
+              const newParentId = raw.parentId && refId ? `${refId}-${raw.parentId}` : raw.parentId;
+              nodeIdMap.set(raw.id, newId);
+              const node: Node = {
+                id: newId,
+                type: (raw.type as string) || "rectangle",
+                position: (raw.position as { x: number; y: number }) ?? { x: 0, y: 0 },
+                data: (raw.data as Record<string, unknown>) ?? {},
+                ...(newParentId && { parentId: newParentId, extent: "parent" as const }),
+              };
+              if (streamedNodeCount === 0 && i === 0 && isNewDiagram) {
+                setNodesNow([node]);
+                setEdgesNow([]);
+              } else {
+                setNodesNow((prev) => (prev.some((n) => n.id === node.id) ? prev : [...prev, node]));
+              }
+            }
+            streamedNodeCount = res.nodes.length;
+
+            for (let i = streamedEdgeCount; i < res.edges.length; i++) {
+              const raw = res.edges[i] as { id?: string; source: string; target: string; [k: string]: unknown };
+              const source = nodeIdMap.get(raw.source) ?? raw.source;
+              const target = nodeIdMap.get(raw.target) ?? raw.target;
+              const edge: Edge = {
+                id: raw.id ? (refId ? `${refId}-${raw.id}` : raw.id) : `e-${source}-${target}-${i}`,
+                source,
+                target,
+                ...(raw.data != null && typeof raw.data === "object" && !Array.isArray(raw.data)
+                  ? { data: raw.data as Record<string, unknown> }
+                  : {}),
+              };
+              setEdgesNow((prev) => (prev.some((e) => e.id === edge.id) ? prev : [...prev, edge]));
+            }
+            streamedEdgeCount = res.edges.length;
+          };
+
+          const reader = presetRes.body.getReader();
+          const decoder = new TextDecoder();
+          while (true) {
+            const { value, done } = await reader.read();
+            if (done) break;
+            if (value) {
+              const chunk = decoder.decode(value, { stream: true });
+              full += chunk;
+              processStreamChunk(chunk);
+            }
+          }
+          full += decoder.decode();
+
+          try {
+            parsed = JSON.parse(full.trim()) as Record<string, unknown>;
+          } catch {
+            setError("Preset returned invalid JSON");
+            setLoading(false);
+            return;
+          }
+          // If preset has no pre-built diagram, fall through to LLM with preset's prompt
+          const presetNodes = parsed?.nodes;
+          if (Array.isArray(presetNodes) && presetNodes.length === 0) {
+            parsed = null;
+          }
+        }
+      }
+
+      // ─── Custom prompt: require API key or sign-in (to pay / use credits) ──
+      if (!parsed && !llmApiKey && !isSignedIn) {
+        setLoading(false);
+        setError("signup-or-key");
+        return;
+      }
+
+      // ─── Call LLM (use user's API key + model when set) ──
+      if (!parsed) {
+        let full = "";
+        let streamBuffer = "";
+        let streamedNodeCount = 0;
+        let streamedEdgeCount = 0;
+
+        const processStreamChunk = (delta: string) => {
+          streamBuffer += delta;
+          const res = parseStreamingDiagramBuffer(streamBuffer);
+          const store = useCanvasStore.getState();
+          const setNodesNow = store.setNodes;
+          const setEdgesNow = store.setEdges;
+
+          for (let i = streamedNodeCount; i < res.nodes.length; i++) {
+            const raw = res.nodes[i] as { id: string; type?: string; parentId?: string; [k: string]: unknown };
+            if (raw.type === "group") continue;
+            const newId = refId ? `${refId}-${raw.id}` : raw.id;
+            const newParentId = raw.parentId && refId ? `${refId}-${raw.parentId}` : raw.parentId;
+            nodeIdMap.set(raw.id, newId);
+            const node: Node = {
+              id: newId,
+              type: (raw.type as string) || "rectangle",
+              position: (raw.position as { x: number; y: number }) ?? { x: 0, y: 0 },
+              data: (raw.data as Record<string, unknown>) ?? {},
+              ...(newParentId && { parentId: newParentId, extent: "parent" as const }),
+            };
+            if (streamedNodeCount === 0 && i === 0 && isNewDiagram) {
+              setNodesNow([node]);
+              setEdgesNow([]);
+            } else {
+              setNodesNow((prev) => (prev.some((n) => n.id === node.id) ? prev : [...prev, node]));
+            }
+          }
+          streamedNodeCount = res.nodes.length;
+
+          for (let i = streamedEdgeCount; i < res.edges.length; i++) {
+            const raw = res.edges[i] as { id?: string; source: string; target: string; [k: string]: unknown };
+            const source = nodeIdMap.get(raw.source) ?? raw.source;
+            const target = nodeIdMap.get(raw.target) ?? raw.target;
+            const edge: Edge = {
+              id: raw.id ? (refId ? `${refId}-${raw.id}` : raw.id) : `e-${source}-${target}-${i}`,
+              source,
+              target,
+              ...(raw.data != null && typeof raw.data === "object" && !Array.isArray(raw.data)
+                ? { data: raw.data as Record<string, unknown> }
+                : {}),
+            };
+            setEdgesNow((prev) => (prev.some((e) => e.id === edge.id) ? prev : [...prev, edge]));
+          }
+          streamedEdgeCount = res.edges.length;
+        };
+
+        if (llmApiKey) {
+          const systemPrompt = buildSystemPrompt("horizontal");
+          const userMessage = buildUserMessage({
             prompt: prompt.trim(),
-            previousPrompt: lastAIPrompt,
-            previousDiagram: lastAIDiagram,
             layoutDirection: "horizontal",
             mode,
             focusNodeId,
             diagramType: effectiveDiagramType,
-            llmProvider,
-            llmModel,
+            previousPrompt: lastAIPrompt,
+            previousDiagram: lastAIDiagram as Record<string, unknown> | null,
             canvasBounds,
-          }),
-        });
-
-        if (!res.ok || !res.body) {
-          let data: Record<string, unknown> = {};
-          try {
-            data = await res.json();
-          } catch {
-            // ignore JSON parse error here; we'll fall back to generic message
+          });
+          full = await streamDiagramGeneration({
+            provider: llmProvider,
+            model: llmModel,
+            apiKey: llmApiKey,
+            baseUrl: llmBaseUrl || undefined,
+            systemPrompt,
+            userMessage,
+            onChunk: processStreamChunk,
+          });
+        } else {
+          const res = await fetch("/api/diagrams/langchain", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              prompt: prompt.trim(),
+              previousPrompt: lastAIPrompt,
+              previousDiagram: lastAIDiagram,
+              layoutDirection: "horizontal",
+              mode,
+              focusNodeId,
+              diagramType: effectiveDiagramType,
+              llmProvider,
+              llmModel,
+              canvasBounds,
+            }),
+          });
+          if (!res.ok || !res.body) {
+            let data: Record<string, unknown> = {};
+            try {
+              data = await res.json();
+            } catch {
+              // ignore
+            }
+            throw new Error((data?.error as string) || "Failed to generate diagram");
           }
-          throw new Error((data?.error as string) || "Failed to generate diagram");
-        }
-
-        // Stream the response text (JSON built up over time for huge diagrams)
-        const reader = res.body.getReader();
-        const decoder = new TextDecoder();
-
-        // eslint-disable-next-line no-constant-condition
-        while (true) {
-          const { value, done } = await reader.read();
-          if (done) break;
-          if (value) {
-            full += decoder.decode(value, { stream: true });
+          const reader = res.body.getReader();
+          const decoder = new TextDecoder();
+          // eslint-disable-next-line no-constant-condition
+          while (true) {
+            const { value, done } = await reader.read();
+            if (done) break;
+            if (value) {
+              const chunk = decoder.decode(value, { stream: true });
+              full += chunk;
+              processStreamChunk(chunk);
+            }
           }
+          full += decoder.decode();
         }
-        full += decoder.decode();
-      }
-
-      let parsed: Record<string, unknown>;
-      try {
-        // Strip markdown fences if the LLM wraps the JSON
-        let jsonStr = full.trim();
-        if (jsonStr.startsWith("```")) {
-          jsonStr = jsonStr.replace(/^```(?:json)?\s*/, "").replace(/\s*```$/, "");
+        try {
+          let jsonStr = full.trim();
+          if (jsonStr.startsWith("```")) {
+            jsonStr = jsonStr.replace(/^```(?:json)?\s*/, "").replace(/\s*```$/, "");
+          }
+          parsed = JSON.parse(jsonStr) as Record<string, unknown>;
+        } catch {
+          throw new Error("AI returned invalid JSON diagram");
         }
-        parsed = JSON.parse(jsonStr);
-      } catch {
-        throw new Error("AI returned invalid JSON diagram");
       }
 
       const { nodes, edges, layoutDirection, groups: rawGroups } = parsed ?? {};
@@ -336,11 +440,6 @@ function AIDiagramPage() {
         : [];
 
       // New diagram (not refine): use a unique reference id so node/edge ids never mix with existing or between runs.
-      const isNewDiagram = mode !== "mindmap-refine";
-      const refId = isNewDiagram
-        ? `ref-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`
-        : null;
-
       if (refId) {
         const nodeIdMap = new Map(
           safeNodes.map((n: { id: string }) => [n.id, `${refId}-${n.id}`])
@@ -445,6 +544,16 @@ function AIDiagramPage() {
           targetHandle,
         };
       });
+
+      if (safeNodes.length === 0) {
+        setError(
+          preset !== "none"
+            ? "This preset has no pre-built diagram. Sign in or add your API key, then Generate again to create it with AI, or choose another preset."
+            : "No diagram data — AI returned no nodes. Try a different prompt."
+        );
+        setLoading(false);
+        return;
+      }
 
       // Mind map: use tree layout and current mind map settings; otherwise generic layered.
       const isMindMapDiagram =
@@ -627,12 +736,10 @@ function AIDiagramPage() {
           }),
           mergedDirection
         );
-        setNodes(refineLayoutAgain.nodes);
-        setEdges(refinedEdgesAfterLayout);
+        applyNodesAndEdgesInChunks(setNodes, setEdges, refineLayoutAgain.nodes, refinedEdgesAfterLayout);
         setPendingFitViewNodeIds(refineLayoutAgain.nodes.map((n: { id: string }) => n.id));
       } else if (mode === "mindmap-refine") {
-        if (layoutedNodes.length) addNodes(layoutedNodes);
-        if (layoutedEdges.length) addEdges(layoutedEdges);
+        applyNodesAndEdgesInChunks(setNodes, setEdges, layoutedNodes, layoutedEdges);
         setPendingFitViewNodeIds(layoutedNodes.map((n: { id: string }) => n.id));
       } else {
         // ─── Keep existing nodes, add AI nodes alongside them ─────────
@@ -666,13 +773,11 @@ function AIDiagramPage() {
 
           const mergedNodes: Node[] = [...(existingNodes as Node[]), ...(offsetNodes as Node[])];
           const mergedEdges: Edge[] = [...(existingEdges as Edge[]), ...(layoutedEdges as Edge[])];
-          setNodes(mergedNodes);
-          setEdges(mergedEdges);
+          applyNodesAndEdgesInChunks(setNodes, setEdges, mergedNodes, mergedEdges);
           setPendingFitViewNodeIds(offsetNodes.map((n: { id: string }) => n.id));
         } else {
-          // Canvas is empty — just set the nodes directly
-          setNodes(layoutedNodes);
-          setEdges(layoutedEdges);
+          // Canvas is empty — apply in chunks to avoid "Maximum call stack exceeded"
+          applyNodesAndEdgesInChunks(setNodes, setEdges, layoutedNodes, layoutedEdges);
           setPendingFitViewNodeIds(layoutedNodes.map((n: { id: string }) => n.id));
         }
       }
@@ -680,13 +785,12 @@ function AIDiagramPage() {
       setLastAIPrompt(prompt.trim());
       setLastAIDiagram({ nodes: layoutedNodes, edges: layoutedEdges });
 
-      // Immediately persist to localStorage before navigation so hydration on
-      // the home page picks up the AI-generated nodes instead of the old data.
+      // Persist so the canvas shows the generated diagram.
       saveNow();
 
-      // Fit diagram into view. Do not run panel layout here — we already laid out in this flow; running it again would overwrite with different settings and scatter nodes. On reload the same saved layout shows correctly.
+      // Fit diagram into view. Stay on canvas (app home), do not route to landing.
       setPendingFitView(true);
-      setTimeout(() => router.push("/"), 450);
+      setTimeout(() => router.push("/editor"), 450);
     } catch (err) {
       const msg = err instanceof Error ? err.message : "Something went wrong";
       // For API-key-related errors, provide a friendlier message
@@ -723,7 +827,7 @@ function AIDiagramPage() {
               </button>
               <button
                 type="button"
-                onClick={() => router.back()}
+                onClick={() => router.push("/editor")}
                 className="text-xs text-gray-500 hover:text-gray-700"
               >
                 Close
@@ -778,23 +882,40 @@ function AIDiagramPage() {
                   <label className="text-[11px] font-semibold text-gray-700 block">
                     Load a preset
                   </label>
-                  <select
-                    value={preset}
-                    onChange={(e) => {
-                      const v = e.target.value as PresetValue;
-                      setPreset(v);
-                      const p = DIAGRAM_PRESETS.find((x) => x.value === v);
-                      if (p) setPrompt(p.prompt);
-                    }}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm bg-white focus:ring-2 focus:ring-violet-500 focus:border-transparent"
-                    disabled={loading}
-                  >
-                    {DIAGRAM_PRESETS.map((opt) => (
-                      <option key={opt.value} value={opt.value}>
-                        {opt.label}
-                      </option>
-                    ))}
-                  </select>
+                  <div className="flex items-center gap-2">
+                    <select
+                      value={preset}
+                      onChange={(e) => {
+                        const v = e.target.value;
+                        setPreset(v);
+                        if (v !== "none" && error === "signup-or-key") setError(null);
+                        const p = presetOptions.find((x) => x.value === v);
+                        if (p) setPrompt(p.prompt);
+                      }}
+                      className="flex-1 min-w-0 px-3 py-2 border border-gray-300 rounded-lg text-sm bg-white focus:ring-2 focus:ring-violet-500 focus:border-transparent"
+                      disabled={loading}
+                    >
+                      {presetOptions.map((opt) => (
+                        <option key={opt.value} value={opt.value}>
+                          {opt.label}
+                        </option>
+                      ))}
+                    </select>
+                    {preset !== "none" && (() => {
+                      const p = presetOptions.find((x) => x.value === preset);
+                      const imgUrl = p?.previewImageUrl && (p.previewImageUrl.startsWith("http://") || p.previewImageUrl.startsWith("https://"))
+                        ? p.previewImageUrl
+                        : null;
+                      return imgUrl ? (
+                        <img
+                          src={imgUrl}
+                          alt=""
+                          className="w-8 h-8 object-contain rounded border border-gray-200 shrink-0"
+                          onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }}
+                        />
+                      ) : null;
+                    })()}
+                  </div>
                 </div>
                 <div className="space-y-1">
                   <label className="text-[11px] font-semibold text-gray-700 block">
@@ -834,7 +955,27 @@ function AIDiagramPage() {
             {/* Current model + API key status */}
             <ModelStatusBadge />
             {error && (
-              error.toLowerCase().includes("api key") ? (
+              error === "signup-or-key" ? (
+                <div className="flex flex-col gap-2 px-2.5 py-2 rounded-lg bg-amber-50 border border-amber-200 text-amber-800 text-xs">
+                  <p className="font-medium">Custom AI needs sign-in or your own API key</p>
+                  <p className="text-amber-700">Presets work without signing in. To generate from your own description, sign up to use credits or add your API key in Settings.</p>
+                  <div className="flex flex-wrap gap-2 mt-1">
+                    <Link
+                      href="/sign-up"
+                      className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-md bg-violet-600 text-white font-medium hover:bg-violet-500"
+                    >
+                      Sign up to use AI
+                    </Link>
+                    <button
+                      type="button"
+                      onClick={() => useCanvasStore.getState().setSettingsOpen(true, "integration")}
+                      className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-md border border-amber-300 text-amber-800 hover:bg-amber-100"
+                    >
+                      Add API key in Settings
+                    </button>
+                  </div>
+                </div>
+              ) : error.toLowerCase().includes("api key") ? (
                 <button
                   type="button"
                   onClick={() => useCanvasStore.getState().setSettingsOpen(true, "integration")}
@@ -852,7 +993,7 @@ function AIDiagramPage() {
             <div className="mt-auto flex justify-end gap-2 pt-2">
               <button
                 type="button"
-                onClick={() => router.back()}
+                onClick={() => router.push("/editor")}
                 className="px-3 py-1.5 rounded-lg border border-gray-300 hover:bg-gray-50 text-xs"
               >
                 Cancel

@@ -1,5 +1,5 @@
-import EditorLayout from "@/components/layout/EditorLayout";
+import { redirect } from "next/navigation";
 
-export default function Home() {
-  return <EditorLayout />;
+export default function RootPage() {
+  redirect("/landing");
 }

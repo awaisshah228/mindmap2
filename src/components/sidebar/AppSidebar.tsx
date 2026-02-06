@@ -13,10 +13,12 @@ import {
   ChevronDown,
   ChevronRight,
   Clock,
+  LayoutTemplate,
 } from "lucide-react";
 import * as Popover from "@radix-ui/react-popover";
 import { cn } from "@/lib/utils";
 import { useCanvasStore, type Project } from "@/lib/store/canvas-store";
+import { applyNodesAndEdgesInChunks } from "@/lib/chunked-nodes";
 
 interface AppSidebarProps {
   isOpen?: boolean;
@@ -37,6 +39,8 @@ function timeAgo(ts: number): string {
   return new Date(ts).toLocaleDateString();
 }
 
+type TemplateItem = { id: string; label: string; level: string; description?: string; previewImageUrl?: string };
+
 export default function AppSidebar({ isOpen = true, onClose, isMobile }: AppSidebarProps) {
   const projects = useCanvasStore((s) => s.projects);
   const activeProjectId = useCanvasStore((s) => s.activeProjectId);
@@ -46,10 +50,38 @@ export default function AppSidebar({ isOpen = true, onClose, isMobile }: AppSide
   const deleteProject = useCanvasStore((s) => s.deleteProject);
   const duplicateProject = useCanvasStore((s) => s.duplicateProject);
   const toggleFavorite = useCanvasStore((s) => s.toggleFavorite);
+  const setNodes = useCanvasStore((s) => s.setNodes);
+  const setEdges = useCanvasStore((s) => s.setEdges);
 
   const [favoritesOpen, setFavoritesOpen] = useState(true);
   const [recentOpen, setRecentOpen] = useState(true);
   const [allOpen, setAllOpen] = useState(true);
+  const [templatesOpen, setTemplatesOpen] = useState(false);
+  const [templates, setTemplates] = useState<TemplateItem[]>([]);
+  const [templatesLoading, setTemplatesLoading] = useState(false);
+
+  useEffect(() => {
+    fetch("/api/presets?templates=true")
+      .then((r) => (r.ok ? r.json() : []))
+      .then((list: TemplateItem[]) => setTemplates(Array.isArray(list) ? list : []))
+      .catch(() => setTemplates([]));
+  }, []);
+
+  const loadTemplate = async (id: string) => {
+    setTemplatesLoading(true);
+    try {
+      const res = await fetch(`/api/presets/${id}`);
+      if (!res.ok) return;
+      const data = await res.json();
+      const nodes = Array.isArray(data.nodes) ? data.nodes : [];
+      const edges = Array.isArray(data.edges) ? data.edges : [];
+      if (!activeProjectId) createProject(data.label || "From template");
+      applyNodesAndEdgesInChunks(setNodes, setEdges, nodes, edges);
+      onClose?.();
+    } finally {
+      setTemplatesLoading(false);
+    }
+  };
 
   const favorites = useMemo(() => projects.filter((p) => p.isFavorite).sort((a, b) => b.updatedAt - a.updatedAt), [projects]);
   const recent = useMemo(() => [...projects].sort((a, b) => b.updatedAt - a.updatedAt).slice(0, 5), [projects]);
@@ -95,6 +127,58 @@ export default function AppSidebar({ isOpen = true, onClose, isMobile }: AppSide
       </div>
 
       <nav className="flex-1 overflow-y-auto px-2 pb-2">
+        {/* Templates */}
+        <Section title="Templates" open={templatesOpen} onToggle={() => setTemplatesOpen((o) => !o)}>
+          {templates.length === 0 ? (
+            <li className="px-3 py-2 text-xs text-gray-500">No templates yet</li>
+          ) : (
+            (() => {
+              const byLevel = templates.reduce<Record<string, TemplateItem[]>>((acc, t) => {
+                const l = t.level || "other";
+                if (!acc[l]) acc[l] = [];
+                acc[l].push(t);
+                return acc;
+              }, {});
+              const levels = Object.keys(byLevel).sort();
+              return (
+                <>
+                  {levels.map((level) => (
+                    <li key={level} className="mt-1">
+                      <span className="px-3 text-[10px] font-medium text-gray-500 uppercase tracking-wider block">
+                        {level.replace(/-/g, " ")}
+                      </span>
+                      <ul className="mt-0.5 space-y-0.5">
+                        {byLevel[level].map((t) => (
+                          <li key={t.id}>
+                            <button
+                              type="button"
+                              disabled={templatesLoading}
+                              onClick={() => loadTemplate(t.id)}
+                              className="w-full flex items-center gap-2 px-3 py-1.5 rounded-lg text-left text-sm hover:bg-gray-800 text-gray-400 hover:text-gray-200 transition-colors disabled:opacity-50"
+                            >
+                              {(t.previewImageUrl && (t.previewImageUrl.startsWith("http://") || t.previewImageUrl.startsWith("https://"))) ? (
+                                <img
+                                  src={t.previewImageUrl}
+                                  alt=""
+                                  className="w-6 h-6 object-contain rounded shrink-0 bg-gray-800/50"
+                                  onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }}
+                                />
+                              ) : (
+                                <LayoutTemplate className="w-3.5 h-3.5 opacity-60 shrink-0" />
+                              )}
+                              <span className="flex-1 truncate">{t.label}</span>
+                            </button>
+                          </li>
+                        ))}
+                      </ul>
+                    </li>
+                  ))}
+                </>
+              );
+            })()
+          )}
+        </Section>
+
         {/* Favorites */}
         {favorites.length > 0 && (
           <Section title="Favorites" open={favoritesOpen} onToggle={() => setFavoritesOpen((o) => !o)}>

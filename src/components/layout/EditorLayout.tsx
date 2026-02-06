@@ -27,6 +27,7 @@ import {
   ListOrdered,
 } from "lucide-react";
 import { useMediaQuery } from "@/hooks/useMediaQuery";
+import { AuthStrip } from "@/components/auth/AuthStrip";
 
 export default function EditorLayout() {
   // ─── Project persistence ────────────────────────────────────────
@@ -205,6 +206,7 @@ export default function EditorLayout() {
                 <Keyboard className="w-4 h-4 text-gray-500 dark:text-gray-400" />
               </button>
               <div className="w-px h-5 bg-gray-200 dark:bg-gray-600 mx-1" />
+              <AuthStrip />
               <button
                 type="button"
                 className="px-4 py-1.5 rounded-lg bg-violet-600 hover:bg-violet-500 text-white text-sm font-medium"

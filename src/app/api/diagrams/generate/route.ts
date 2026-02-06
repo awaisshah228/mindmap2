@@ -4,6 +4,8 @@ import { openai } from "@ai-sdk/openai";
 import { z } from "zod";
 import { ICON_IDS_FOR_PROMPT } from "@/lib/icon-prompt-list";
 import { getOpenAiApiKey } from "@/lib/env";
+import { getAuthUserId } from "@/lib/auth";
+import { canUseCredits, deductCredits } from "@/lib/credits";
 
 const nodeSchema = z.object({
   id: z.string(),
@@ -44,6 +46,14 @@ const diagramSchema = z.object({
 
 export async function POST(req: NextRequest) {
   try {
+    const userId = await getAuthUserId();
+    if (userId) {
+      const can = await canUseCredits(userId);
+      if (!can.ok) {
+        return NextResponse.json({ error: can.reason ?? "Insufficient credits" }, { status: 402 });
+      }
+    }
+
     const { prompt } = await req.json();
     if (!prompt || typeof prompt !== "string") {
       return NextResponse.json(
@@ -60,7 +70,7 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const { object } = await generateObject({
+    const result = await generateObject({
       model: openai("gpt-4o-mini"),
       schema: diagramSchema,
       prompt: `Generate a diagram JSON for: "${prompt}"
@@ -82,7 +92,14 @@ Icon libs: lucide-react, react-icons. data.icon only from: ${ICON_IDS_FOR_PROMPT
 Architecture: rectangle for services/DBs, layer left→right or top→bottom, set data.icon. Flowchart: rectangle/diamond/circle, flow one direction. Unique ids. Only use data.icon from the list or omit.`,
     });
 
-    return NextResponse.json(object);
+    if (userId) {
+      const deducted = await deductCredits(userId);
+      if (!deducted.ok) {
+        return NextResponse.json({ error: deducted.reason ?? "Credit deduction failed" }, { status: 402 });
+      }
+    }
+
+    return NextResponse.json(result.object);
   } catch (err) {
     console.error("AI diagram generation error:", err);
     return NextResponse.json(

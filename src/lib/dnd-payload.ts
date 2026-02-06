@@ -17,7 +17,7 @@ export type DragNodePayload =
   | { type: "queue" }
   | { type: "actor" }
   | { type: "group" }
-  | { type: "icon"; data: { iconId?: string; emoji?: string; customIcon?: string } }
+  | { type: "icon"; data: { iconId?: string; emoji?: string; customIcon?: string; label?: string } }
   | { type: "image"; data: { imageUrl: string; label: string } };
 
 export function setDragPayload(dataTransfer: DataTransfer, payload: DragNodePayload): void {

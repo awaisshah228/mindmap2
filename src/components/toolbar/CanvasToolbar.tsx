@@ -182,6 +182,8 @@ export default function CanvasToolbar({ activeTool, onToolChange }: CanvasToolba
   const pendingShape = useCanvasStore((s) => s.pendingShape);
   const setPendingShape = useCanvasStore((s) => s.setPendingShape);
   const setPendingIconId = useCanvasStore((s) => (s as any).setPendingIconId);
+  const pendingIconLabel = useCanvasStore((s) => s.pendingIconLabel);
+  const setPendingIconLabel = useCanvasStore((s) => s.setPendingIconLabel);
   const setPendingImage = useCanvasStore((s) => s.setPendingImage);
   const pendingEdgeType = useCanvasStore((s) => s.pendingEdgeType);
   const setPendingEdgeType = useCanvasStore((s) => s.setPendingEdgeType);
@@ -559,6 +561,14 @@ export default function CanvasToolbar({ activeTool, onToolChange }: CanvasToolba
                     className="w-full pl-8 pr-3 py-2 text-sm rounded-lg border border-gray-200 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-200 focus:ring-2 focus:ring-violet-500 focus:border-transparent"
                   />
                 </div>
+                <label className="block text-[11px] font-medium text-gray-500 dark:text-gray-400 mt-2 mb-1">Label (optional)</label>
+                <input
+                  type="text"
+                  placeholder="e.g. API Gateway, Stripe"
+                  value={pendingIconLabel ?? ""}
+                  onChange={(e) => setPendingIconLabel(e.target.value.trim() || null)}
+                  className="w-full px-3 py-1.5 text-sm rounded-lg border border-gray-200 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-200 focus:ring-2 focus:ring-violet-500 focus:border-transparent"
+                />
               </div>
               <div className="flex-1 overflow-y-auto p-2 min-h-0">
                 {/* ── Upload custom icon / image ── */}
