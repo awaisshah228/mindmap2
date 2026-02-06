@@ -402,7 +402,7 @@ function LabeledConnectorEdge({
                 }
                 title="Start marker"
                 className={cn(
-                  "p-1.5 rounded hover:bg-gray-600",
+                  "p-1.5 rounded hover:bg-gray-600 flex items-center gap-0.5",
                   markerStart && "bg-violet-600"
                 )}
               >
@@ -410,6 +410,7 @@ function LabeledConnectorEdge({
                   <path d="M4 5 L0 0 L0 10 Z" stroke="currentColor" strokeWidth="1.5" fill="none" />
                   <path d="M4 5 L14 5" stroke="currentColor" strokeWidth="1.5" />
                 </svg>
+                <svg width="6" height="6" viewBox="0 0 6 6" fill="none" className="opacity-60"><path d="M1 2 L3 4 L5 2" stroke="currentColor" strokeWidth="1.2" /></svg>
               </button>
               <button
                 type="button"
@@ -418,7 +419,7 @@ function LabeledConnectorEdge({
                 }
                 title="End marker"
                 className={cn(
-                  "p-1.5 rounded hover:bg-gray-600",
+                  "p-1.5 rounded hover:bg-gray-600 flex items-center gap-0.5",
                   markerEnd && "bg-violet-600"
                 )}
               >
@@ -426,6 +427,7 @@ function LabeledConnectorEdge({
                   <path d="M0 5 L10 5" stroke="currentColor" strokeWidth="1.5" />
                   <path d="M10 5 L14 0 L14 10 Z" stroke="currentColor" strokeWidth="1.5" fill="none" />
                 </svg>
+                <svg width="6" height="6" viewBox="0 0 6 6" fill="none" className="opacity-60"><path d="M1 2 L3 4 L5 2" stroke="currentColor" strokeWidth="1.2" /></svg>
               </button>
               {activeMarkerSide && (
                 <div className="absolute top-full left-0 mt-1 z-[200] rounded-lg bg-gray-900 text-white shadow-lg border border-gray-700 px-2 py-2 min-w-[140px]">

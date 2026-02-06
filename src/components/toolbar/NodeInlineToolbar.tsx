@@ -25,6 +25,7 @@ import {
   Focus,
   Trash2,
   Replace,
+  ChevronDown,
 } from "lucide-react";
 import type { Node } from "@xyflow/react";
 import { cn } from "@/lib/utils";
@@ -267,10 +268,11 @@ export function NodeInlineToolbar({ nodeId, selected = false }: NodeInlineToolba
               <button
                 type="button"
                 title="Change shape"
-                className="p-1.5 rounded hover:bg-gray-600 transition-colors"
+                className="p-1.5 rounded hover:bg-gray-600 transition-colors flex items-center gap-0.5"
                 aria-label="Change shape"
               >
                 <Shapes className="w-3.5 h-3.5" />
+                <ChevronDown className="w-2.5 h-2.5 opacity-60" />
               </button>
             </Popover.Trigger>
             <Popover.Portal>
@@ -320,10 +322,11 @@ export function NodeInlineToolbar({ nodeId, selected = false }: NodeInlineToolba
               <button
                 type="button"
                 title="Add icon"
-                className="p-1.5 rounded hover:bg-gray-600 transition-colors"
+                className="p-1.5 rounded hover:bg-gray-600 transition-colors flex items-center gap-0.5"
                 aria-label="Add icon"
               >
                 <Smile className="w-3.5 h-3.5" />
+                <ChevronDown className="w-2.5 h-2.5 opacity-60" />
               </button>
             }
           />
@@ -335,12 +338,13 @@ export function NodeInlineToolbar({ nodeId, selected = false }: NodeInlineToolba
                 type="button"
                 title="Fill color"
                 className={cn(
-                  "p-1.5 rounded transition-colors flex items-center justify-center",
+                  "p-1.5 rounded transition-colors flex items-center gap-0.5",
                   colorOpen ? "bg-white text-gray-800 ring-2 ring-violet-400" : "hover:bg-gray-600"
                 )}
                 aria-label="Fill color"
               >
                 <span className="flex items-center justify-center w-5 h-5 rounded-full border-2 border-gray-500 bg-white" aria-hidden />
+                <ChevronDown className={cn("w-2.5 h-2.5 opacity-60", colorOpen && "text-gray-600")} />
               </button>
             </Popover.Trigger>
             <Popover.Portal>
@@ -386,11 +390,12 @@ export function NodeInlineToolbar({ nodeId, selected = false }: NodeInlineToolba
             <button
               type="button"
               title="Font size"
-              className="p-1.5 rounded hover:bg-gray-600 transition-colors flex items-center gap-1"
+              className="p-1.5 rounded hover:bg-gray-600 transition-colors flex items-center gap-0.5"
               aria-label="Font size"
             >
               <Type className="w-3.5 h-3.5" />
               <span className="text-[10px] opacity-80">{FONT_SIZES.find((f) => f.value === fontSize)?.label ?? "S"}</span>
+              <ChevronDown className="w-2.5 h-2.5 opacity-60" />
             </button>
           </Popover.Trigger>
           <Popover.Portal>
@@ -440,10 +445,11 @@ export function NodeInlineToolbar({ nodeId, selected = false }: NodeInlineToolba
               <button
                 type="button"
                 title="Change node type"
-                className="p-1.5 rounded hover:bg-gray-600 transition-colors"
+                className="p-1.5 rounded hover:bg-gray-600 transition-colors flex items-center gap-0.5"
                 aria-label="Change node type"
               >
                 <Replace className="w-3.5 h-3.5" />
+                <ChevronDown className="w-2.5 h-2.5 opacity-60" />
               </button>
             </Popover.Trigger>
             <Popover.Portal>

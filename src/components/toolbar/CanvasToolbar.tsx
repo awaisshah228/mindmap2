@@ -156,6 +156,16 @@ const ADD_NODE_OPTIONS: { icon: React.ReactNode; label: string; tool: Tool }[] =
   { icon: <Image className="w-4 h-4" />, label: "Image", tool: "image" },
 ];
 
+/** Tiny triangle in the bottom-right corner indicating a submenu. */
+function SubMenuIndicator() {
+  return (
+    <span
+      className="absolute bottom-0.5 right-0.5 border-[3px] border-transparent border-b-current border-r-current opacity-50"
+      aria-hidden
+    />
+  );
+}
+
 export default function CanvasToolbar({ activeTool, onToolChange }: CanvasToolbarProps) {
   const router = useRouter();
   const [selectOpen, setSelectOpen] = useState(false);
@@ -254,12 +264,13 @@ export default function CanvasToolbar({ activeTool, onToolChange }: CanvasToolba
                 <button
                   type="button"
                   className={cn(
-                    "w-10 h-10 flex items-center justify-center rounded-lg transition-colors",
+                    "relative w-10 h-10 flex items-center justify-center rounded-lg transition-colors",
                     isSelectGroup ? "bg-violet-100 text-violet-600 dark:bg-violet-900/40 dark:text-violet-400" : "hover:bg-gray-100 text-gray-600 dark:hover:bg-gray-700 dark:text-gray-400"
                   )}
                   aria-label="Select tools"
                 >
                   <MousePointer2 className="w-5 h-5" />
+                  <SubMenuIndicator />
                 </button>
               </Popover.Trigger>
             </Tooltip.Trigger>
@@ -301,12 +312,13 @@ export default function CanvasToolbar({ activeTool, onToolChange }: CanvasToolba
               <button
                 type="button"
                 className={cn(
-                  "w-10 h-10 flex items-center justify-center rounded-lg transition-colors",
+                  "relative w-10 h-10 flex items-center justify-center rounded-lg transition-colors",
                   (pendingShape || (activeTool === "rectangle" && !pendingShape)) ? "bg-violet-100 text-violet-600 dark:bg-violet-900/40 dark:text-violet-400" : "hover:bg-gray-100 text-gray-600 dark:hover:bg-gray-700 dark:text-gray-400"
                 )}
                 aria-label="Shapes menu"
               >
                 <Shapes className="w-5 h-5" />
+                <SubMenuIndicator />
               </button>
             </Popover.Trigger>
           </Tooltip.Trigger>
@@ -367,12 +379,13 @@ export default function CanvasToolbar({ activeTool, onToolChange }: CanvasToolba
               <button
                 type="button"
                 className={cn(
-                  "w-10 h-10 flex items-center justify-center rounded-lg transition-colors",
+                  "relative w-10 h-10 flex items-center justify-center rounded-lg transition-colors",
                   activeTool === "connector" ? "bg-violet-100 text-violet-600 dark:bg-violet-900/40 dark:text-violet-400" : "hover:bg-gray-100 text-gray-600 dark:hover:bg-gray-700 dark:text-gray-400"
                 )}
                 aria-label="Connector / edge"
               >
                 <GitBranch className="w-5 h-5" />
+                <SubMenuIndicator />
               </button>
             </Popover.Trigger>
           </Tooltip.Trigger>
@@ -420,12 +433,13 @@ export default function CanvasToolbar({ activeTool, onToolChange }: CanvasToolba
                 <button
                   type="button"
                   className={cn(
-                    "w-10 h-10 flex items-center justify-center rounded-lg transition-colors",
+                    "relative w-10 h-10 flex items-center justify-center rounded-lg transition-colors",
                     isAddNodeGroup ? "bg-violet-100 text-violet-600 dark:bg-violet-900/40 dark:text-violet-400" : "hover:bg-gray-100 text-gray-600 dark:hover:bg-gray-700 dark:text-gray-400"
                   )}
                   aria-label="Add nodes"
                 >
                   <Plus className="w-5 h-5" />
+                  <SubMenuIndicator />
                 </button>
               </Popover.Trigger>
             </Tooltip.Trigger>
@@ -467,12 +481,13 @@ export default function CanvasToolbar({ activeTool, onToolChange }: CanvasToolba
                 <button
                   type="button"
                   className={cn(
-                    "w-10 h-10 flex items-center justify-center rounded-lg transition-colors",
+                    "relative w-10 h-10 flex items-center justify-center rounded-lg transition-colors",
                     activeTool === "emoji" || activeTool === "image" ? "bg-violet-100 text-violet-600 dark:bg-violet-900/40 dark:text-violet-400" : "hover:bg-gray-100 text-gray-600 dark:hover:bg-gray-700 dark:text-gray-400"
                   )}
                   aria-label="Icons & images"
                 >
                   <Smile className="w-5 h-5" />
+                  <SubMenuIndicator />
                 </button>
               </Popover.Trigger>
             </Tooltip.Trigger>
@@ -557,12 +572,13 @@ export default function CanvasToolbar({ activeTool, onToolChange }: CanvasToolba
                 <button
                   type="button"
                   className={cn(
-                    "w-10 h-10 flex items-center justify-center rounded-lg transition-colors",
+                    "relative w-10 h-10 flex items-center justify-center rounded-lg transition-colors",
                     isDrawGroup ? "bg-violet-100 text-violet-600 dark:bg-violet-900/40 dark:text-violet-400" : "hover:bg-gray-100 text-gray-600 dark:hover:bg-gray-700 dark:text-gray-400"
                   )}
                   aria-label="Draw"
                 >
                   <Pencil className="w-5 h-5" />
+                  <SubMenuIndicator />
                 </button>
               </Popover.Trigger>
             </Tooltip.Trigger>
