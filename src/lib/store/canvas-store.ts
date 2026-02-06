@@ -2,6 +2,7 @@ import { type Node, type Edge } from "@xyflow/react";
 import { create } from "zustand";
 import type { LayoutDirection, LayoutAlgorithm } from "@/lib/layout-engine";
 import type { ShapeType } from "@/lib/shape-types";
+import { applyNodesAndEdgesInChunks } from "@/lib/chunked-nodes";
 
 export type MindMapLayoutOptions = {
   algorithm: LayoutAlgorithm;
@@ -436,28 +437,30 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
         set({
           projects: updated,
           activeProjectId: id,
-          nodes: target.nodes,
-          edges: target.edges,
+          nodes: [],
+          edges: [],
           nodeNotes: target.nodeNotes,
           nodeTasks: target.nodeTasks,
           nodeAttachments: target.nodeAttachments,
           undoStack: [],
           redoStack: [],
         });
+        applyNodesAndEdgesInChunks(get().setNodes, get().setEdges, target.nodes, target.edges);
       }
     } else {
       const target = s.projects.find((p) => p.id === id);
       if (target) {
         set({
           activeProjectId: id,
-          nodes: target.nodes,
-          edges: target.edges,
+          nodes: [],
+          edges: [],
           nodeNotes: target.nodeNotes,
           nodeTasks: target.nodeTasks,
           nodeAttachments: target.nodeAttachments,
           undoStack: [],
           redoStack: [],
         });
+        applyNodesAndEdgesInChunks(get().setNodes, get().setEdges, target.nodes, target.edges);
       }
     }
   },

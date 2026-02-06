@@ -1,11 +1,11 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { requireAuth } from "@/lib/auth";
 import { db } from "@/db";
 import { documents } from "@/db/schema";
 import { eq, desc } from "drizzle-orm";
 
-/** GET /api/projects – list current user's documents (projects). */
-export async function GET() {
+/** GET /api/projects – list current user's documents. Use ?metadataOnly=1 for light list (no nodes/edges). */
+export async function GET(request: NextRequest) {
   const userId = await requireAuth();
   if (userId instanceof NextResponse) return userId;
 
@@ -15,19 +15,36 @@ export async function GET() {
     .where(eq(documents.userId, userId))
     .orderBy(desc(documents.updatedAt));
 
-  const projects = list.map((doc) => ({
-    id: doc.id,
-    name: doc.name,
-    nodes: doc.nodes ?? [],
-    edges: doc.edges ?? [],
-    viewport: doc.viewport ?? undefined,
-    nodeNotes: doc.nodeNotes ?? {},
-    nodeTasks: doc.nodeTasks ?? {},
-    nodeAttachments: doc.nodeAttachments ?? {},
-    isFavorite: doc.isFavorite ?? false,
-    createdAt: doc.createdAt ? new Date(doc.createdAt).getTime() : Date.now(),
-    updatedAt: doc.updatedAt ? new Date(doc.updatedAt).getTime() : Date.now(),
-  }));
+  const metadataOnly = request.nextUrl.searchParams.get("metadataOnly") === "1";
+
+  const projects = list.map((doc) =>
+    metadataOnly
+      ? {
+          id: doc.id,
+          name: doc.name,
+          nodes: [] as unknown[],
+          edges: [] as unknown[],
+          nodeNotes: {} as Record<string, string>,
+          nodeTasks: {} as Record<string, unknown>,
+          nodeAttachments: {} as Record<string, unknown>,
+          isFavorite: doc.isFavorite ?? false,
+          createdAt: doc.createdAt ? new Date(doc.createdAt).getTime() : Date.now(),
+          updatedAt: doc.updatedAt ? new Date(doc.updatedAt).getTime() : Date.now(),
+        }
+      : {
+          id: doc.id,
+          name: doc.name,
+          nodes: doc.nodes ?? [],
+          edges: doc.edges ?? [],
+          viewport: doc.viewport ?? undefined,
+          nodeNotes: doc.nodeNotes ?? {},
+          nodeTasks: doc.nodeTasks ?? {},
+          nodeAttachments: doc.nodeAttachments ?? {},
+          isFavorite: doc.isFavorite ?? false,
+          createdAt: doc.createdAt ? new Date(doc.createdAt).getTime() : Date.now(),
+          updatedAt: doc.updatedAt ? new Date(doc.updatedAt).getTime() : Date.now(),
+        }
+  );
 
   return NextResponse.json(projects);
 }

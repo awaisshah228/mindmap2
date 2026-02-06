@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useRef, useEffect, useMemo } from "react";
+import type { Node, Edge } from "@xyflow/react";
 import {
   FilePlus,
   Star,
@@ -19,6 +20,7 @@ import * as Popover from "@radix-ui/react-popover";
 import { cn } from "@/lib/utils";
 import { useCanvasStore, type Project } from "@/lib/store/canvas-store";
 import { applyNodesAndEdgesInChunks } from "@/lib/chunked-nodes";
+import { parseStreamingDiagramBuffer } from "@/lib/ai/streaming-json-parser";
 
 interface AppSidebarProps {
   isOpen?: boolean;
@@ -67,16 +69,99 @@ export default function AppSidebar({ isOpen = true, onClose, isMobile }: AppSide
       .catch(() => setTemplates([]));
   }, []);
 
-  const loadTemplate = async (id: string) => {
+  const loadTemplate = async (template: TemplateItem) => {
+    const { id, label } = template;
     setTemplatesLoading(true);
     try {
-      const res = await fetch(`/api/presets/${id}`);
-      if (!res.ok) return;
-      const data = await res.json();
-      const nodes = Array.isArray(data.nodes) ? data.nodes : [];
-      const edges = Array.isArray(data.edges) ? data.edges : [];
-      if (!activeProjectId) createProject(data.label || "From template");
-      applyNodesAndEdgesInChunks(setNodes, setEdges, nodes, edges);
+      const res = await fetch(`/api/diagrams/preset/stream?preset=${encodeURIComponent(id)}`, {
+        credentials: "include",
+      });
+      if (!res.ok || !res.body) {
+        setTemplatesLoading(false);
+        return;
+      }
+      if (!activeProjectId) createProject(label || "From template");
+      const nodeIdMap = new Map<string, string>();
+      let streamBuffer = "";
+      let streamedNodeCount = 0;
+      let streamedEdgeCount = 0;
+      const processChunk = (delta: string) => {
+        streamBuffer += delta;
+        const res = parseStreamingDiagramBuffer(streamBuffer);
+        for (let i = streamedNodeCount; i < res.nodes.length; i++) {
+          const raw = res.nodes[i] as { id: string; type?: string; parentId?: string; [k: string]: unknown };
+          if (raw.type === "group") continue;
+          const nid = raw.id;
+          nodeIdMap.set(nid, nid);
+          const node: Node = {
+            id: nid,
+            type: (raw.type as string) || "rectangle",
+            position: (raw.position as { x: number; y: number }) ?? { x: 0, y: 0 },
+            data: (raw.data as Record<string, unknown>) ?? {},
+            ...(raw.parentId && { parentId: raw.parentId as string, extent: "parent" as const }),
+          };
+          if (streamedNodeCount === 0 && i === 0) {
+            setNodes([node]);
+            setEdges([]);
+          } else {
+            setNodes((prev) => (prev.some((n) => n.id === node.id) ? prev : [...prev, node]));
+          }
+        }
+        streamedNodeCount = res.nodes.length;
+        for (let i = streamedEdgeCount; i < res.edges.length; i++) {
+          const raw = res.edges[i] as { id?: string; source: string; target: string; [k: string]: unknown };
+          const source = nodeIdMap.get(raw.source) ?? raw.source;
+          const target = nodeIdMap.get(raw.target) ?? raw.target;
+          const edge: Edge = {
+            id: (raw.id as string) || `e-${source}-${target}-${i}`,
+            source,
+            target,
+            ...(raw.data != null && typeof raw.data === "object" && !Array.isArray(raw.data)
+              ? { data: raw.data as Record<string, unknown> }
+              : {}),
+          };
+          setEdges((prev) => (prev.some((e) => e.id === edge.id) ? prev : [...prev, edge]));
+        }
+        streamedEdgeCount = res.edges.length;
+      };
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let full = "";
+      while (true) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        if (value) {
+          const chunk = decoder.decode(value, { stream: true });
+          full += chunk;
+          processChunk(chunk);
+        }
+      }
+      try {
+        const data = JSON.parse(full.trim()) as { nodes?: unknown[]; edges?: unknown[] };
+        const nodes = Array.isArray(data.nodes) ? data.nodes : [];
+        const edges = Array.isArray(data.edges) ? data.edges : [];
+        const flatNodes = (nodes as { id: string; type?: string; position?: { x: number; y: number }; data?: Record<string, unknown>; parentId?: string }[])
+          .filter((n) => n.type !== "group")
+          .map((n) => ({
+            id: n.id,
+            type: (n.type as string) || "rectangle",
+            position: n.position ?? { x: 0, y: 0 },
+            data: n.data ?? {},
+            ...(n.parentId && { parentId: n.parentId, extent: "parent" as const }),
+          })) as Node[];
+        const nodeIds = new Set(flatNodes.map((n) => n.id));
+        const validEdges = (edges as { id?: string; source: string; target: string; data?: Record<string, unknown> }[])
+          .filter((e) => e && nodeIds.has(e.source) && nodeIds.has(e.target))
+          .map((e, i) => ({
+            id: e.id || `e-${e.source}-${e.target}-${i}`,
+            source: e.source,
+            target: e.target,
+            ...(e.data && { data: e.data }),
+          })) as Edge[];
+        applyNodesAndEdgesInChunks(setNodes, setEdges, flatNodes, validEdges);
+      } catch {
+        // keep streamed state if final parse fails
+      }
       onClose?.();
     } finally {
       setTemplatesLoading(false);
@@ -153,7 +238,7 @@ export default function AppSidebar({ isOpen = true, onClose, isMobile }: AppSide
                             <button
                               type="button"
                               disabled={templatesLoading}
-                              onClick={() => loadTemplate(t.id)}
+                              onClick={() => loadTemplate(t)}
                               className="w-full flex items-center gap-2 px-3 py-1.5 rounded-lg text-left text-sm hover:bg-gray-800 text-gray-400 hover:text-gray-200 transition-colors disabled:opacity-50"
                             >
                               {(t.previewImageUrl && (t.previewImageUrl.startsWith("http://") || t.previewImageUrl.startsWith("https://"))) ? (

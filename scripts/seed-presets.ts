@@ -145,6 +145,13 @@ const TEMPLATES: PresetDef[] = [
   { name: "template-stripe-payment", label: "Stripe payment flow", diagramType: "flowchart", level: "flows", prompt: "", isTemplate: true, sortOrder: 7 },
   { name: "template-simple-3-tier", label: "3-tier architecture", diagramType: "architecture", level: "high-level-system-design", prompt: "", isTemplate: true, sortOrder: 8 },
   { name: "template-ecommerce-sql", label: "eCommerce ER diagram", diagramType: "entity-relationship", level: "entity-relationship", prompt: "", isTemplate: true, sortOrder: 9 },
+  { name: "template-serverless-api", label: "Serverless API", diagramType: "architecture", level: "high-level-system-design", prompt: "", isTemplate: true, sortOrder: 10 },
+  { name: "template-api-request-sequence", label: "API request sequence", diagramType: "sequence", level: "sequence", prompt: "", isTemplate: true, sortOrder: 11 },
+  { name: "template-order-approval-bpmn", label: "Order approval (BPMN)", diagramType: "bpmn", level: "bpmn", prompt: "", isTemplate: true, sortOrder: 12 },
+  { name: "template-support-ticket-bpmn", label: "Support ticket (BPMN)", diagramType: "bpmn", level: "bpmn", prompt: "", isTemplate: true, sortOrder: 13 },
+  { name: "template-puppy-training", label: "Puppy training journey", diagramType: "flowchart", level: "high-level-flow", prompt: "", isTemplate: true, sortOrder: 14 },
+  { name: "template-twitter-data", label: "Twitter data pipeline", diagramType: "architecture", level: "high-level-system-design", prompt: "", isTemplate: true, sortOrder: 15 },
+  { name: "template-product-microservices", label: "Product microservices", diagramType: "architecture", level: "high-level-system-design", prompt: "", isTemplate: true, sortOrder: 16 },
 ];
 
 async function main() {

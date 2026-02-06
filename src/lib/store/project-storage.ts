@@ -11,6 +11,110 @@ import { useEffect, useRef } from "react";
 import { useAuth } from "@clerk/nextjs";
 import { useCanvasStore, DEFAULT_MIND_MAP_LAYOUT, type Project } from "./canvas-store";
 import type { Node, Edge } from "@xyflow/react";
+import { applyNodesAndEdgesInChunks } from "@/lib/chunked-nodes";
+import { parseStreamingDiagramBuffer } from "@/lib/ai/streaming-json-parser";
+
+/** Load one project's diagram from GET /api/projects/[id]?stream=1 and apply to canvas in chunks. */
+async function loadProjectContentFromStream(projectId: string): Promise<void> {
+  const res = await fetch(`/api/projects/${projectId}?stream=1`, { credentials: "include" });
+  if (!res.ok || !res.body) return;
+  const { setNodes, setEdges, setNodeNote, setNodeTasks } = useCanvasStore.getState();
+  const nodeIdMap = new Map<string, string>();
+  let streamBuffer = "";
+  let streamedNodeCount = 0;
+  let streamedEdgeCount = 0;
+  const processChunk = (delta: string) => {
+    streamBuffer += delta;
+    const parsed = parseStreamingDiagramBuffer(streamBuffer);
+    for (let i = streamedNodeCount; i < parsed.nodes.length; i++) {
+      const raw = parsed.nodes[i] as { id: string; type?: string; parentId?: string; [k: string]: unknown };
+      if (raw.type === "group") continue;
+      nodeIdMap.set(raw.id, raw.id);
+      const node: Node = {
+        id: raw.id,
+        type: (raw.type as string) || "rectangle",
+        position: (raw.position as { x: number; y: number }) ?? { x: 0, y: 0 },
+        data: (raw.data as Record<string, unknown>) ?? {},
+        ...(raw.parentId && { parentId: raw.parentId as string, extent: "parent" as const }),
+      };
+      if (streamedNodeCount === 0 && i === 0) {
+        setNodes([node]);
+        setEdges([]);
+      } else {
+        setNodes((prev) => (prev.some((n) => n.id === node.id) ? prev : [...prev, node]));
+      }
+    }
+    streamedNodeCount = parsed.nodes.length;
+    for (let i = streamedEdgeCount; i < parsed.edges.length; i++) {
+      const raw = parsed.edges[i] as { id?: string; source: string; target: string; [k: string]: unknown };
+      const source = nodeIdMap.get(raw.source) ?? raw.source;
+      const target = nodeIdMap.get(raw.target) ?? raw.target;
+      const edge: Edge = {
+        id: (raw.id as string) || `e-${source}-${target}-${i}`,
+        source,
+        target,
+        ...(raw.data != null && typeof raw.data === "object" && !Array.isArray(raw.data)
+          ? { data: raw.data as Record<string, unknown> }
+          : {}),
+      };
+      setEdges((prev) => (prev.some((e) => e.id === edge.id) ? prev : [...prev, edge]));
+    }
+    streamedEdgeCount = parsed.edges.length;
+  };
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let full = "";
+  while (true) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    if (value) {
+      const chunk = decoder.decode(value, { stream: true });
+      full += chunk;
+      processChunk(chunk);
+    }
+  }
+  try {
+    const data = JSON.parse(full.trim()) as {
+      nodes?: unknown[];
+      edges?: unknown[];
+      nodeNotes?: Record<string, string>;
+      nodeTasks?: Record<string, unknown>;
+      nodeAttachments?: Record<string, unknown>;
+    };
+    const nodes = Array.isArray(data.nodes) ? data.nodes : [];
+    const edges = Array.isArray(data.edges) ? data.edges : [];
+    const flatNodes = (nodes as { id: string; type?: string; position?: { x: number; y: number }; data?: Record<string, unknown>; parentId?: string }[])
+      .filter((n) => n.type !== "group")
+      .map((n) => ({
+        id: n.id,
+        type: (n.type as string) || "rectangle",
+        position: n.position ?? { x: 0, y: 0 },
+        data: n.data ?? {},
+        ...(n.parentId && { parentId: n.parentId, extent: "parent" as const }),
+      })) as Node[];
+    const nodeIds = new Set(flatNodes.map((n) => n.id));
+    const validEdges = (edges as { id?: string; source: string; target: string; data?: Record<string, unknown> }[])
+      .filter((e) => e && nodeIds.has(e.source) && nodeIds.has(e.target))
+      .map((e, i) => ({
+        id: e.id || `e-${e.source}-${e.target}-${i}`,
+        source: e.source,
+        target: e.target,
+        ...(e.data && { data: e.data }),
+      })) as Edge[];
+    applyNodesAndEdgesInChunks(setNodes, setEdges, flatNodes, validEdges);
+    if (data.nodeNotes && typeof data.nodeNotes === "object") {
+      Object.entries(data.nodeNotes).forEach(([id, note]) => setNodeNote(id, note));
+    }
+    if (data.nodeTasks && typeof data.nodeTasks === "object") {
+      Object.entries(data.nodeTasks).forEach(([id, tasks]) => setNodeTasks(id, tasks as Project["nodeTasks"][string]));
+    }
+    if (data.nodeAttachments && typeof data.nodeAttachments === "object") {
+      useCanvasStore.setState({ nodeAttachments: data.nodeAttachments as Project["nodeAttachments"] });
+    }
+  } catch {
+    // keep streamed state if final parse fails
+  }
+}
 
 const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 function isApiProjectId(id: string) {
@@ -168,11 +272,11 @@ export function useProjectPersistence() {
     }
 
     if (sessionUser) {
-      // Authenticated: fetch projects from API
-      fetch("/api/projects", { credentials: "include" })
+      // Authenticated: fetch light list then stream active project for efficient loading
+      fetch("/api/projects?metadataOnly=1", { credentials: "include" })
         .then((res) => (res.ok ? res.json() : []))
         .then((projects: Project[]) => {
-          let list = Array.isArray(projects) ? projects : [];
+          const list = Array.isArray(projects) ? projects : [];
           if (list.length === 0) {
             const now = Date.now();
             const template = getDefaultMindMapTemplate();
@@ -212,25 +316,29 @@ export function useProjectPersistence() {
                 useCanvasStore.setState({
                   projects: [p],
                   activeProjectId: p.id,
-                  nodes: p.nodes,
-                  edges: p.edges,
+                  nodes: [],
+                  edges: [],
                   nodeNotes: p.nodeNotes,
                   nodeTasks: p.nodeTasks,
                   nodeAttachments: p.nodeAttachments,
                   persistenceSource: "cloud",
                 });
+                const { setNodes, setEdges } = useCanvasStore.getState();
+                applyNodesAndEdgesInChunks(setNodes, setEdges, p.nodes, p.edges);
               })
               .catch(() => {
                 useCanvasStore.setState({
                   projects: [newProj],
                   activeProjectId: newProj.id,
-                  nodes: newProj.nodes,
-                  edges: newProj.edges,
+                  nodes: [],
+                  edges: [],
                   nodeNotes: newProj.nodeNotes,
                   nodeTasks: newProj.nodeTasks,
                   nodeAttachments: newProj.nodeAttachments,
                   persistenceSource: "local",
                 });
+                const { setNodes, setEdges } = useCanvasStore.getState();
+                applyNodesAndEdgesInChunks(setNodes, setEdges, newProj.nodes, newProj.edges);
               });
             return;
           }
@@ -239,8 +347,8 @@ export function useProjectPersistence() {
           useCanvasStore.setState({
             projects: list,
             activeProjectId: active.id,
-            nodes: active.nodes,
-            edges: active.edges,
+            nodes: [],
+            edges: [],
             nodeNotes: active.nodeNotes,
             nodeTasks: active.nodeTasks,
             nodeAttachments: active.nodeAttachments,
@@ -275,13 +383,15 @@ export function useProjectPersistence() {
           useCanvasStore.setState({
             projects,
             activeProjectId: active.id,
-            nodes: active.nodes,
-            edges: active.edges,
+            nodes: [],
+            edges: [],
             nodeNotes: active.nodeNotes,
             nodeTasks: active.nodeTasks,
             nodeAttachments: active.nodeAttachments,
             persistenceSource: "local",
           });
+          const { setNodes, setEdges } = useCanvasStore.getState();
+          applyNodesAndEdgesInChunks(setNodes, setEdges, active.nodes, active.edges);
         });
       return;
     }
@@ -313,20 +423,31 @@ export function useProjectPersistence() {
     useCanvasStore.setState({
       projects,
       activeProjectId: active.id,
-      nodes: active.nodes,
-      edges: active.edges,
+      nodes: [],
+      edges: [],
       nodeNotes: active.nodeNotes,
       nodeTasks: active.nodeTasks,
       nodeAttachments: active.nodeAttachments,
       persistenceSource: "local",
     });
+    const { setNodes, setEdges } = useCanvasStore.getState();
+    applyNodesAndEdgesInChunks(setNodes, setEdges, active.nodes, active.edges);
   }, [sessionStatus, userId]);
+
+  // When on cloud and active project has no diagram data (metadata-only list), stream load it and apply in chunks.
+  const persistenceSource = useCanvasStore((s) => s.persistenceSource);
+  const activeProjectId = useCanvasStore((s) => s.activeProjectId);
+  const projects = useCanvasStore((s) => s.projects);
+  useEffect(() => {
+    if (persistenceSource !== "cloud" || !activeProjectId) return;
+    const active = projects.find((p) => p.id === activeProjectId);
+    if (!active || (Array.isArray(active.nodes) && active.nodes.length > 0)) return;
+    loadProjectContentFromStream(activeProjectId);
+  }, [persistenceSource, activeProjectId, projects]);
 
   // Auto-save canvas data on change (debounced).
   const saveTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
   const initialSave = useRef(true);
-  const persistenceSource = useCanvasStore((s) => s.persistenceSource);
-  const activeProjectId = useCanvasStore((s) => s.activeProjectId);
   const nodes = useCanvasStore((s) => s.nodes);
   const edges = useCanvasStore((s) => s.edges);
   const nodeNotes = useCanvasStore((s) => s.nodeNotes);

@@ -1,4 +1,4 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { requireAuth } from "@/lib/auth";
 import { db } from "@/db";
 import { documents } from "@/db/schema";
@@ -6,8 +6,11 @@ import { eq, and } from "drizzle-orm";
 
 type Params = { params: Promise<{ id: string }> };
 
-/** GET /api/projects/[id] – get one document. */
-export async function GET(_request: Request, { params }: Params) {
+/** Chunk size for streaming project JSON – large enough to avoid tiny backend writes. */
+const STREAM_CHUNK_SIZE = 8192;
+
+/** GET /api/projects/[id] – get one document. Use ?stream=1 to stream JSON for large projects. */
+export async function GET(request: NextRequest, { params }: Params) {
   const userId = await requireAuth();
   if (userId instanceof NextResponse) return userId;
   const { id } = await params;
@@ -20,7 +23,7 @@ export async function GET(_request: Request, { params }: Params) {
     return NextResponse.json({ error: "Not found" }, { status: 404 });
   }
 
-  return NextResponse.json({
+  const payload = {
     id: doc.id,
     name: doc.name,
     nodes: doc.nodes ?? [],
@@ -32,6 +35,29 @@ export async function GET(_request: Request, { params }: Params) {
     isFavorite: doc.isFavorite ?? false,
     createdAt: doc.createdAt ? new Date(doc.createdAt).getTime() : Date.now(),
     updatedAt: doc.updatedAt ? new Date(doc.updatedAt).getTime() : Date.now(),
+  };
+
+  const stream = request.nextUrl.searchParams.get("stream") === "1";
+  if (!stream) {
+    return NextResponse.json(payload);
+  }
+
+  const jsonStr = JSON.stringify(payload);
+  const encoder = new TextEncoder();
+  const readable = new ReadableStream<Uint8Array>({
+    start(controller) {
+      for (let i = 0; i < jsonStr.length; i += STREAM_CHUNK_SIZE) {
+        controller.enqueue(encoder.encode(jsonStr.slice(i, i + STREAM_CHUNK_SIZE)));
+      }
+      controller.close();
+    },
+  });
+
+  return new Response(readable, {
+    headers: {
+      "Content-Type": "application/json",
+      "Cache-Control": "no-store",
+    },
   });
 }
 

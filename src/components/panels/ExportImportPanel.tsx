@@ -4,6 +4,7 @@ import { useCallback, useRef } from "react";
 import { Download, Upload, X, FileJson, FileText, FileCode } from "lucide-react";
 import { useReactFlow } from "@xyflow/react";
 import { useCanvasStore } from "@/lib/store/canvas-store";
+import { applyNodesAndEdgesInChunks } from "@/lib/chunked-nodes";
 
 interface ExportImportPanelProps {
   open: boolean;
@@ -128,12 +129,9 @@ export function ExportImportPanel({ open, onClose }: ExportImportPanelProps) {
       reader.onload = () => {
         try {
           const data = JSON.parse(reader.result as string);
-          if (data.nodes && Array.isArray(data.nodes)) {
-            setNodes(data.nodes);
-          }
-          if (data.edges && Array.isArray(data.edges)) {
-            setEdges(data.edges);
-          }
+          const nodes = Array.isArray(data.nodes) ? data.nodes : [];
+          const edges = Array.isArray(data.edges) ? data.edges : [];
+          applyNodesAndEdgesInChunks(setNodes, setEdges, nodes, edges);
           if (data.nodeNotes) {
             Object.entries(data.nodeNotes).forEach(([id, note]) => {
               useCanvasStore.getState().setNodeNote(id, note as string);
