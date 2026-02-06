@@ -133,6 +133,10 @@ interface CanvasState {
 
   /** When true, the canvas should call fitView on the next render (e.g. after AI adds a diagram). */
   pendingFitView: boolean;
+  /** When set, fitView will focus on these node IDs only (e.g. newly added AI nodes). */
+  pendingFitViewNodeIds: string[] | null;
+  /** When true, run auto layout once after nodes are rendered (e.g. after AI adds a diagram), same as first-time canvas open. */
+  pendingApplyLayout: boolean;
 
   /** Last AI prompt used to generate/update the diagram (for refinement). */
   lastAIPrompt: string | null;
@@ -266,6 +270,8 @@ interface CanvasState {
   setPendingImage: (url: string | null, label?: string | null) => void;
   setPendingEdgeType: (type: PendingEdgeType) => void;
   setPendingFitView: (value: boolean) => void;
+  setPendingFitViewNodeIds: (ids: string[] | null) => void;
+  setPendingApplyLayout: (value: boolean) => void;
   setLastAIPrompt: (prompt: string | null) => void;
   setLastAIDiagram: (diagram: { nodes: Node[]; edges: Edge[] } | null) => void;
   addNode: (node: Node) => void;
@@ -298,6 +304,8 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
   undoStack: [],
   redoStack: [],
   pendingFitView: false,
+  pendingFitViewNodeIds: null,
+  pendingApplyLayout: false,
   lastAIPrompt: null,
   lastAIDiagram: null,
   editingNodeId: null,
@@ -572,6 +580,8 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
     set({ pendingImageUrl: url ?? null, pendingImageLabel: label ?? null }),
   setPendingEdgeType: (type) => set({ pendingEdgeType: type }),
   setPendingFitView: (value) => set({ pendingFitView: value }),
+  setPendingFitViewNodeIds: (ids) => set({ pendingFitViewNodeIds: ids }),
+  setPendingApplyLayout: (value: boolean) => set({ pendingApplyLayout: value }),
   setLastAIPrompt: (prompt) => set({ lastAIPrompt: prompt }),
   setLastAIDiagram: (diagram) => set({ lastAIDiagram: diagram }),
 

@@ -5,16 +5,7 @@ export type LayoutDirection = "TB" | "LR" | "BT" | "RL";
 
 export type LayoutSpacing = [number, number];
 
-export type LayoutAlgorithm =
-  | "elk-layered"
-  | "elk-mrtree"
-  | "elk-box"
-  | "elk-force"
-  | "elk-radial"
-  | "elk-stress"
-  | "dagre"
-  | "d3-tree"
-  | "d3-cluster";
+export type LayoutAlgorithm = "dagre" | "d3-tree" | "d3-cluster";
 
 const DEFAULT_NODE_WIDTH = 150;
 const DEFAULT_NODE_HEIGHT = 50;
@@ -30,6 +21,7 @@ const QUEUE_NODE_WIDTH = 140;
 const QUEUE_NODE_HEIGHT = 64;
 const ACTOR_NODE_WIDTH = 100;
 const ACTOR_NODE_HEIGHT = 100;
+const ICON_NODE_SIZE = 64;
 const ROOT_LEFT_PADDING = 80;
 
 const GROUP_NODE_DEFAULT_WIDTH = 280;
@@ -43,6 +35,7 @@ function getNodeSize(node: Node) {
   const isQueue = node.type === "queue";
   const isActor = node.type === "actor";
   const isGroup = node.type === "group";
+  const isIcon = node.type === "icon";
   let defW = DEFAULT_NODE_WIDTH;
   let defH = DEFAULT_NODE_HEIGHT;
   if (isMindMap) {
@@ -63,6 +56,9 @@ function getNodeSize(node: Node) {
   } else if (isActor) {
     defW = ACTOR_NODE_WIDTH;
     defH = ACTOR_NODE_HEIGHT;
+  } else if (isIcon) {
+    defW = ICON_NODE_SIZE;
+    defH = ICON_NODE_SIZE;
   } else if (isGroup) {
     defW = GROUP_NODE_DEFAULT_WIDTH;
     defH = GROUP_NODE_DEFAULT_HEIGHT;
@@ -107,6 +103,21 @@ export function getHandleIds(direction: LayoutDirection): { target: string; sour
   }
 }
 
+/**
+ * ELK layout: same pattern as React Flow's official example.
+ * - Graph: { id: 'root', layoutOptions, children: [{ id, width, height, ... }], edges: [{ id, sources: [id], targets: [id] }] }
+ * - After layout: each node has x, y → we set position: { x: node.x, y: node.y }
+ * @see https://reactflow.dev/examples/layout/elkjs
+ * @see https://www.eclipse.org/elk/reference/algorithms.html
+ * @see https://www.eclipse.org/elk/reference/options.html
+ */
+type ElkNode = { id: string; width: number; height: number; x?: number; y?: number; children?: ElkNode[]; edges?: { id: string; sources: string[]; targets: string[] }[] };
+
+function getRootId(nodeId: string, nodes: Node[]): string {
+  const node = nodes.find((n) => n.id === nodeId);
+  return node?.parentId ? getRootId(node.parentId, nodes) : nodeId;
+}
+
 async function layoutWithElk(
   nodes: Node[],
   edges: Edge[],
@@ -118,46 +129,258 @@ async function layoutWithElk(
   const elk = new ELK();
   const { target: targetPos, source: sourcePos } = getHandlePositions(direction);
 
-  // Subflows: only layout root nodes (no parentId) so group children stay inside their parent.
   const rootNodes = nodes.filter((n) => !n.parentId);
   const rootIds = new Set(rootNodes.map((n) => n.id));
-  const rootEdges = edges.filter((e) => rootIds.has(e.source) && rootIds.has(e.target));
+  const nodeById = new Map(nodes.map((n) => [n.id, n]));
+
+  const hasGroups = rootNodes.some((n) => n.type === "group");
+  const layoutOptions = {
+    "elk.algorithm": algorithm,
+    "elk.direction": directionToElk(direction),
+    "elk.spacing.nodeNode": String(spacing[0]),
+    "elk.layered.spacing.nodeNodeBetweenLayers": String(spacing[1]),
+  };
+
+  function buildElkNode(node: Node): ElkNode {
+    const { width, height } = getNodeSize(node);
+    if (node.type === "group") {
+      const children = nodes.filter((n) => n.parentId === node.id);
+      const childIds = new Set(children.map((c) => c.id));
+      const groupEdges = edges.filter((e) => childIds.has(e.source) && childIds.has(e.target));
+      const childrenElk = children.map((c) => {
+        const { width: cw, height: ch } = getNodeSize(c);
+        return { id: c.id, width: cw, height: ch };
+      });
+      const padding = GROUP_PADDING;
+      const contentW =
+        childrenElk.length > 0
+          ? Math.max(...childrenElk.map((c) => c.width)) + (childrenElk.length > 1 ? spacing[0] * (childrenElk.length - 1) : 0)
+          : width;
+      const contentH =
+        childrenElk.length > 0
+          ? childrenElk.reduce((sum, c) => sum + c.height, 0) + (childrenElk.length > 1 ? spacing[1] * (childrenElk.length - 1) : 0)
+          : height;
+      const groupW = Math.max(width, contentW + 2 * padding, GROUP_NODE_DEFAULT_WIDTH);
+      const groupH = Math.max(height, contentH + 2 * padding, GROUP_NODE_DEFAULT_HEIGHT);
+      return {
+        id: node.id,
+        width: groupW,
+        height: groupH,
+        children: childrenElk,
+        edges: groupEdges.map((e, i) => ({
+          id: e.id || `e${i}`,
+          sources: [e.source],
+          targets: [e.target],
+        })),
+      };
+    }
+    return { id: node.id, width, height };
+  }
+
+  const rootEdgesForElk = hasGroups
+    ? edges
+        .map((e) => ({
+          id: e.id,
+          sources: [getRootId(e.source, nodes)],
+          targets: [getRootId(e.target, nodes)],
+        }))
+        .filter((e) => e.sources[0] !== e.targets[0])
+    : edges.filter((e) => rootIds.has(e.source) && rootIds.has(e.target));
 
   const graph = {
     id: "root",
-    layoutOptions: {
-      "elk.algorithm": algorithm,
-      "elk.direction": directionToElk(direction),
-      "elk.spacing.nodeNode": String(spacing[0]),
-      "elk.layered.spacing.nodeNodeBetweenLayers": String(spacing[1]),
-    },
-    children: rootNodes.map((node) => {
-      const { width, height } = getNodeSize(node);
-      return { id: node.id, width, height };
-    }),
-    edges: rootEdges.map((e, i) => ({
-      id: e.id || `e${i}`,
-      sources: [e.source],
-      targets: [e.target],
+    layoutOptions: layoutOptions,
+    children: rootNodes.map((node) => buildElkNode(node)),
+    edges: rootEdgesForElk.map((e: { id?: string; source?: string; target?: string; sources?: string[]; targets?: string[] }, i) => ({
+      id: e.id || `root-e${i}`,
+      sources: [e.sources?.[0] ?? e.source ?? ""],
+      targets: [e.targets?.[0] ?? e.target ?? ""],
     })),
   };
 
-  const layoutedGraph = await elk.layout(graph);
-  const layoutedRootNodes: Node[] = (layoutedGraph.children ?? []).map((child) => {
-    const node = nodes.find((n) => n.id === child.id)!;
-    const elkNode = child as { x?: number; y?: number };
-    return {
+  const layoutedGraph = (await elk.layout(graph)) as { children?: ElkNode[] };
+  const byId = new Map<string, Node>();
+
+  function applyElkLayout(elkNode: ElkNode): void {
+    const node = nodeById.get(elkNode.id);
+    if (!node) return;
+    const x = elkNode.x ?? 0;
+    const y = elkNode.y ?? 0;
+    byId.set(elkNode.id, {
       ...node,
       targetPosition: targetPos,
       sourcePosition: sourcePos,
-      position: { x: elkNode.x ?? 0, y: elkNode.y ?? 0 },
-    };
-  });
+      position: { x, y },
+    });
+    if (elkNode.children?.length) {
+      for (const ch of elkNode.children) {
+        applyElkLayout(ch);
+      }
+    }
+  }
+
+  for (const child of layoutedGraph.children ?? []) {
+    applyElkLayout(child);
+  }
+
+  const layoutedRootNodes = (layoutedGraph.children ?? [])
+    .map((c) => byId.get(c.id))
+    .filter((n): n is Node => n != null);
   const shiftedRoots = shiftLayoutLeft(layoutedRootNodes, ROOT_LEFT_PADDING);
-  const byId = new Map(shiftedRoots.map((n) => [n.id, n]));
-  const allNodes = nodes.map((n) => (byId.has(n.id) ? byId.get(n.id)! : { ...n, targetPosition: targetPos, sourcePosition: sourcePos }));
+  const shiftedById = new Map(shiftedRoots.map((n) => [n.id, n]));
+
+  const allNodes: Node[] = nodes.map((n) => {
+    if (shiftedById.has(n.id)) return shiftedById.get(n.id)!;
+    if (byId.has(n.id)) return byId.get(n.id)!;
+    return { ...n, targetPosition: targetPos, sourcePosition: sourcePos };
+  });
+
   const normalizedEdges = normalizeMindMapEdgeHandles(allNodes, edges, direction);
   return { nodes: allNodes, edges: normalizedEdges };
+}
+
+const GROUP_PADDING = 64;
+const GROUP_HEADER_INSET = 44;
+
+export type GroupMetadata = { id: string; label: string; nodeIds: string[] };
+
+/**
+ * Apply grouping at render time: create group nodes from metadata and set parentId
+ * + extent: "parent" on every child so that dragging the group moves all its children.
+ * All input nodes are flat; output has group nodes and children with positions
+ * relative to the group (like selection grouping). Node order: each group appears
+ * before its children so React Flow hierarchy works correctly.
+ */
+export function applyGroupingFromMetadata(
+  flatNodes: Node[],
+  groups: GroupMetadata[]
+): Node[] {
+  if (!groups?.length) return flatNodes;
+  const nodeById = new Map(flatNodes.map((n) => [n.id, { ...n }]));
+  const result = flatNodes.map((n) => ({ ...n }));
+
+  for (const g of groups) {
+    const nodeIds = (g.nodeIds || []).filter((id) => nodeById.has(id));
+    if (nodeIds.length === 0) continue;
+
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    for (const id of nodeIds) {
+      const node = nodeById.get(id)!;
+      const { width, height } = getNodeSize(node);
+      const x = node.position?.x ?? 0;
+      const y = node.position?.y ?? 0;
+      if (x < minX) minX = x;
+      if (y < minY) minY = y;
+      if (x + width > maxX) maxX = x + width;
+      if (y + height > maxY) maxY = y + height;
+    }
+
+    const groupW = maxX - minX + 2 * GROUP_PADDING;
+    const groupH = maxY - minY + 2 * GROUP_PADDING + GROUP_HEADER_INSET;
+    const groupX = minX - GROUP_PADDING;
+    const groupY = minY - GROUP_HEADER_INSET - GROUP_PADDING;
+
+    const groupNode: Node = {
+      id: g.id,
+      type: "group",
+      position: { x: groupX, y: groupY },
+      data: { label: g.label ?? g.id },
+      style: { width: groupW, height: groupH },
+    };
+    result.push(groupNode);
+    nodeById.set(g.id, groupNode);
+
+    for (let i = 0; i < result.length; i++) {
+      if (!nodeIds.includes(result[i].id)) continue;
+      const n = result[i];
+      const x = n.position?.x ?? 0;
+      const y = n.position?.y ?? 0;
+      result[i] = {
+        ...n,
+        parentId: g.id,
+        extent: "parent" as const,
+        position: {
+          x: x - groupX,
+          y: y - groupY,
+        },
+      };
+    }
+  }
+
+  // Reorder so each group node appears before its children. React Flow expects
+  // parent before children so that dragging the group moves all children.
+  const topLevel = result.filter((n) => n.type !== "group" && !n.parentId);
+  const groupNodes = result.filter((n) => n.type === "group");
+  const childNodes = result.filter((n) => n.parentId != null);
+  const ordered: Node[] = [...topLevel];
+  for (const g of groups) {
+    const groupNode = groupNodes.find((n) => n.id === g.id);
+    if (!groupNode) continue;
+    ordered.push(groupNode);
+    const children = childNodes.filter((n) => n.parentId === g.id);
+    ordered.push(...children);
+  }
+  return ordered;
+}
+
+/**
+ * Fit each group's style {width, height} to its children's bounding box + padding
+ * (like React Flow Selection Grouping). Children are aligned and positioned below
+ * the group header.
+ * @see https://reactflow.dev/examples/grouping/selection-grouping
+ */
+export function fitGroupBoundsAndCenterChildren(nodes: Node[]): Node[] {
+  const groupIds = new Set(nodes.filter((n) => n.type === "group").map((n) => n.id));
+
+  const result = nodes.map((node) => ({ ...node }));
+
+  for (const groupId of groupIds) {
+    const children = result.filter((n) => n.parentId === groupId);
+    if (children.length === 0) continue;
+
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    for (const child of children) {
+      const { width, height } = getNodeSize(child);
+      const x = child.position?.x ?? 0;
+      const y = child.position?.y ?? 0;
+      if (x < minX) minX = x;
+      if (y < minY) minY = y;
+      if (x + width > maxX) maxX = x + width;
+      if (y + height > maxY) maxY = y + height;
+    }
+
+    const contentW = maxX - minX;
+    const contentH = maxY - minY;
+    const groupW = contentW + 2 * GROUP_PADDING;
+    const groupH = contentH + 2 * GROUP_PADDING + GROUP_HEADER_INSET;
+
+    const centerX = (minX + maxX) / 2;
+    const offsetX = groupW / 2 - centerX;
+    const offsetY = GROUP_HEADER_INSET + GROUP_PADDING - minY;
+
+    for (let i = 0; i < result.length; i++) {
+      if (result[i].id === groupId) {
+        result[i] = {
+          ...result[i],
+          style: { ...result[i].style, width: groupW, height: groupH },
+        };
+        break;
+      }
+    }
+    for (let i = 0; i < result.length; i++) {
+      if (result[i].parentId === groupId && result[i].position) {
+        result[i] = {
+          ...result[i],
+          position: {
+            x: result[i].position!.x + offsetX,
+            y: result[i].position!.y + offsetY,
+          },
+        };
+      }
+    }
+  }
+
+  return result;
 }
 
 /** Shift all nodes left so the leftmost node is at padding (root pulled back on x-axis). */

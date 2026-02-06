@@ -141,3 +141,12 @@ body {
   background: #c4b5fd !important;
   border-color: #7c3aed !important;
 }
+
+/* Single border for group nodes: our GroupNode draws its own border; hide React Flow’s default wrapper border */
+.react-flow__node-group {
+  border: none !important;
+  outline: none !important;
+  box-shadow: none !important;
+  background: transparent !important;
+  padding: 0 !important;
+}

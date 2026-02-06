@@ -27,7 +27,7 @@ import { getLayoutedElements, type LayoutDirection } from "@/lib/layout-engine";
 import { resolveCollisions } from "@/lib/resolve-collisions";
 import { getHiddenNodeIds } from "@/lib/mindmap-utils";
 import "@xyflow/react/dist/style.css";
-import { useCanvasStore, DEFAULT_MIND_MAP_LAYOUT } from "@/lib/store/canvas-store";
+import { useCanvasStore } from "@/lib/store/canvas-store";
 
 const SNAP_THRESHOLD = 8;
 const DEFAULT_NODE_WIDTH = 150;
@@ -84,101 +84,9 @@ const nodeTypes = {
   group: GroupNode,
 };
 
+// Default mind map template is now created in project-storage.ts only
+// for brand-new projects on first app load.
 const MIND_MAP_NODE_WIDTH = 170;
-const INITIAL_CANVAS_PADDING = 100;
-function getDefaultMindMapPositions(): Node[] {
-  const { spacingX, spacingY } = DEFAULT_MIND_MAP_LAYOUT;
-  const pad = INITIAL_CANVAS_PADDING;
-  const layer1X = pad + MIND_MAP_NODE_WIDTH + spacingX;
-  const layer2X = layer1X + MIND_MAP_NODE_WIDTH + spacingX;
-  return [
-    {
-      id: "mind-root",
-      type: "mindMap",
-      position: { x: pad, y: pad },
-      data: { label: "Mind Map Overview" },
-    },
-    {
-      id: "mind-goals",
-      type: "mindMap",
-      position: { x: layer1X, y: pad - spacingY },
-      data: { label: "Goals" },
-    },
-    {
-      id: "mind-tasks",
-      type: "mindMap",
-      position: { x: layer1X, y: pad },
-      data: { label: "Key Tasks" },
-    },
-    {
-      id: "mind-stakeholders",
-      type: "mindMap",
-      position: { x: layer1X, y: pad + spacingY },
-      data: { label: "Stakeholders" },
-    },
-    {
-      id: "mind-task-ideas",
-      type: "mindMap",
-      position: { x: layer2X, y: pad - spacingY },
-      data: { label: "Milestones" },
-    },
-    {
-      id: "mind-task-next",
-      type: "mindMap",
-      position: { x: layer2X, y: pad + spacingY },
-      data: { label: "Next Actions" },
-    },
-  ];
-}
-const defaultNodes: Node[] = getDefaultMindMapPositions();
-
-const defaultEdges: Edge[] = [
-  {
-    id: "edge-root-goals",
-    source: "mind-root",
-    target: "mind-goals",
-    sourceHandle: "right",
-    targetHandle: "left",
-    type: "labeledConnector",
-    data: { connectorType: "default" },
-  },
-  {
-    id: "edge-root-tasks",
-    source: "mind-root",
-    target: "mind-tasks",
-    sourceHandle: "right",
-    targetHandle: "left",
-    type: "labeledConnector",
-    data: { connectorType: "default" },
-  },
-  {
-    id: "edge-root-stakeholders",
-    source: "mind-root",
-    target: "mind-stakeholders",
-    sourceHandle: "right",
-    targetHandle: "left",
-    type: "labeledConnector",
-    data: { connectorType: "default" },
-  },
-  {
-    id: "edge-tasks-ideas",
-    source: "mind-tasks",
-    target: "mind-task-ideas",
-    sourceHandle: "right",
-    targetHandle: "left",
-    type: "labeledConnector",
-    data: { connectorType: "default" },
-  },
-  {
-    id: "edge-tasks-next",
-    source: "mind-tasks",
-    target: "mind-task-next",
-    sourceHandle: "right",
-    targetHandle: "left",
-    type: "labeledConnector",
-    data: { connectorType: "default" },
-  },
-];
 
 const edgeTypes = {
   labeledConnector: LabeledConnectorEdge,
@@ -216,7 +124,9 @@ export default function DiagramCanvas() {
   const mindMapLayout = useCanvasStore((s) => s.mindMapLayout);
   const selectedNodeIds = useCanvasStore((s) => s.selectedNodeIds);
   const pendingFitView = useCanvasStore((s) => (s as any).pendingFitView);
+  const pendingFitViewNodeIds = useCanvasStore((s) => (s as any).pendingFitViewNodeIds);
   const setPendingFitView = useCanvasStore((s) => (s as any).setPendingFitView);
+  const setPendingFitViewNodeIds = useCanvasStore((s) => (s as any).setPendingFitViewNodeIds);
   const presentationMode = useCanvasStore((s) => s.presentationMode);
   const presentationNodeIndex = useCanvasStore((s) => s.presentationNodeIndex);
   const reactFlowRef = useRef<ReactFlowInstance | null>(null);
@@ -599,18 +509,39 @@ export default function DiagramCanvas() {
   }, []);
 
   // When external code (like the AI page) requests a fitView, run it once after
-  // the nodes/edges are synced and then clear the flag.
+  // the nodes/edges are synced and the canvas has painted. Optionally fit only to specific nodes (e.g. newly added AI diagram).
   useEffect(() => {
     if (!pendingFitView || !reactFlowRef.current) return;
-    const id = window.setTimeout(() => {
-      reactFlowRef.current?.fitView({
-        padding: 0.2,
-        duration: 300,
-      });
+    const nodeIds = pendingFitViewNodeIds;
+    let cancelled = false;
+    const runFit = () => {
+      if (cancelled || !reactFlowRef.current) return;
+      if (nodeIds && nodeIds.length > 0) {
+        reactFlowRef.current.fitView({
+          nodes: nodeIds.map((id: string) => ({ id })),
+          padding: 0.25,
+          duration: 300,
+        });
+      } else {
+        reactFlowRef.current.fitView({
+          padding: 0.2,
+          duration: 300,
+        });
+      }
       setPendingFitView(false);
-    }, 100);
-    return () => window.clearTimeout(id);
-  }, [pendingFitView, setPendingFitView]);
+      setPendingFitViewNodeIds(null);
+    };
+    // Wait for layout/paint then run fit so the diagram is fully in view
+    const t1 = window.setTimeout(() => {
+      requestAnimationFrame(() => {
+        requestAnimationFrame(runFit);
+      });
+    }, 200);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(t1);
+    };
+  }, [pendingFitView, pendingFitViewNodeIds, setPendingFitView, setPendingFitViewNodeIds]);
 
   // Sync store → canvas when undo/redo or hydration updates the Zustand store.
   // We track whether the store change originated from the canvas (via onNodesChange/onEdgesChange)
@@ -640,10 +571,8 @@ export default function DiagramCanvas() {
     (changes: NodeChange[]) => {
       setNodes((nds) => {
         const updated = applyNodeChanges(changes, nds);
-        // Push to Zustand so persistence picks it up.
-        // Mark the flag so the store→canvas sync ignores this update.
         fromCanvasRef.current++;
-        setStoreNodes(updated);
+        queueMicrotask(() => setStoreNodes(updated));
         return updated;
       });
     },
@@ -655,7 +584,7 @@ export default function DiagramCanvas() {
       setEdges((eds) => {
         const updated = applyEdgeChanges(changes, eds);
         fromCanvasRef.current++;
-        setStoreEdges(updated);
+        queueMicrotask(() => setStoreEdges(updated));
         return updated;
       });
     },
@@ -701,7 +630,7 @@ export default function DiagramCanvas() {
       setEdges((eds) => {
         const updated = [...eds, newEdge];
         fromCanvasRef.current++;
-        setStoreEdges(updated);
+        queueMicrotask(() => setStoreEdges(updated));
         return updated;
       });
     },
@@ -881,17 +810,15 @@ export default function DiagramCanvas() {
       };
 
       // Add both node and edge in a single batched update.
-      // React 18 batches setNodes + setEdges into one render, so the store→canvas
-      // sync useEffect fires once. Increment by 1 to skip that single sync.
       fromCanvasRef.current += 1;
       setNodes((nds) => {
         const updated = [...nds, { ...newNode, selected: false }];
-        setStoreNodes(updated);
+        queueMicrotask(() => setStoreNodes(updated));
         return updated;
       });
       setEdges((eds) => {
         const updated = [...eds, newEdge];
-        setStoreEdges(updated);
+        queueMicrotask(() => setStoreEdges(updated));
         return updated;
       });
     },
@@ -1508,19 +1435,10 @@ export default function DiagramCanvas() {
     };
   }, []);
 
-  // Add default mind map template after canvas is mounted (only if store is empty)
-  const hasAddedDefaultTemplate = useRef(false);
-  useEffect(() => {
-    if (storeNodes.length === 0 && storeEdges.length === 0 && !hasAddedDefaultTemplate.current) {
-      hasAddedDefaultTemplate.current = true;
-      // Wait for canvas to be fully mounted before adding nodes
-      const timeout = setTimeout(() => {
-        setNodes(defaultNodes);
-        setEdges(defaultEdges);
-      }, 100);
-      return () => clearTimeout(timeout);
-    }
-  }, [storeNodes.length, storeEdges.length, setNodes, setEdges]);
+  // NOTE: Default mind map template is now only added when a *brand-new* project
+  // is created (see project-storage.ts). We no longer reactively inject a template
+  // whenever the store is empty — that caused AI-generated diagrams to be
+  // overwritten after navigation.
 
   const onPointerLeave = useCallback(() => {
     // No-op for freehand; overlay handles stroke lifecycle.
@@ -1660,7 +1578,7 @@ export default function DiagramCanvas() {
           setNodes((prev) => {
             const next = typeof nodesOrUpdater === "function" ? nodesOrUpdater(prev) : nodesOrUpdater;
             fromCanvasRef.current++;
-            setStoreNodes(next);
+            queueMicrotask(() => setStoreNodes(next));
             return next;
           });
         }}
@@ -1668,7 +1586,7 @@ export default function DiagramCanvas() {
           setEdges((prev) => {
             const next = typeof edgesOrUpdater === "function" ? edgesOrUpdater(prev) : edgesOrUpdater;
             fromCanvasRef.current++;
-            setStoreEdges(next);
+            queueMicrotask(() => setStoreEdges(next));
             return next;
           });
         }}

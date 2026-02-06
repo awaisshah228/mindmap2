@@ -35,7 +35,7 @@ export function MindMapLayoutPanel({
   setEdges,
   fitView: fitViewProp,
 }: MindMapLayoutPanelProps) {
-  const { applyLayout, nodes, edges } = useApplyMindMapLayout({
+  const { applyLayout, applyLayoutToSelection, nodes, edges, selectedCount } = useApplyMindMapLayout({
     setNodes,
     setEdges,
     fitView: fitViewProp,
@@ -81,17 +81,36 @@ export function MindMapLayoutPanel({
     setActiveTool("select");
   }, [setNodes, setActiveTool, pushUndo]);
 
-  // Run layout on initial load when default template is shown (same as clicking "Layout whole tree")
+  // Run layout on first load only for mind map diagrams (default template), never for architecture/flow/other diagrams
   const hasRunInitialLayout = useRef(false);
   useEffect(() => {
-    const isDefaultTemplate = nodes.some((n) => n.id === "mind-root") && edges.length > 0;
-    if (!isDefaultTemplate || hasRunInitialLayout.current) return;
+    if (hasRunInitialLayout.current) return;
+    const hasMindMapRoot = nodes.some((n) => n.id === "mind-root" && n.type === "mindMap");
+    if (!hasMindMapRoot || edges.length === 0) return;
+    const layoutExcluded = new Set(["freeDraw", "edgeAnchor", "group"]);
+    const layoutableNodes = nodes.filter((n) => !layoutExcluded.has(n.type ?? ""));
+    const allLayoutableAreMindMap = layoutableNodes.length > 0 && layoutableNodes.every((n) => n.type === "mindMap");
+    if (!allLayoutableAreMindMap) return; // skip: not a pure mind map (e.g. architecture or mixed diagram)
     const t = setTimeout(() => {
       hasRunInitialLayout.current = true;
       applyLayout();
     }, 100);
     return () => clearTimeout(t);
   }, [nodes, edges, applyLayout]);
+
+  // After AI (or other source) renders all nodes: apply auto layout once after an interval (same as first-time canvas open).
+  // Use a generous delay so store→canvas sync and node measurement are done before layout runs.
+  const pendingApplyLayout = useCanvasStore((s) => s.pendingApplyLayout);
+  const setPendingApplyLayout = useCanvasStore((s) => s.setPendingApplyLayout);
+  useEffect(() => {
+    if (!pendingApplyLayout) return;
+    const LAYOUT_DELAY_MS = 700;
+    const t = setTimeout(() => {
+      setPendingApplyLayout(false);
+      applyLayout();
+    }, LAYOUT_DELAY_MS);
+    return () => clearTimeout(t);
+  }, [pendingApplyLayout, applyLayout, setPendingApplyLayout]);
 
   if (!panelVisible) {
     return (
@@ -115,7 +134,7 @@ export function MindMapLayoutPanel({
         <div className="flex items-center justify-between gap-2 mb-3 text-sm font-medium">
           <div className="flex items-center gap-2">
             <Settings2 className="w-4 h-4" />
-            Mind Map Layout
+            Layout
           </div>
           <button
             type="button"
@@ -197,6 +216,9 @@ export function MindMapLayoutPanel({
               {DIRECTIONS.find((d) => d.value === mindMapLayout.direction)?.label}
             </span>
           </div>
+          <p className="text-[11px] text-gray-500">
+            Direction, algorithm and spacing apply to both selected and all.
+          </p>
           <div className="flex gap-2">
             <div>
               <label className="block text-xs text-gray-400 mb-1">spacing X</label>
@@ -225,14 +247,24 @@ export function MindMapLayoutPanel({
               />
             </div>
           </div>
+          {selectedCount >= 2 && (
+            <button
+              type="button"
+              onClick={() => applyLayoutToSelection()}
+              className="w-full py-2 px-3 text-sm font-medium rounded bg-violet-600 hover:bg-violet-500 text-white transition-colors flex items-center justify-center gap-2"
+            >
+              <Layout className="w-4 h-4" />
+              Apply to selected ({selectedCount})
+            </button>
+          )}
           {hasMindMapNodes ? (
             <button
               type="button"
               onClick={() => applyLayout()}
-              className="w-full py-2 px-3 text-sm font-medium rounded bg-violet-600 hover:bg-violet-500 text-white transition-colors flex items-center justify-center gap-2"
+              className="w-full py-2 px-3 text-sm font-medium rounded bg-violet-600/90 hover:bg-violet-500/90 text-white transition-colors flex items-center justify-center gap-2"
             >
               <Layout className="w-4 h-4" />
-              Layout whole tree
+              Layout all
             </button>
           ) : (
             <button

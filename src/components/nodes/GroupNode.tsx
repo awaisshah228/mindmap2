@@ -55,7 +55,8 @@ const FONT_SIZE_CLASSES: Record<string, string> = {
  * Any node type (shape, image, icon, etc.) can be a child when dropped inside.
  * Features: editable label, color presets, connection handles, icon/emoji, toolbar.
  */
-function GroupNode({ id, data, selected }: NodeProps) {
+function GroupNode({ id, data: dataProp, selected }: NodeProps) {
+  const data = dataProp ?? {};
   const label = (data.label as string) || "Group";
   const description = (data.description as string) ?? "";
   const hoveredGroupId = (data.hoveredGroupId as string) ?? null;
@@ -76,6 +77,9 @@ function GroupNode({ id, data, selected }: NodeProps) {
   const fontSize = (data.fontSize as string) ?? "sm";
 
   const { updateNodeData, getNode, getNodes, setNodes, deleteElements } = useReactFlow();
+  const node = getNode(id);
+  const nodeWidth = node?.style && typeof node.style.width === "number" ? node.style.width : undefined;
+  const nodeHeight = node?.style && typeof node.style.height === "number" ? node.style.height : undefined;
   const pushUndo = useCanvasStore((s) => s.pushUndo);
   const hoveredNodeId = useCanvasStore((s) => s.hoveredNodeId);
   const setHoveredNodeId = useCanvasStore((s) => s.setHoveredNodeId);
@@ -273,17 +277,24 @@ function GroupNode({ id, data, selected }: NodeProps) {
       <Handle id="right" type="source" position={Position.Right} className="node-connect-handle" />
       <div
         className={cn(
-          "rounded-xl border-2 overflow-hidden w-full h-full transition-colors",
+          "rounded-xl border-2 overflow-visible transition-colors box-border flex flex-col",
           color.bg,
           selected ? "border-violet-400 ring-2 ring-violet-200" : color.border,
           isHovered && !selected && "border-violet-300 bg-violet-50/80 ring-2 ring-violet-200/60"
         )}
-        style={{ minWidth: MIN_GROUP_WIDTH, minHeight: MIN_GROUP_HEIGHT }}
+        style={{
+          minWidth: MIN_GROUP_WIDTH,
+          minHeight: MIN_GROUP_HEIGHT,
+          ...(nodeWidth != null && { width: nodeWidth }),
+          ...(nodeHeight != null && { height: nodeHeight }),
+          ...(nodeWidth == null && { width: "100%" }),
+          ...(nodeHeight == null && { height: "100%" }),
+        }}
         onMouseEnter={() => setHoveredNodeId(id)}
         onMouseLeave={() => setHoveredNodeId(null)}
       >
-        {/* ── Header ── */}
-        <div className={cn("px-3 py-2 border-b border-slate-300/50 flex items-center gap-2", color.header)}>
+        {/* ── Header (fixed height so children area is predictable) ── */}
+        <div className={cn("shrink-0 px-3 py-2 border-b border-slate-300/50 flex items-center gap-2 min-h-[36px]", color.header)}>
           {/* Icon / emoji */}
           {renderIcon()}
           {isEditing ? (
@@ -334,7 +345,7 @@ function GroupNode({ id, data, selected }: NodeProps) {
         </div>
         {/* ── Description (optional subtitle) ── */}
         {(description || isEditingDesc) && (
-          <div className={cn("px-3 py-1 border-b border-slate-200/50", color.bg)}>
+          <div className={cn("shrink-0 px-3 py-1 border-b border-slate-200/50", color.bg)}>
             {isEditingDesc ? (
               <input
                 autoFocus
@@ -359,7 +370,8 @@ function GroupNode({ id, data, selected }: NodeProps) {
             )}
           </div>
         )}
-        <div className="w-full h-[calc(100%-32px)]" />
+        {/* Content area: fills remaining height so group box matches style.height exactly */}
+        <div className="flex-1 min-h-0 w-full" aria-hidden />
       </div>
 
       {/* ── Floating annotation label below group ── */}

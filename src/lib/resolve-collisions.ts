@@ -4,6 +4,37 @@ const DEFAULT_NODE_WIDTH = 150;
 const DEFAULT_NODE_HEIGHT = 50;
 const MIND_MAP_NODE_WIDTH = 170;
 const MIND_MAP_NODE_HEIGHT = 44;
+const GROUP_NODE_DEFAULT_WIDTH = 280;
+const GROUP_NODE_DEFAULT_HEIGHT = 200;
+
+/** Default [width, height] per node type when node has no measured/size (e.g. AI nodes before first render). */
+const TYPE_DEFAULTS: Record<string, [number, number]> = {
+  mindMap: [MIND_MAP_NODE_WIDTH, MIND_MAP_NODE_HEIGHT],
+  group: [GROUP_NODE_DEFAULT_WIDTH, GROUP_NODE_DEFAULT_HEIGHT],
+  icon: [64, 64],
+  service: [180, 56],
+  queue: [140, 50],
+  actor: [100, 60],
+  databaseSchema: [200, 100],
+  rectangle: [160, 60],
+  diamond: [120, 80],
+  circle: [80, 80],
+  document: [140, 70],
+  stickyNote: [160, 120],
+  text: [120, 40],
+  image: [200, 150],
+};
+
+export type CollisionAlgorithmOptions = {
+  maxIterations: number;
+  overlapThreshold: number;
+  margin: number;
+};
+
+export type CollisionAlgorithm = (
+  nodes: Node[],
+  options: CollisionAlgorithmOptions
+) => Node[];
 
 export interface ResolveCollisionsOptions {
   maxIterations?: number;
@@ -11,36 +42,47 @@ export interface ResolveCollisionsOptions {
   margin?: number;
 }
 
+type Box = {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  moved: boolean;
+  node: Node;
+};
+
 function getNodeSize(node: Node): { width: number; height: number } {
-  const defW = node.type === "mindMap" ? MIND_MAP_NODE_WIDTH : DEFAULT_NODE_WIDTH;
-  const defH = node.type === "mindMap" ? MIND_MAP_NODE_HEIGHT : DEFAULT_NODE_HEIGHT;
-  const w = node.measured?.width ?? node.width ?? defW;
-  const h = node.measured?.height ?? node.height ?? defH;
-  return { width: Number(w) || defW, height: Number(h) || defH };
+  const typeDefaults = TYPE_DEFAULTS[node.type ?? ""];
+  const defW = typeDefaults?.[0] ?? DEFAULT_NODE_WIDTH;
+  const defH = typeDefaults?.[1] ?? DEFAULT_NODE_HEIGHT;
+  if (node.type === "group") {
+    const style = node.style as { width?: number; height?: number } | undefined;
+    if (style?.width != null || style?.height != null) {
+      return {
+        width: Number(style?.width) || defW,
+        height: Number(style?.height) || defH,
+      };
+    }
+  }
+  const w = node.width ?? node.measured?.width;
+  const h = node.height ?? node.measured?.height;
+  return {
+    width: typeof w === "number" && w > 0 ? w : defW,
+    height: typeof h === "number" && h > 0 ? h : defH,
+  };
 }
 
 /**
- * Resolves node overlaps by pushing overlapping nodes apart.
- * Based on the naive O(n²) algorithm from React Flow's node-collisions example
- * and xyflow/node-collision-algorithms.
+ * Build collision boxes from nodes (same pattern as React Flow node-collisions example).
+ * Uses type-based defaults when width/height are missing or 0 (e.g. before first render).
  * @see https://reactflow.dev/examples/layout/node-collisions
- * @see https://github.com/xyflow/node-collision-algorithms
  */
-export function resolveCollisions(
-  nodes: Node[],
-  options: ResolveCollisionsOptions = {}
-): Node[] {
-  const {
-    maxIterations = 50,
-    overlapThreshold = 0.5,
-    margin = 15,
-  } = options;
-
-  if (nodes.length < 2) return nodes;
-
-  const boxes = nodes.map((node) => {
+function getBoxesFromNodes(nodes: Node[], margin = 0): Box[] {
+  const boxes: Box[] = new Array(nodes.length);
+  for (let i = 0; i < nodes.length; i++) {
+    const node = nodes[i];
     const { width, height } = getNodeSize(node);
-    return {
+    boxes[i] = {
       x: node.position.x - margin,
       y: node.position.y - margin,
       width: width + margin * 2,
@@ -48,9 +90,29 @@ export function resolveCollisions(
       node,
       moved: false,
     };
-  });
+  }
+  return boxes;
+}
 
-  for (let iter = 0; iter < maxIterations; iter++) {
+/**
+ * Resolves node overlaps by pushing overlapping nodes apart.
+ * Matches the algorithm from React Flow's node-collisions example; resolves along
+ * the axis with smallest overlap so related nodes stay closer.
+ * @see https://reactflow.dev/examples/layout/node-collisions
+ */
+export function resolveCollisions(
+  nodes: Node[],
+  options: ResolveCollisionsOptions | CollisionAlgorithmOptions = {}
+): Node[] {
+  const maxIterations = options.maxIterations ?? 50;
+  const overlapThreshold = options.overlapThreshold ?? 0.5;
+  const margin = options.margin ?? 0;
+
+  if (nodes.length < 2) return nodes;
+
+  const boxes = getBoxesFromNodes(nodes, margin);
+
+  for (let iter = 0; iter <= maxIterations; iter++) {
     let moved = false;
 
     for (let i = 0; i < boxes.length; i++) {
@@ -100,4 +162,63 @@ export function resolveCollisions(
         }
       : box.node
   );
+}
+
+/**
+ * Resolve collisions for all nodes including groups: first resolve root-level nodes
+ * (so groups and top-level nodes don't overlap), then resolve children within each group.
+ * Use after layout (e.g. AI diagram) so no nodes or groups overlap. Preserves node order.
+ * @see https://reactflow.dev/examples/layout/node-collisions
+ */
+export function resolveCollisionsWithGroups(
+  nodes: Node[],
+  options: ResolveCollisionsOptions = {}
+): Node[] {
+  if (nodes.length < 2) return nodes;
+
+  const roots = nodes.filter((n) => !n.parentId);
+  const resolvedRoots = resolveCollisions(roots, {
+    maxIterations: Number.POSITIVE_INFINITY,
+    overlapThreshold: 0.5,
+    margin: 15,
+    ...options,
+  });
+
+  const byParentId = new Map<string, Node[]>();
+  for (const n of nodes) {
+    if (n.parentId) {
+      const list = byParentId.get(n.parentId) ?? [];
+      list.push(n);
+      byParentId.set(n.parentId, list);
+    }
+  }
+
+  const resolvedChildren: Node[] = [];
+  for (const group of resolvedRoots) {
+    if (group.type !== "group") continue;
+    const children = byParentId.get(group.id);
+    if (!children?.length) continue;
+
+    const groupPos = group.position;
+    const toAbsolute = (node: Node): Node => ({
+      ...node,
+      position: {
+        x: (node.position?.x ?? 0) + groupPos.x,
+        y: (node.position?.y ?? 0) + groupPos.y,
+      },
+    });
+    const toRelative = (node: Node): Node => ({
+      ...node,
+      position: {
+        x: (node.position?.x ?? 0) - groupPos.x,
+        y: (node.position?.y ?? 0) - groupPos.y,
+      },
+    });
+
+    const absoluteChildren = children.map(toAbsolute);
+    const resolvedAbsolute = resolveCollisions(absoluteChildren, options);
+    resolvedChildren.push(...resolvedAbsolute.map(toRelative));
+  }
+
+  return [...resolvedRoots, ...resolvedChildren];
 }

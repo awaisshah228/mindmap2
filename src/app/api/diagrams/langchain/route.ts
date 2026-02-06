@@ -51,6 +51,7 @@ export async function POST(req: NextRequest) {
       llmProvider,
       llmModel,
       llmApiKey,
+      canvasBounds,
     } = await req.json();
 
     if (!prompt || typeof prompt !== "string") {
@@ -136,6 +137,7 @@ export async function POST(req: NextRequest) {
       diagramType,
       previousPrompt,
       previousDiagram,
+      canvasBounds: canvasBounds ?? null,
     });
 
     const stream = await llm.stream([

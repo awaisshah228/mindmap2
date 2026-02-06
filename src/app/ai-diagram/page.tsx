@@ -2,16 +2,20 @@
 
 import { useState, Suspense } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
+import type { Node, Edge } from "@xyflow/react";
 import { useCanvasStore } from "@/lib/store/canvas-store";
 import {
   getLayoutedElements,
   normalizeMindMapEdgeHandles,
+  fitGroupBoundsAndCenterChildren,
+  applyGroupingFromMetadata,
   type LayoutDirection,
   type LayoutAlgorithm,
 } from "@/lib/layout-engine";
-import { buildSystemPrompt, buildUserMessage } from "@/lib/ai/prompt-builder";
+import { buildSystemPrompt, buildUserMessage, type CanvasBounds } from "@/lib/ai/prompt-builder";
 import { streamDiagramGeneration } from "@/lib/ai/frontend-ai";
 import EditorLayout from "@/components/layout/EditorLayout";
+import { saveNow } from "@/lib/store/project-storage";
 import { Loader2, Settings } from "lucide-react";
 
 export const DIAGRAM_TYPE_OPTIONS = [
@@ -28,7 +32,7 @@ export type DiagramTypeValue = (typeof DIAGRAM_TYPE_OPTIONS)[number]["value"];
 
 export const DIAGRAM_PRESETS = [
   { value: "none", label: "None (default)", prompt: "" },
-  { value: "ecommerce-mern-aws", label: "eCommerce MERN + AWS (full stack)", prompt: "Full-stack eCommerce architecture with MERN stack on AWS. Group by layers: Frontend (React SPA on CloudFront + S3), Backend (Node.js/Express API on ECS Fargate behind ALB), Database (MongoDB Atlas, Redis ElastiCache for sessions/cart), Messaging (AWS SQS for order processing queue, AWS SNS for notifications to email/SMS/push, Apache Kafka for real-time event streaming — inventory updates, analytics, activity feed), Real-time (Socket.io server on ECS for live order tracking, chat support, price alerts via WebSockets), Storage (S3 for product images, CloudFront CDN), Auth (Cognito or Auth0), Payment (Stripe), Search (Elasticsearch). Show edges: user → CloudFront → ALB → API → MongoDB/Redis/SQS/SNS/Kafka/Socket.io. Use brand icons for AWS, MongoDB, Redis, Kafka, Stripe, React, Node.js." },
+  { value: "ecommerce-mern-aws", label: "eCommerce MERN + AWS (full stack)", prompt: "Full-stack eCommerce architecture with MERN on AWS. Clear left-to-right flow, well-aligned nodes. Use only 2–4 groups if they help (e.g. Frontend, Backend, Data); do not add unnecessary groups. Include: User, React SPA (CloudFront + S3), ALB, Node.js/Express API (ECS Fargate), MongoDB Atlas, Redis (sessions/cart), AWS SQS (order queue), AWS SNS (notifications), Apache Kafka (events), Socket.io (real-time), S3 + CloudFront (images/CDN), Cognito/Auth0, Stripe, Elasticsearch. Label every edge (e.g. Requests, API calls, Queries, Pub/Sub, WebSockets, Events). Correct source/target and sourceHandle/targetHandle for clean connections. Use brand icons (AWS, MongoDB, Redis, Kafka, Stripe, React, Node)." },
   { value: "stripe-payment", label: "Stripe payment flow", prompt: "Create a flowchart for Stripe payment flow: user selects product, cart, checkout, Stripe payment (card/redirect), success or failure, order confirmation, and email receipt." },
   { value: "chatbot-arch", label: "Chatbot architecture", prompt: "System architecture diagram for a chatbot: User, Frontend chat UI, API Gateway, Auth service, Chat service, LLM provider (OpenAI), vector database for RAG, and Redis for session/cache." },
   { value: "auth0-flow", label: "Auth0 auth flow", prompt: "Flowchart for Auth0 authentication: User clicks Login, redirect to Auth0, login/register, callback to app with tokens, validate token, load user session, then either show dashboard or prompt to complete profile." },
@@ -119,6 +123,7 @@ function AIDiagramPage() {
     setNodes,
     setEdges,
     setPendingFitView,
+    setPendingFitViewNodeIds,
     lastAIPrompt,
     lastAIDiagram,
     setLastAIPrompt,
@@ -155,6 +160,27 @@ function AIDiagramPage() {
 
       const effectiveDiagramType = mode === "mindmap-refine" ? "mindmap" : diagramType;
 
+      // ─── Compute bounding box of existing canvas nodes ─────────
+      const existingNodes = Array.isArray(canvasNodes) ? canvasNodes : [];
+      const existingEdges = Array.isArray(canvasEdges) ? canvasEdges : [];
+      let canvasBounds: CanvasBounds | null = null;
+      if (existingNodes.length > 0) {
+        const DEFAULT_W = 150;
+        const DEFAULT_H = 50;
+        let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+        for (const n of existingNodes as { position?: { x: number; y: number }; measured?: { width?: number; height?: number }; width?: number; height?: number; style?: { width?: number; height?: number } }[]) {
+          const x = n.position?.x ?? 0;
+          const y = n.position?.y ?? 0;
+          const w = (n.measured?.width ?? n.width ?? n.style?.width ?? DEFAULT_W) as number;
+          const h = (n.measured?.height ?? n.height ?? n.style?.height ?? DEFAULT_H) as number;
+          if (x < minX) minX = x;
+          if (y < minY) minY = y;
+          if (x + w > maxX) maxX = x + w;
+          if (y + h > maxY) maxY = y + h;
+        }
+        canvasBounds = { minX, minY, maxX, maxY, nodeCount: existingNodes.length };
+      }
+
       let full = "";
 
       if (llmApiKey) {
@@ -168,6 +194,7 @@ function AIDiagramPage() {
           diagramType: effectiveDiagramType,
           previousPrompt: lastAIPrompt,
           previousDiagram: lastAIDiagram as Record<string, unknown> | null,
+          canvasBounds,
         });
 
         full = await streamDiagramGeneration({
@@ -193,6 +220,7 @@ function AIDiagramPage() {
             diagramType: effectiveDiagramType,
             llmProvider,
             llmModel,
+            canvasBounds,
           }),
         });
 
@@ -233,21 +261,17 @@ function AIDiagramPage() {
         throw new Error("AI returned invalid JSON diagram");
       }
 
-      const { nodes, edges, layoutDirection } = parsed ?? {};
-      let safeNodes = Array.isArray(nodes) ? nodes : [];
+      const { nodes, edges, layoutDirection, groups: rawGroups } = parsed ?? {};
+      // Only flat nodes: LLM returns groups as metadata (groups array), not as group nodes.
+      let safeNodes = Array.isArray(nodes)
+        ? (nodes as { id: string; type?: string; [k: string]: unknown }[]).filter((n) => n.type !== "group")
+        : [];
       let rawEdges = Array.isArray(edges) ? edges : [];
-
-      // Normalize nodes: parentNode -> parentId, extent for children, default style for groups.
-      safeNodes = safeNodes.map((n: { id: string; type?: string; parentNode?: string; parentId?: string; style?: { width?: number; height?: number }; [k: string]: unknown }) => {
-        const parentId = n.parentId ?? (typeof n.parentNode === "string" ? n.parentNode : undefined);
-        const isGroup = n.type === "group";
-        const style = n.style ?? {};
-        const withExtent = parentId ? { ...n, parentId, extent: "parent" as const } : { ...n, parentId };
-        if (isGroup && (style.width == null || style.height == null)) {
-          return { ...withExtent, style: { ...style, width: style.width ?? 280, height: style.height ?? 200 } };
-        }
-        return withExtent;
-      });
+      let groupMetadata: { id: string; label: string; nodeIds: string[] }[] = Array.isArray(rawGroups)
+        ? (rawGroups as { id?: string; label?: string; nodeIds?: string[] }[])
+            .filter((g) => g && typeof g.id === "string" && Array.isArray(g.nodeIds))
+            .map((g) => ({ id: g.id!, label: String(g.label ?? g.id), nodeIds: g.nodeIds!.filter((id): id is string => typeof id === "string") }))
+        : [];
 
       // New diagram (not refine): use a unique reference id so node/edge ids never mix with existing or between runs.
       const isNewDiagram = mode !== "mindmap-refine";
@@ -298,6 +322,14 @@ function AIDiagramPage() {
               target: nodeIdMap.get(e.target) ?? e.target,
             })
           );
+        const nodeIdsSet = new Set(safeNodes.map((n: { id: string }) => n.id));
+        groupMetadata = groupMetadata
+          .map((g) => ({
+            id: `${refId}-${g.id}`,
+            label: g.label,
+            nodeIds: g.nodeIds.map((id) => nodeIdMap.get(id) ?? id).filter((id) => nodeIdsSet.has(id)),
+          }))
+          .filter((g) => g.nodeIds.length > 0);
       }
 
       const nodeIds = new Set(safeNodes.map((n: { id: string }) => n.id));
@@ -361,22 +393,62 @@ function AIDiagramPage() {
         : layoutDirection === "vertical"
           ? "TB"
           : "LR";
+      const hasGroups = groupMetadata.length > 0;
+      // Generous spacing when we have groups so flat layout has clear gaps; then we apply grouping and run layout again
       const spacing: [number, number] = isMindMapDiagram
         ? [mindMapLayout?.spacingX ?? 120, mindMapLayout?.spacingY ?? 100]
-        : [280, 220];
+        : hasGroups
+          ? [240, 200]
+          : [160, 120];
       const layoutAlgorithm: LayoutAlgorithm = isMindMapDiagram
         ? (mindMapLayout?.algorithm ?? "elk-mrtree")
         : "elk-layered";
 
+      // Layout all nodes flat (no group nodes yet). Then apply grouping at render time
+      // (like user selecting nodes and Ctrl+G / sidebar group tool).
       const layoutResult = await getLayoutedElements(
-        safeNodes,
+        safeNodes as Node[],
         normalizedEdges,
         direction,
         spacing,
         layoutAlgorithm
       );
-      const layoutedNodes = layoutResult.nodes;
+      let layoutedNodes = layoutResult.nodes;
       let layoutedEdges = layoutResult.edges;
+
+      // Apply grouping from LLM metadata: create group nodes and set parentId on listed nodes
+      // (like user selecting nodes and Ctrl+G). Then run layout again so groups are positioned with gaps.
+      if (!isMindMapDiagram && groupMetadata.length > 0) {
+        const withGroups = applyGroupingFromMetadata(layoutedNodes, groupMetadata);
+        layoutedNodes = fitGroupBoundsAndCenterChildren(withGroups);
+        // Run layout again (same as first render) so compound graph has proper alignment and gaps between groups
+        const afterGroupLayout = await getLayoutedElements(
+          layoutedNodes,
+          layoutedEdges,
+          direction,
+          spacing,
+          layoutAlgorithm
+        );
+        layoutedNodes = afterGroupLayout.nodes;
+        layoutedEdges = afterGroupLayout.edges;
+        layoutedNodes = fitGroupBoundsAndCenterChildren(layoutedNodes);
+      }
+
+      // Apply layout (ELK) for alignment — for mind map or when diagram type is "any" (auto).
+      // if ((isMindMapDiagram || diagramType === "auto") && !(groupMetadata.length > 0)) {
+      //   const afterCollisionLayout = await getLayoutedElements(
+      //     layoutedNodes,
+      //     layoutedEdges,
+      //     direction,
+      //     spacing,
+      //     layoutAlgorithm
+      //   );
+      //   layoutedNodes = afterCollisionLayout.nodes;
+      //   layoutedEdges = afterCollisionLayout.edges;
+      //   if (!isMindMapDiagram && layoutedNodes.some((n: { type?: string }) => n.type === "group")) {
+      //     layoutedNodes = fitGroupBoundsAndCenterChildren(layoutedNodes);
+      //   }
+      // }
 
       // Ensure mind map edges use labeledConnector and correct handles.
       if (isMindMapDiagram && layoutedNodes.length > 0) {
@@ -465,20 +537,87 @@ function AIDiagramPage() {
           mergedDirection
         );
 
-        setNodes(mergedLayout.nodes);
-        setEdges(refinedEdges);
+        // Apply layout (ELK) for alignment.
+        const refineLayoutAgain = await getLayoutedElements(
+          mergedLayout.nodes,
+          refinedEdges,
+          mergedDirection,
+          mergedSpacing,
+          (mindMapLayout?.algorithm as LayoutAlgorithm) ?? "elk-mrtree"
+        );
+        const refinedEdgesAfterLayout = normalizeMindMapEdgeHandles(
+          refineLayoutAgain.nodes,
+          refineLayoutAgain.edges.map((edge) => {
+            const src = refineLayoutAgain.nodes.find((n) => n.id === edge.source);
+            const tgt = refineLayoutAgain.nodes.find((n) => n.id === edge.target);
+            return {
+              ...edge,
+              type: src?.type === "mindMap" && tgt?.type === "mindMap" ? "labeledConnector" : edge.type,
+              data: { ...edge.data, connectorType: "default" },
+            };
+          }),
+          mergedDirection
+        );
+        setNodes(refineLayoutAgain.nodes);
+        setEdges(refinedEdgesAfterLayout);
+        setPendingFitViewNodeIds(refineLayoutAgain.nodes.map((n: { id: string }) => n.id));
       } else if (mode === "mindmap-refine") {
         if (layoutedNodes.length) addNodes(layoutedNodes);
         if (layoutedEdges.length) addEdges(layoutedEdges);
+        setPendingFitViewNodeIds(layoutedNodes.map((n: { id: string }) => n.id));
       } else {
-        setNodes(layoutedNodes);
-        setEdges(layoutedEdges);
+        // ─── Keep existing nodes, add AI nodes alongside them ─────────
+        if (existingNodes.length > 0 && canvasBounds) {
+          // Compute bounding box of the new AI-generated nodes
+          let aiMinX = Infinity, aiMinY = Infinity;
+          for (const n of layoutedNodes) {
+            const x = n.position?.x ?? 0;
+            const y = n.position?.y ?? 0;
+            if (x < aiMinX) aiMinX = x;
+            if (y < aiMinY) aiMinY = y;
+          }
+
+          // Offset all AI nodes so their top-left starts below existing content
+          // with a generous gap (400px below the lowest existing node).
+          const GAP = 400;
+          const offsetX = canvasBounds.minX - aiMinX; // align left edges
+          const offsetY = (canvasBounds.maxY + GAP) - aiMinY; // place below
+
+          const offsetNodes = layoutedNodes.map((n: { id: string; position: { x: number; y: number }; parentId?: string; [k: string]: unknown }) => {
+            // Don't offset children inside groups — they use relative positions
+            if (n.parentId) return n;
+            return {
+              ...n,
+              position: {
+                x: n.position.x + offsetX,
+                y: n.position.y + offsetY,
+              },
+            };
+          });
+
+          const mergedNodes: Node[] = [...(existingNodes as Node[]), ...(offsetNodes as Node[])];
+          const mergedEdges: Edge[] = [...(existingEdges as Edge[]), ...(layoutedEdges as Edge[])];
+          setNodes(mergedNodes);
+          setEdges(mergedEdges);
+          setPendingFitViewNodeIds(offsetNodes.map((n: { id: string }) => n.id));
+        } else {
+          // Canvas is empty — just set the nodes directly
+          setNodes(layoutedNodes);
+          setEdges(layoutedEdges);
+          setPendingFitViewNodeIds(layoutedNodes.map((n: { id: string }) => n.id));
+        }
       }
 
       setLastAIPrompt(prompt.trim());
       setLastAIDiagram({ nodes: layoutedNodes, edges: layoutedEdges });
+
+      // Immediately persist to localStorage before navigation so hydration on
+      // the home page picks up the AI-generated nodes instead of the old data.
+      saveNow();
+
+      // Fit diagram into view. Do not run panel layout here — we already laid out in this flow; running it again would overwrite with different settings and scatter nodes. On reload the same saved layout shows correctly.
       setPendingFitView(true);
-      router.push("/");
+      setTimeout(() => router.push("/"), 450);
     } catch (err) {
       const msg = err instanceof Error ? err.message : "Something went wrong";
       // For API-key-related errors, provide a friendlier message

@@ -5,6 +5,14 @@
 
 import { ICON_IDS_FOR_PROMPT } from "@/lib/icon-prompt-list";
 
+export interface CanvasBounds {
+  minX: number;
+  minY: number;
+  maxX: number;
+  maxY: number;
+  nodeCount: number;
+}
+
 export interface PromptParams {
   prompt: string;
   layoutDirection?: string;
@@ -13,6 +21,7 @@ export interface PromptParams {
   diagramType?: string;
   previousPrompt?: string | null;
   previousDiagram?: Record<string, unknown> | null;
+  canvasBounds?: CanvasBounds | null;
 }
 
 export function buildSystemPrompt(layoutDirection?: string): string {
@@ -20,22 +29,17 @@ export function buildSystemPrompt(layoutDirection?: string): string {
     layoutDirection === "vertical" ? "vertical" : "horizontal";
 
   return `
-You design diagrams for a React Flow whiteboard. Return only valid JSON matching the schema below. No markdown, no comments.
+You design diagrams for a React Flow whiteboard. Return only valid JSON. No markdown, no comments.
 
-Node types: mindMap, stickyNote, rectangle, diamond, circle, document, text, image, databaseSchema, service, queue, actor, icon, group.
+Node types: mindMap, stickyNote, rectangle, diamond, circle, document, text, image, databaseSchema, service, queue, actor, icon. Do NOT use type "group" — use the groups array instead.
 
-POSITIONING RULES — THIS IS CRITICAL:
-Layout: preferred layoutDirection is ${preferredLayoutDirection}. Each node MUST have an explicit position {x: number, y: number} as exact canvas coordinates.
-- Place the first/central node at position {x: 0, y: 0}.
-- Space nodes generously: minimum 300px apart on the X axis and 250px apart on the Y axis.
-- For horizontal flows (left→right): increment x by 350–450 for each column, y by 280–350 for each row.
-- For vertical flows (top→bottom): increment y by 300–400 for each row, x by 350–450 for each column.
-- Use positions in range [-2000, 2000]. Align in clear rows/columns.
-- NEVER stack nodes at the same position. Each node MUST have a unique {x, y}.
+PLACEMENT — FULL AUTONOMY:
+You decide the logical order and arrangement of nodes. Give each node a position {x: number, y: number}. Use any coordinates you like (e.g. 0,0 for first node; spread others in the order you want). The canvas will run an auto-layout to arrange nodes clearly — so focus on correct structure and edges, not exact pixel positions. Keep connected components close: use modest coordinate gaps (e.g. 100–200 between related nodes) so edges stay short and the flow is easy to follow. Avoid large gaps that create long, hard-to-follow edges. Only rule: give each node a unique position so no two nodes share the same {x, y}.
 
-Schema: nodes have id, type, position {x,y}. For groups: type "group", style {width, height}. For nodes inside a group: "parentNode": "<group-id>", position relative to group (e.g. 20, 50). data: label, shape?, icon?, imageUrl?, subtitle?, columns? (for databaseSchema), annotation? (floating label below node).
+Schema: nodes have id, type, position {x,y}. All nodes are top-level (no parentNode). data: label, shape?, icon?, imageUrl?, subtitle?, columns? (for databaseSchema), annotation?. For grouping: return an optional "groups" array: groups: [{ id: string, label: string, nodeIds: string[] }]. Each nodeIds lists the ids of nodes that belong to that group (e.g. "Frontend" group with nodeIds ["react-spa","cloudfront","s3"]). The app will lay out all nodes flat, then apply grouping visually. Use at most 2–4 groups when they clarify the diagram; omit groups when not needed.
 
-EDGES: id, source, target, sourceHandle ("left"|"right"|"top"|"bottom"), targetHandle ("left"|"right"|"top"|"bottom"). data.label? (e.g. "HTTP", "Calls", "Queries"). data.connectionLength? (number, the pixel distance between source and target nodes — typically 300–500). Always set sourceHandle and targetHandle to match the flow direction.
+EDGES — CRITICAL FOR CLEAN CONNECTIONS:
+Every edge MUST have: id (unique), source (exact node id), target (exact node id), sourceHandle, targetHandle. Use handles so the flow direction is clear: e.g. left→right flow use sourceHandle "right" and targetHandle "left"; top→bottom use "bottom" and "top". Set data.label on EVERY edge so the flow is readable (e.g. "Requests", "HTTP", "Queries", "Pub/Sub", "WebSockets", "Events", "Sync", "Async"). Accurate source/target and handles prevent tangled connections. Keep the graph simple: avoid one node connecting to too many others; prefer a clear left-to-right or top-to-bottom flow so the diagram is easily understandable.
 
 Icons — ICON FALLBACK CHAIN (follow this priority):
 1. FIRST try our installed icon library: Set data.icon to one of: ${ICON_IDS_FOR_PROMPT}. Defaults: services "lucide:server", data stores "lucide:database". Only use ids from this list for data.icon.
@@ -63,29 +67,18 @@ Annotations: Any node can have data.annotation — a short floating label that a
 
 Mind map (only when user asks for mind map): type "mindMap", central node at (0,0). First-level children at x ±400, y offset ±300 from center. Each subsequent level adds ±350 x offset. If mode=mindmap-refine and focusNodeId set: add only children of that node; source=focusNodeId for every new edge.
 
-Architecture: rectangle for services/queues/gateways, document/text for notes, circle for start/end. Clear path (e.g. User→Frontend→API→Services→DB). Set data.icon AND data.iconUrl on every rectangle/circle/document/service so no plain text-only nodes. Use brand icons via iconUrl (e.g. "https://cdn.simpleicons.org/amazonaws/FF9900" for AWS).
+Architecture / system design: HIGH-LEVEL VIEW ONLY. Show components as services, rectangles, queues — not as detailed schemas. For databases and data stores (MongoDB, Redis, PostgreSQL, etc.) use type "service" or "rectangle" with a short label (e.g. "MongoDB Atlas", "Redis", "PostgreSQL"). Do NOT use type "databaseSchema" or list tables/columns in architecture diagrams. Save databaseSchema (tables with columns) only for entity-relationship or database schema diagram types. Clear path (e.g. User→Frontend→API→Services→DB). Set data.icon AND data.iconUrl on every node. Use brand icons via iconUrl.
 
-SUBFLOWS & GROUPING (USE EXTENSIVELY):
-Groups organize related nodes into logical clusters. USE GROUPS LIBERALLY — real-world systems have clear boundaries:
-- Use type "group" for: cloud providers (AWS, GCP, Azure), environments (Production, Staging), layers (Frontend, Backend, Data), services clusters (Microservices, APIs), infrastructure (Kubernetes, Docker), teams, regions, etc.
-- Group node: type "group", id, data.label, position {x,y}, style {width: 400–700, height: 300–600}.
-- Child nodes inside the group: set "parentNode" to the group's id; position {x,y} is RELATIVE to the group origin (e.g. {x: 30, y: 50}).
-- IMPORTANT: Define the group node BEFORE any child node that references it as parentNode in the nodes array.
-- Nest groups for hierarchy: e.g. "Cloud" group contains "Compute" and "Storage" subgroups.
-- Edges can connect across groups: e.g. source "frontend" (top-level) → target "api-gw" (inside "backend" group).
-- For architecture diagrams with 5+ components, ALWAYS use at least 1–3 groups.
-- For complex systems (10+ nodes), use 3–5 groups with possible nesting.
-- Space groups well apart (600–800px between groups).
-- Inside groups, space child nodes 200–300px apart.
-- Groups should have descriptive labels: "Backend Services", "AWS Cloud", "Database Layer", "CI/CD Pipeline", etc.
+GROUPS — METADATA ONLY (app applies grouping like Ctrl+G):
+- Do NOT create nodes with type "group" or parentNode. Return a "groups" array: groups: [{ id: string, label: string, nodeIds: string[] }]. Each entry names a group (e.g. "Frontend", "Backend") and lists the node ids that belong to it. The app lays out all nodes flat, then applies grouping to those nodeIds (same as user selecting nodes and using group/subflow or Ctrl+G). Use at most 2–4 groups when they clarify the diagram; omit groups when not needed.
 
 Flowchart: rectangle=step, diamond=decision, circle=start/end. Flow top→bottom or left→right. Group related decision branches.
 
-Special types: databaseSchema → data.columns [{name, type?, key?}]. service → data.subtitle optional. queue/actor → data.label.
+Special types: databaseSchema → use ONLY for entity-relationship or schema diagrams; data.columns [{name, type?, key?}]. For architecture/system design use "service" or "rectangle" for data stores (no columns). service → data.subtitle optional. queue/actor → data.label.
 
 Images: type "image" with data.imageUrl = https://picsum.photos/seed/<word>/200/150 (seed: user, api, database, server, etc.). data.label = short caption.
 
-Rules: Short labels (2–5 words). Unique ids. Edges reference node ids. Non-mindMap: add edge.data.label where helpful (e.g. "HTTP", "REST", "gRPC", "Pub/Sub"). Add data.connectionLength on each edge (300–500 pixels). EVERY node MUST have at least one visual icon — set data.icon (from library), data.iconUrl (CDN URL to relevant icon/logo), or data.emoji. Never leave a node without an icon. Use diverse node types (mix rectangle, circle, databaseSchema, service, queue, actor, icon, image) for visual variety.
+Rules: Unique node ids. Every edge: source and target exact node ids; sourceHandle and targetHandle; data.label on every edge. Short node labels (2–5 words). Every node: data.icon, data.iconUrl, or data.emoji. For architecture/system design: high-level view only — use service/rectangle for databases (e.g. MongoDB, Redis), never databaseSchema with columns. Use databaseSchema only for entity-relationship or schema diagram type. Place nodes for clear flow; auto-layout will arrange.
 `.trim();
 }
 
@@ -98,6 +91,7 @@ export function buildUserMessage(params: PromptParams): string {
     diagramType,
     previousPrompt,
     previousDiagram,
+    canvasBounds,
   } = params;
 
   const preferredLayoutDirection =
@@ -112,12 +106,12 @@ export function buildUserMessage(params: PromptParams): string {
             mindmap:
               "Type: mind map. Central topic + branches, all nodes mindMap.",
             architecture:
-              "Type: architecture. Services, APIs, gateways, data stores; use data.icon or image nodes. MUST use groups to organize services into logical layers (e.g. Frontend, Backend, Data, Infrastructure). Use diverse node types.",
+              "Type: architecture — high-level system design only. Show components as service or rectangle nodes with short labels. Do NOT use databaseSchema or show tables/columns. Use groups array (id, label, nodeIds) for 2–4 layers if needed (e.g. Frontend, Backend). Place related nodes close together; every edge: source/target, sourceHandle/targetHandle, data.label. Clean flow and icons.",
             flowchart:
-              "Type: flowchart. Rectangles (steps), diamonds (decisions), circles (start/end). Group related steps into phases or stages using group nodes.",
+              "Type: flowchart. Rectangles (steps), diamonds (decisions), circles (start/end). Use groups array to group related steps into phases if needed.",
             sequence: "Type: sequence. Actors and interactions, clear lanes. Group actors by team/system.",
-            "entity-relationship": "Type: ER. Entities and relationships. Use databaseSchema nodes with columns. Group related entities.",
-            bpmn: "Type: BPMN. Tasks, gateways, flows. Group by swim lanes using group nodes.",
+            "entity-relationship": "Type: ER. Entities and relationships. Use databaseSchema nodes with columns. Use groups array for related entities if needed.",
+            bpmn: "Type: BPMN. Tasks, gateways, flows. Use groups array for swim lanes if needed.",
           };
           return hints[diagramType] ?? "";
         })()
@@ -126,8 +120,14 @@ export function buildUserMessage(params: PromptParams): string {
   const typeBlock = diagramTypeHint ? `${diagramTypeHint}\n\n` : "";
   const meta = `Mode: ${isMindmapRefine ? "mindmap-refine" : "diagram"}. focusNodeId: ${focusNodeId ?? "—"}. layout: ${preferredLayoutDirection}.`;
 
-  if (previousDiagram && Object.keys(previousDiagram).length > 0) {
-    return `${typeBlock}${prompt}\n\n${meta}\n\nPrevious prompt: ${previousPrompt ?? "—"}\n\nPrevious diagram:\n${JSON.stringify(previousDiagram)}\n\nReturn full diagram JSON only.${isMindmapRefine ? " Extend only the focused node's branch." : ""}`;
+  // Tell the AI about existing canvas content so it places nodes in blank areas
+  let canvasContext = "";
+  if (canvasBounds && canvasBounds.nodeCount > 0) {
+    canvasContext = `\n\nCANVAS CONTEXT: The canvas already has ${canvasBounds.nodeCount} nodes occupying the area from (${Math.round(canvasBounds.minX)}, ${Math.round(canvasBounds.minY)}) to (${Math.round(canvasBounds.maxX)}, ${Math.round(canvasBounds.maxY)}). Place your new diagram BELOW the existing content — start your first node at approximately (${Math.round(canvasBounds.minX)}, ${Math.round(canvasBounds.maxY + 400)}). Do NOT overlap with existing nodes.`;
   }
-  return `${typeBlock}${prompt}\n\n${meta}\n\nReturn diagram JSON only.`;
+
+  if (previousDiagram && Object.keys(previousDiagram).length > 0) {
+    return `${typeBlock}${prompt}\n\n${meta}${canvasContext}\n\nPrevious prompt: ${previousPrompt ?? "—"}\n\nPrevious diagram:\n${JSON.stringify(previousDiagram)}\n\nReturn full diagram JSON only.${isMindmapRefine ? " Extend only the focused node's branch." : ""}`;
+  }
+  return `${typeBlock}${prompt}\n\n${meta}${canvasContext}\n\nReturn diagram JSON only.`;
 }

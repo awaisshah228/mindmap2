@@ -8,7 +8,8 @@
  */
 
 import { useEffect, useRef } from "react";
-import { useCanvasStore, type Project } from "./canvas-store";
+import { useCanvasStore, DEFAULT_MIND_MAP_LAYOUT, type Project } from "./canvas-store";
+import type { Node, Edge } from "@xyflow/react";
 
 const PROJECTS_KEY = "ai-diagram-projects-v1";
 const SETTINGS_KEY = "ai-diagram-settings-v1";
@@ -98,6 +99,38 @@ function migrateLegacy(): Project | null {
   }
 }
 
+// ─── Default mind-map template for brand-new projects ─────────────────
+
+const MIND_MAP_NODE_WIDTH = 170;
+const INITIAL_CANVAS_PADDING = 100;
+
+function getDefaultMindMapTemplate(): { nodes: Node[]; edges: Edge[] } {
+  const { spacingX, spacingY } = DEFAULT_MIND_MAP_LAYOUT;
+  const pad = INITIAL_CANVAS_PADDING;
+  const layer1X = pad + MIND_MAP_NODE_WIDTH + spacingX;
+  const layer2X = layer1X + MIND_MAP_NODE_WIDTH + spacingX;
+
+  const nodes: Node[] = [
+    { id: "mind-root", type: "mindMap", position: { x: pad, y: pad }, data: { label: "Mind Map Overview" } },
+    { id: "mind-goals", type: "mindMap", position: { x: layer1X, y: pad - spacingY }, data: { label: "Goals" } },
+    { id: "mind-tasks", type: "mindMap", position: { x: layer1X, y: pad }, data: { label: "Key Tasks" } },
+    { id: "mind-stakeholders", type: "mindMap", position: { x: layer1X, y: pad + spacingY }, data: { label: "Stakeholders" } },
+    { id: "mind-task-ideas", type: "mindMap", position: { x: layer2X, y: pad - spacingY }, data: { label: "Milestones" } },
+    { id: "mind-task-next", type: "mindMap", position: { x: layer2X, y: pad + spacingY }, data: { label: "Next Actions" } },
+  ];
+
+  const edgeBase = { type: "labeledConnector" as const, data: { connectorType: "default" } };
+  const edges: Edge[] = [
+    { id: "edge-root-goals", source: "mind-root", target: "mind-goals", sourceHandle: "right", targetHandle: "left", ...edgeBase },
+    { id: "edge-root-tasks", source: "mind-root", target: "mind-tasks", sourceHandle: "right", targetHandle: "left", ...edgeBase },
+    { id: "edge-root-stakeholders", source: "mind-root", target: "mind-stakeholders", sourceHandle: "right", targetHandle: "left", ...edgeBase },
+    { id: "edge-goals-ideas", source: "mind-goals", target: "mind-task-ideas", sourceHandle: "right", targetHandle: "left", ...edgeBase },
+    { id: "edge-stakeholders-next", source: "mind-stakeholders", target: "mind-task-next", sourceHandle: "right", targetHandle: "left", ...edgeBase },
+  ];
+
+  return { nodes, edges };
+}
+
 // ─── React hook: hydrate on mount + auto-save ────────────────────────
 
 export function useProjectPersistence() {
@@ -136,16 +169,17 @@ export function useProjectPersistence() {
     }
 
     if (projects.length === 0) {
-      // Create a default project
+      // Create a default project with a starter mind-map template
       const now = Date.now();
+      const template = getDefaultMindMapTemplate();
       projects = [{
         id: `proj-default-${now}`,
         name: "Untitled",
         createdAt: now,
         updatedAt: now,
         isFavorite: false,
-        nodes: [],
-        edges: [],
+        nodes: template.nodes as Project["nodes"],
+        edges: template.edges as Project["edges"],
         nodeNotes: {},
         nodeTasks: {},
         nodeAttachments: {},
