@@ -2,8 +2,13 @@ import { NextResponse } from "next/server";
 import { requireAuth } from "@/lib/auth";
 import { db } from "@/db";
 import { userCredits, plans, subscriptions } from "@/db/schema";
+import type { InferSelectModel } from "drizzle-orm";
 import { eq } from "drizzle-orm";
 import { PLAN_IDS } from "@/lib/plans";
+
+type UserCreditsRow = InferSelectModel<typeof userCredits>;
+type SubscriptionsRow = InferSelectModel<typeof subscriptions>;
+type PlansRow = InferSelectModel<typeof plans>;
 
 /** GET /api/credits – balance, plan, free trial & monthly usage. */
 export async function GET() {
@@ -22,8 +27,8 @@ export async function GET() {
       monthlyResetAt: null,
     });
 
-  let row: Awaited<ReturnType<typeof db.select>>[0] | undefined;
-  let sub: Awaited<ReturnType<typeof db.select>>[0] | undefined;
+  let row: UserCreditsRow | undefined;
+  let sub: SubscriptionsRow | undefined;
   try {
     [row] = await db.select().from(userCredits).where(eq(userCredits.userId, userId));
     [sub] = await db.select().from(subscriptions).where(eq(subscriptions.userId, userId));
@@ -32,7 +37,7 @@ export async function GET() {
   }
 
   const planId = sub?.planId ?? PLAN_IDS.FREE;
-  let plan: Awaited<ReturnType<typeof db.select>>[0] | undefined;
+  let plan: PlansRow | undefined;
   try {
     [plan] = await db.select().from(plans).where(eq(plans.id, planId));
   } catch {

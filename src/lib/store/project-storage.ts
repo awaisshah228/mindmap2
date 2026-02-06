@@ -33,7 +33,7 @@ async function applyLoadedProjectData(
     excalidrawData?: unknown;
     drawioData?: string | null;
   }
-): void {
+): Promise<void> {
   const { setNodes, setEdges, setNodeNote, setNodeTasks } = useCanvasStore.getState();
   const nodes = Array.isArray(data.nodes) ? data.nodes : [];
   const edges = Array.isArray(data.edges) ? data.edges : [];

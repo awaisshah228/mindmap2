@@ -25,6 +25,7 @@ import { applyNodesAndEdgesInChunks } from "@/lib/chunked-nodes";
 import { parseStreamingDiagramBuffer, parseStreamingElementsBuffer } from "@/lib/ai/streaming-json-parser";
 import { diagramToExcalidraw } from "@/lib/excalidraw-convert";
 import { excalidrawToDrawioXml } from "@/lib/excalidraw-to-drawio";
+import { validateAndFixXml } from "@/lib/drawio-utils";
 import { normalizeSkeletons } from "@/lib/skeleton-normalize";
 
 export const DIAGRAM_TYPE_OPTIONS = [
@@ -55,6 +56,7 @@ const DEFAULT_PRESET_OPTIONS: PresetOption[] = [
 
 /** Draw.io prompt presets (client-side; no pre-built diagram). */
 const DRAWIO_PRESETS: PresetOption[] = [
+  { value: "drawio-microservices-aws-kafka", label: "Draw.io: Microservices + AWS + Kafka", prompt: "Create a complete microservices architecture diagram on AWS with Kafka. Include: User/Browser, CDN/CloudFront, Next.js frontend, API Gateway, Auth service, User service, Product Catalog, Order service, Payment (Stripe), Kafka message broker, PostgreSQL, Redis, S3. Show data flow with arrows: static assets through CDN, API requests through gateway to services, events published to Kafka, services consuming from Kafka. Use AWS colors: orange (#ff9900) for compute, green (#569a31) for storage, blue (#527bbb) for database. Left-to-right flow. Group by tier (frontend, API, services, data).", targetCanvas: "drawio" },
   { value: "drawio-flowchart", label: "Draw.io: Flowchart", prompt: "Create a flowchart for a typical user login process: start, input credentials, validate, success or error, redirect.", targetCanvas: "drawio" },
   { value: "drawio-architecture", label: "Draw.io: System architecture", prompt: "Create a system architecture diagram: client, API gateway, backend services, database. Use clear boxes and arrows.", targetCanvas: "drawio" },
   { value: "drawio-process-flow", label: "Draw.io: Process flow", prompt: "Create a business process flow: receive order, validate, payment, fulfillment, shipping, delivery.", targetCanvas: "drawio" },
@@ -285,19 +287,24 @@ function AIDiagramPage() {
         const decoder = new TextDecoder();
         let streamBuffer = "";
         let lastElementCount = 0;
+        const STREAM_BATCH_SIZE = 5;
         const reader = res.body.getReader();
         while (true) {
           const { done, value } = await reader.read();
-          if (done) break;
-          streamBuffer += decoder.decode(value, { stream: true });
+          if (value) streamBuffer += decoder.decode(value, { stream: true });
           const parsed = parseStreamingElementsBuffer(streamBuffer);
-          if (parsed.elements.length > lastElementCount) {
+          const newCount = parsed.elements.length - lastElementCount;
+          const shouldUpdate = parsed.elements.length > lastElementCount && (newCount >= STREAM_BATCH_SIZE || done);
+          if (shouldUpdate) {
             const normalized = normalizeSkeletons(parsed.elements);
-            const xml = excalidrawToDrawioXml(normalized as Parameters<typeof excalidrawToDrawioXml>[0]);
+            let xml = excalidrawToDrawioXml(normalized as Parameters<typeof excalidrawToDrawioXml>[0]);
+            const v = validateAndFixXml(xml);
+            if (v.fixed) xml = v.fixed;
             setDrawioData(xml);
             setCanvasMode("drawio");
             lastElementCount = parsed.elements.length;
           }
+          if (done) break;
         }
         const finalParsed = parseStreamingElementsBuffer(streamBuffer);
         if (finalParsed.elements.length === 0) {
@@ -306,7 +313,9 @@ function AIDiagramPage() {
           return;
         }
         const normalized = normalizeSkeletons(finalParsed.elements);
-        const xml = excalidrawToDrawioXml(normalized as Parameters<typeof excalidrawToDrawioXml>[0]);
+        let xml = excalidrawToDrawioXml(normalized as Parameters<typeof excalidrawToDrawioXml>[0]);
+        const v = validateAndFixXml(xml);
+        if (v.fixed) xml = v.fixed;
         setDrawioData(xml);
         setCanvasMode("drawio");
         setHasUnsavedChanges(true);
@@ -344,20 +353,23 @@ function AIDiagramPage() {
         const decoder = new TextDecoder();
         let streamBuffer = "";
         let lastElementCount = 0;
+        const STREAM_BATCH_SIZE = 5;
         const { convertToExcalidrawElements } = await import("@excalidraw/excalidraw");
         const reader = res.body.getReader();
         while (true) {
           const { done, value } = await reader.read();
-          if (done) break;
-          streamBuffer += decoder.decode(value, { stream: true });
+          if (value) streamBuffer += decoder.decode(value, { stream: true });
           const parsed = parseStreamingElementsBuffer(streamBuffer);
-          if (parsed.elements.length > lastElementCount) {
+          const newCount = parsed.elements.length - lastElementCount;
+          const shouldUpdate = parsed.elements.length > lastElementCount && (newCount >= STREAM_BATCH_SIZE || done);
+          if (shouldUpdate) {
             const normalized = normalizeSkeletons(parsed.elements);
             const elements = convertToExcalidrawElements(normalized as never[], { regenerateIds: false });
             setExcalidrawData({ elements, appState: {} });
             setCanvasMode("excalidraw");
             lastElementCount = parsed.elements.length;
           }
+          if (done) break;
         }
         const finalParsed = parseStreamingElementsBuffer(streamBuffer);
         if (finalParsed.elements.length === 0) {

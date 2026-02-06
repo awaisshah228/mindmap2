@@ -12,6 +12,7 @@ import { diagramToExcalidraw } from "@/lib/excalidraw-convert";
 import { excalidrawToDiagram } from "@/lib/excalidraw-convert";
 import { diagramToDrawioXml } from "@/lib/diagram-to-drawio";
 import { excalidrawToDrawioXml } from "@/lib/excalidraw-to-drawio";
+import { validateAndFixXml } from "@/lib/drawio-utils";
 import { drawioXmlToDiagram } from "@/lib/drawio-to-diagram";
 import { parseStreamingElementsBuffer } from "@/lib/ai/streaming-json-parser";
 import { normalizeSkeletons } from "@/lib/skeleton-normalize";
@@ -37,6 +38,7 @@ import { DailyNotesPanel } from "@/components/panels/DailyNotesPanel";
 import { ExportImportPanel } from "@/components/panels/ExportImportPanel";
 import { SharePanel } from "@/components/panels/SharePanel";
 import { ThemeProvider } from "@/components/panels/ThemeProvider";
+import { DrawioProvider } from "@/contexts/DrawioContext";
 import {
   Menu,
   Search,
@@ -253,7 +255,9 @@ export default function EditorLayout() {
       setHasUnsavedChanges(true);
       return;
     }
-    const xml = excalidrawToDrawioXml(skeletons as { type: string; id?: string; x: number; y: number; width?: number; height?: number; label?: { text?: string }; start?: { id?: string }; end?: { id?: string } }[]);
+    let xml = excalidrawToDrawioXml(skeletons as { type: string; id?: string; x: number; y: number; width?: number; height?: number; label?: { text?: string }; start?: { id?: string }; end?: { id?: string } }[]);
+    const v = validateAndFixXml(xml);
+    if (v.fixed) xml = v.fixed;
     setDrawioData(xml);
     setCanvasMode("drawio");
     setHasUnsavedChanges(true);
@@ -291,26 +295,33 @@ export default function EditorLayout() {
       const decoder = new TextDecoder();
       let streamBuffer = "";
       let lastCount = 0;
+      const STREAM_BATCH_SIZE = 5;
       const nodeIds = (nodes as { id?: string }[]).map((n) => n.id).filter(Boolean) as string[];
       const reader = res.body.getReader();
       while (true) {
         const { done, value } = await reader.read();
-        if (done) break;
-        streamBuffer += decoder.decode(value, { stream: true });
+        if (value) streamBuffer += decoder.decode(value, { stream: true });
         const parsed = parseStreamingElementsBuffer(streamBuffer);
-        if (parsed.elements.length > lastCount) {
+        const newCount = parsed.elements.length - lastCount;
+        const shouldUpdate = parsed.elements.length > lastCount && (newCount >= STREAM_BATCH_SIZE || done);
+        if (shouldUpdate) {
           const normalized = normalizeSkeletons(parsed.elements, nodeIds);
-          const xml = excalidrawToDrawioXml(normalized as Parameters<typeof excalidrawToDrawioXml>[0]);
+          let xml = excalidrawToDrawioXml(normalized as Parameters<typeof excalidrawToDrawioXml>[0]);
+          const v = validateAndFixXml(xml);
+          if (v.fixed) xml = v.fixed;
           setDrawioData(xml);
           setCanvasMode("drawio");
           lastCount = parsed.elements.length;
         }
+        if (done) break;
       }
       const finalParsed = parseStreamingElementsBuffer(streamBuffer);
       const sk = finalParsed.elements.length > 0
         ? normalizeSkeletons(finalParsed.elements, nodeIds)
         : diagramToExcalidraw(nodes, edges);
-      const xml = excalidrawToDrawioXml(sk as Parameters<typeof excalidrawToDrawioXml>[0]);
+      let xml = excalidrawToDrawioXml(sk as Parameters<typeof excalidrawToDrawioXml>[0]);
+      const v = validateAndFixXml(xml);
+      if (v.fixed) xml = v.fixed;
       setDrawioData(xml);
       setCanvasMode("drawio");
       setHasUnsavedChanges(true);
@@ -359,21 +370,24 @@ export default function EditorLayout() {
       const decoder = new TextDecoder();
       let streamBuffer = "";
       let lastCount = 0;
+      const STREAM_BATCH_SIZE = 5;
       const nodeIds = (nodes as { id?: string }[]).map((n) => n.id).filter(Boolean) as string[];
       const { convertToExcalidrawElements } = await import("@excalidraw/excalidraw");
       const reader = res.body.getReader();
       while (true) {
         const { done, value } = await reader.read();
-        if (done) break;
-        streamBuffer += decoder.decode(value, { stream: true });
+        if (value) streamBuffer += decoder.decode(value, { stream: true });
         const parsed = parseStreamingElementsBuffer(streamBuffer);
-        if (parsed.elements.length > lastCount) {
+        const newCount = parsed.elements.length - lastCount;
+        const shouldUpdate = parsed.elements.length > lastCount && (newCount >= STREAM_BATCH_SIZE || done);
+        if (shouldUpdate) {
           const normalized = normalizeSkeletons(parsed.elements, nodeIds);
           const elements = convertToExcalidrawElements(normalized as never[], { regenerateIds: false });
           setExcalidrawData({ elements, appState: {} });
           setCanvasMode("excalidraw");
           lastCount = parsed.elements.length;
         }
+        if (done) break;
       }
       const finalParsed = parseStreamingElementsBuffer(streamBuffer);
       if (finalParsed.elements.length === 0) {
@@ -828,9 +842,11 @@ export default function EditorLayout() {
               </div>
             )}
             {canvasMode === "drawio" && (
-              <div className="flex-1 relative min-w-0">
-                <DrawioCanvas />
-              </div>
+              <DrawioProvider>
+                <div className="flex-1 relative min-w-0">
+                  <DrawioCanvas />
+                </div>
+              </DrawioProvider>
             )}
           </div>
 

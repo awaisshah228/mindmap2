@@ -26,6 +26,8 @@ type ExcalidrawSkeleton = {
   /** 0–1: where arrow enters target */
   entryX?: number;
   entryY?: number;
+  /** Arrow style: straight (default), curved, orthogonal (stepped), elbow */
+  edgeStyle?: string;
 };
 
 function nextId(): string {
@@ -107,9 +109,8 @@ export function excalidrawToDrawioXml(
     const exitY = clamp01(a.exitY ?? 0.5);
     const entryX = clamp01(a.entryX ?? 0);
     const entryY = clamp01(a.entryY ?? 0.5);
-    // Rounded corners; explicit connection points for clean attachment
-    const edgeStyle = `endArrow=classic;html=1;rounded=1;exitX=${exitX};exitY=${exitY};entryX=${entryX};entryY=${entryY};`;
-    cells.push(`<mxCell id="${aid}" value="${label}" style="${edgeStyle}" edge="1" parent="1" source="${startId}" target="${endId}"><mxGeometry relative="1" as="geometry"/></mxCell>`);
+    const arrowStyle = getArrowStyle(a.edgeStyle, exitX, exitY, entryX, entryY);
+    cells.push(`<mxCell id="${aid}" value="${label}" style="${arrowStyle}" edge="1" parent="1" source="${startId}" target="${endId}"><mxGeometry relative="1" as="geometry"/></mxCell>`);
   }
 
   return `<?xml version="1.0" encoding="UTF-8"?>
@@ -122,6 +123,15 @@ export function excalidrawToDrawioXml(
     </mxGraphModel>
   </diagram>
 </mxfile>`;
+}
+
+function getArrowStyle(edgeStyle: string | undefined, exitX: number, exitY: number, entryX: number, entryY: number): string {
+  const base = `endArrow=classic;html=1;rounded=1;exitX=${exitX};exitY=${exitY};entryX=${entryX};entryY=${entryY};`;
+  const t = (edgeStyle ?? "straight").toLowerCase();
+  if (t === "curved") return `curved=1;${base}`;
+  if (t === "orthogonal") return `edgeStyle=orthogonalEdgeStyle;${base}`;
+  if (t === "elbow") return `edgeStyle=elbowEdgeStyle;${base}`;
+  return base;
 }
 
 function getShapeStyle(type: string, bg: string, stroke: string): string {

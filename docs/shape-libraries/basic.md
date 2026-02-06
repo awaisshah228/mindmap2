@@ -1,14 +1,48 @@
-# Basic Shape Library (Draw.io)
+# basic
 
-Generic shapes for general diagrams. rectangle, diamond, ellipse, text.
+**Type:** mxgraph shapes
+**Prefix:** `mxgraph.basic`
 
-## Shapes
-- **rectangle**: Process, component, container. rounded=0 or rounded=1
-- **diamond**: Decision, branch point
-- **ellipse**: Start, end, emphasis
-- **text**: Labels, notes. Use for long text without a shape
+## Usage
 
-## Colors
-- Default fill: #e7f5ff
-- Default stroke: #1971c2
-- Variants: #fff3bf (yellow), #d3f9d8 (green) for contrast
+```xml
+<mxCell value="label" style="shape=mxgraph.basic.{shape};fillColor=#fff2cc;strokeColor=#d6b656;" vertex="1" parent="1">
+  <mxGeometry x="0" y="0" width="60" height="60" as="geometry" />
+</mxCell>
+```
+
+
+
+## Shapes (31)
+
+- `4_point_star`
+- `6_point_star`
+- `8_point_star`
+- `banner`
+- `cloud_callout`
+- `cloud_rect`
+- `cone`
+- `cross`
+- `document`
+- `flash`
+- `half_circle`
+- `heart`
+- `loud_callout`
+- `moon`
+- `mxgraph.basic`
+- `no_symbol`
+- `octagon`
+- `orthogonal_triangle`
+- `oval_callout`
+- `parallelepiped`
+- `pentagon`
+- `pointed_oval`
+- `rectangular_callout`
+- `rounded_rectangular_callout`
+- `smiley`
+- `star`
+- `sun`
+- `tick`
+- `trapezoid`
+- `wave`
+- `x`

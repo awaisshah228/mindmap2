@@ -1,15 +1,60 @@
-# BPMN Shape Library (Draw.io)
+# bpmn
 
-Business process modeling. Use swimlanes for lanes, rectangles for tasks, diamonds for gateways.
+**Type:** mxgraph shapes
+**Prefix:** `mxgraph.bpmn`
 
-## Layout
-- **Swimlanes**: Horizontal lanes (one per role/actor). Use type "swimlane" or grouped rectangles.
-- **Tasks**: rectangle, 140×50, backgroundColor #e7f5ff
-- **Events**: ellipse for start/end
-- **Gateways**: diamond for XOR/AND decisions
+## Usage
 
-## Flow
-- Left-to-right within swimlanes
-- Spacing: 180px horizontal, 140px vertical between shapes. No overlap.
-- Cross-lane arrows for handoffs
-- Gateway edges: label "yes/no" or condition
+```xml
+<mxCell value="label" style="shape=mxgraph.bpmn.shape;symbol=message;outline=throwing;" vertex="1" parent="1">
+  <mxGeometry x="0" y="0" width="60" height="60" as="geometry" />
+</mxCell>
+```
+
+## Parameters
+
+- `outline` - Event type: `start`, `end`, `catching`, `throwing`, `none`
+- `symbol` - Icon inside: `message`, `timer`, `error`, `cancel`, `compensation`, `link`, `terminate`, `general`, `multiple`, `rule`
+
+## Shapes (40)
+
+- `ad_hoc`
+- `business_rule_task`
+- `cancel_end`
+- `cancel_intermediate`
+- `compensation`
+- `compensation_end`
+- `compensation_intermediate`
+- `error_end`
+- `error_intermediate`
+- `gateway`
+- `gateway_and`
+- `gateway_complex`
+- `gateway_or`
+- `gateway_xor_(data)`
+- `gateway_xor_(event)`
+- `general_end`
+- `general_intermediate`
+- `general_start`
+- `link_end`
+- `link_intermediate`
+- `link_start`
+- `loop`
+- `loop_marker`
+- `manual_task`
+- `message_end`
+- `message_intermediate`
+- `message_start`
+- `multiple_end`
+- `multiple_instances`
+- `multiple_intermediate`
+- `multiple_start`
+- `mxgraph.bpmn`
+- `rule_intermediate`
+- `rule_start`
+- `script_task`
+- `service_task`
+- `terminate`
+- `timer_intermediate`
+- `timer_start`
+- `user_task`
