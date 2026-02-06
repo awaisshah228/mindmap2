@@ -120,6 +120,8 @@ interface CanvasState {
   pendingShape: ShapeType | null;
   pendingEmoji: string | null;
   pendingIconId: string | null;
+  /** Custom icon data URL (uploaded image used as icon). */
+  pendingCustomIcon: string | null;
   /** When set, next canvas click adds an image node with this URL and optional label. */
   pendingImageUrl: string | null;
   pendingImageLabel: string | null;
@@ -172,6 +174,7 @@ interface CanvasState {
 
   /** Settings panel */
   settingsOpen: boolean;
+  settingsInitialTab: string | null;
 
   /** Daily notes */
   dailyNotes: Record<string, string>; // key = YYYY-MM-DD
@@ -229,7 +232,7 @@ interface CanvasState {
   setFocusedBranchNodeId: (id: string | null) => void;
 
   setShortcutsOpen: (open: boolean) => void;
-  setSettingsOpen: (open: boolean) => void;
+  setSettingsOpen: (open: boolean, initialTab?: string) => void;
 
   setDailyNote: (date: string, note: string) => void;
   setDailyNotesOpen: (open: boolean) => void;
@@ -253,6 +256,7 @@ interface CanvasState {
   setPendingShape: (shape: ShapeType | null) => void;
   setPendingEmoji: (emoji: string | null) => void;
   setPendingIconId: (id: string | null) => void;
+  setPendingCustomIcon: (dataUrl: string | null) => void;
   setPendingImage: (url: string | null, label?: string | null) => void;
   setPendingEdgeType: (type: PendingEdgeType) => void;
   setPendingFitView: (value: boolean) => void;
@@ -280,6 +284,7 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
   pendingShape: null,
   pendingEmoji: null,
   pendingIconId: null,
+  pendingCustomIcon: null,
   pendingImageUrl: null,
   pendingImageLabel: null,
   pendingEdgeType: "default",
@@ -304,6 +309,7 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
   focusedBranchNodeId: null,
   shortcutsOpen: false,
   settingsOpen: false,
+  settingsInitialTab: null,
   dailyNotes: {},
   dailyNotesOpen: false,
   aiPrompts: DEFAULT_AI_PROMPTS,
@@ -513,7 +519,7 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
   setFocusedBranchNodeId: (id) => set({ focusedBranchNodeId: id }),
 
   setShortcutsOpen: (open) => set({ shortcutsOpen: open }),
-  setSettingsOpen: (open) => set({ settingsOpen: open }),
+  setSettingsOpen: (open, initialTab) => set({ settingsOpen: open, settingsInitialTab: initialTab ?? null }),
 
   setDailyNote: (date, note) =>
     set((s) => ({ dailyNotes: { ...s.dailyNotes, [date]: note } })),
@@ -551,6 +557,7 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
   setPendingShape: (shape) => set({ pendingShape: shape }),
   setPendingEmoji: (emoji) => set({ pendingEmoji: emoji }),
   setPendingIconId: (id) => set({ pendingIconId: id }),
+  setPendingCustomIcon: (dataUrl) => set({ pendingCustomIcon: dataUrl }),
   setPendingImage: (url, label) =>
     set({ pendingImageUrl: url ?? null, pendingImageLabel: label ?? null }),
   setPendingEdgeType: (type) => set({ pendingEdgeType: type }),

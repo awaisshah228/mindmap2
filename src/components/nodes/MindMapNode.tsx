@@ -1,11 +1,12 @@
 "use client";
 
-import { memo, useCallback, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Handle,
   type NodeProps,
   Position,
   useReactFlow,
+  useUpdateNodeInternals,
   NodeResizer,
   type Node,
   type Edge,
@@ -32,6 +33,7 @@ import { useMindMapLayout, useMindMapUpdateNodeData } from "@/contexts/MindMapLa
 import { getChildCount } from "@/lib/mindmap-utils";
 import { useCanvasStore } from "@/lib/store/canvas-store";
 import { getIconById } from "@/lib/icon-registry";
+import type { ExtraHandle } from "./BaseNode";
 
 function MindMapNode({ id, data, selected }: NodeProps) {
   const mindMapLayout = useCanvasStore((s) => s.mindMapLayout);
@@ -45,19 +47,35 @@ function MindMapNode({ id, data, selected }: NodeProps) {
   const addAndLayout = useMindMapLayout();
   const pushUndo = useCanvasStore((s) => s.pushUndo);
   const updateNodeData = useMindMapUpdateNodeData();
-  const edges = getEdges();
-  const childCount = getChildCount(id, edges);
-  const hasChildren = childCount > 0;
-  const branchStyle = getNodeBranchStyle(
-    id,
-    edges,
-    data.color as string | undefined
-  );
+  // Avoid calling getEdges() on every render — memoize derived values
+  const { childCount, hasChildren, branchStyle } = useMemo(() => {
+    const edges = getEdges();
+    const cc = getChildCount(id, edges);
+    return {
+      childCount: cc,
+      hasChildren: cc > 0,
+      branchStyle: getNodeBranchStyle(id, edges, data.color as string | undefined),
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [id, data.color]);
   const customIcon = data.customIcon as string | undefined;
   const iconDef = getIconById(data.icon as string);
   const IconComponent = iconDef?.Icon;
   const router = useRouter();
   const presentationMode = useCanvasStore((s) => s.presentationMode);
+  const activeTool = useCanvasStore((s) => s.activeTool);
+
+  // Extra handles from node data
+  const extraHandles: ExtraHandle[] = useMemo(
+    () => (data?.extraHandles as ExtraHandle[] | undefined) ?? [],
+    [data?.extraHandles]
+  );
+
+  // When extra handles change, tell React Flow to re-register the handles
+  const updateNodeInternals = useUpdateNodeInternals();
+  useEffect(() => {
+    updateNodeInternals(id);
+  }, [id, extraHandles, updateNodeInternals]);
 
   const handleToggleCollapse = useCallback(
     (e: React.MouseEvent) => {
@@ -145,7 +163,7 @@ function MindMapNode({ id, data, selected }: NodeProps) {
     addAndLayout?.(newNode, newEdge);
   }, [id, getNodes, addAndLayout, sourceHandleId, targetHandleId]);
 
-  const isRoot = !edges.some((e) => e.target === id);
+  const isRoot = useMemo(() => !getEdges().some((e: { target: string }) => e.target === id), [id, getEdges]);
   const editRef = useRef<HTMLDivElement>(null);
 
   const handleEdit = useCallback((e: React.MouseEvent) => {
@@ -172,6 +190,34 @@ function MindMapNode({ id, data, selected }: NodeProps) {
           onResizeStart={() => pushUndo()}
         />
       )}
+      {/* Easy-connect overlay for connector tool — at top level for React Flow */}
+      {activeTool === "connector" && (
+        <Handle
+          type="source"
+          position={Position.Right}
+          id="__easy-connect__"
+          className="!absolute !inset-0 !w-full !h-full !rounded-none !bg-transparent !border-none !transform-none !left-0 !top-0 !translate-x-0 !translate-y-0 !opacity-0 hover:!opacity-100 hover:!bg-violet-400/10 !cursor-crosshair !transition-colors"
+        />
+      )}
+      {/* Extra handles added by user — at top level for React Flow positioning */}
+      {extraHandles.map((h) => {
+        const posMap: Record<string, Position> = { top: Position.Top, bottom: Position.Bottom, left: Position.Left, right: Position.Right };
+        const sty: React.CSSProperties =
+          h.position === "top" || h.position === "bottom"
+            ? { left: `${h.offset}%` }
+            : { top: `${h.offset}%` };
+        return (
+          <Handle
+            key={h.id}
+            id={h.id}
+            type="source"
+            isConnectable
+            position={posMap[h.position] ?? Position.Right}
+            style={sty}
+            className="extra-user-handle"
+          />
+        );
+      })}
       <div
         className={cn(
           "group flex items-center transition-all",
@@ -185,8 +231,8 @@ function MindMapNode({ id, data, selected }: NodeProps) {
         onMouseLeave={onMouseLeave}
       >
         {/* All 4 handles so edges always find their connection point (avoids disappearing when direction/layout mismatch) */}
-        {/* Drag handle: large tap target for dragging on mobile — hidden in presentation */}
-        {!presentationMode && (
+        {/* Drag handle: large tap target for dragging on mobile — hidden in presentation & connector mode */}
+        {!presentationMode && activeTool !== "connector" && (
           <div
             className="shrink-0 flex items-center justify-center w-9 min-w-[36px] h-9 min-h-[36px] rounded-l-2xl cursor-grab active:cursor-grabbing touch-manipulation opacity-70 hover:opacity-100 transition-opacity border border-transparent border-r-0"
             style={{
@@ -199,63 +245,18 @@ function MindMapNode({ id, data, selected }: NodeProps) {
             <GripVertical className="w-5 h-5" style={{ color: branchStyle.stroke }} />
           </div>
         )}
-        {/* Handles: always rendered (edges need them), but invisible in presentation mode */}
-        <Handle
-          id="left"
-          type={sourceHandleId === "left" ? "source" : "target"}
-          position={Position.Left}
-          className={cn(
-            "!rounded-full !border-2 !transition-all",
-            presentationMode
-              ? "!w-0 !h-0 !min-w-0 !min-h-0 !opacity-0 !border-0"
-              : "!w-5 !h-5 !min-w-5 !min-h-5 !-left-2.5 !top-1/2 !-translate-y-1/2",
-            !presentationMode && (selected ? "!border-gray-300/60 !opacity-60 hover:!opacity-100" : "!opacity-0")
-          )}
-          style={!presentationMode && selected ? { backgroundColor: branchStyle.bg, borderColor: branchStyle.stroke } : undefined}
-        />
-        <Handle
-          id="right"
-          type={sourceHandleId === "right" ? "source" : "target"}
-          position={Position.Right}
-          className={cn(
-            "!rounded-full !border-2 !transition-all",
-            presentationMode
-              ? "!w-0 !h-0 !min-w-0 !min-h-0 !opacity-0 !border-0"
-              : "!w-5 !h-5 !min-w-5 !min-h-5 !-right-2.5 !top-1/2 !-translate-y-1/2",
-            !presentationMode && (selected ? "!border-gray-300/60 !opacity-60 hover:!opacity-100" : "!opacity-0")
-          )}
-          style={!presentationMode && selected ? { backgroundColor: branchStyle.bg, borderColor: branchStyle.stroke } : undefined}
-        />
-        <Handle
-          id="top"
-          type={sourceHandleId === "top" ? "source" : "target"}
-          position={Position.Top}
-          className={cn(
-            "!rounded-full !border-2 !transition-all",
-            presentationMode
-              ? "!w-0 !h-0 !min-w-0 !min-h-0 !opacity-0 !border-0"
-              : "!w-5 !h-5 !min-w-5 !min-h-5 !-top-2.5 !left-1/2 !-translate-x-1/2",
-            !presentationMode && (selected ? "!border-gray-300/60 !opacity-60 hover:!opacity-100" : "!opacity-0")
-          )}
-          style={!presentationMode && selected ? { backgroundColor: branchStyle.bg, borderColor: branchStyle.stroke } : undefined}
-        />
-        <Handle
-          id="bottom"
-          type={sourceHandleId === "bottom" ? "source" : "target"}
-          position={Position.Bottom}
-          className={cn(
-            "!rounded-full !border-2 !transition-all",
-            presentationMode
-              ? "!w-0 !h-0 !min-w-0 !min-h-0 !opacity-0 !border-0"
-              : "!w-5 !h-5 !min-w-5 !min-h-5 !-bottom-2.5 !left-1/2 !-translate-x-1/2",
-            !presentationMode && (selected ? "!border-gray-300/60 !opacity-60 hover:!opacity-100" : "!opacity-0")
-          )}
-          style={!presentationMode && selected ? { backgroundColor: branchStyle.bg, borderColor: branchStyle.stroke } : undefined}
-        />
+        {/* Handles: always rendered (edges need them), but invisible in presentation mode.
+            All handles are type="source" — with ConnectionMode.Loose this allows
+            connecting from/to any handle without direction issues. */}
+        <Handle id="left" type="source" position={Position.Left} className="node-connect-handle" />
+        <Handle id="right" type="source" position={Position.Right} className="node-connect-handle" />
+        <Handle id="top" type="source" position={Position.Top} className="node-connect-handle" />
+        <Handle id="bottom" type="source" position={Position.Bottom} className="node-connect-handle" />
         <div
           className={cn(
-            "nodrag flex-1 min-w-0 flex items-center gap-2 px-3 py-2.5 transition-all shadow-sm",
-            presentationMode ? "rounded-2xl" : "rounded-r-2xl rounded-l-none",
+            "flex-1 min-w-0 flex items-center gap-2 px-3 py-2.5 transition-all shadow-sm",
+            (activeTool === "connector" || activeTool === "freeDraw" || activeTool === "eraser") && "nodrag",
+            presentationMode ? "rounded-2xl" : activeTool === "connector" ? "rounded-2xl" : "rounded-r-2xl rounded-l-none",
             "border border-transparent",
             selected && !presentationMode && "ring-2 ring-violet-400 ring-offset-2 shadow-md"
           )}

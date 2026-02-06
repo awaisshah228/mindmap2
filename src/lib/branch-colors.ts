@@ -41,24 +41,40 @@ export const BRANCH_TEXT_COLORS = [
   "rgb(88 28 135)",    // dark purple
 ];
 
+/**
+ * Walk up the parent chain using the parentMap, stopping if a cycle is
+ * detected (visited set) to prevent infinite loops in cyclic graphs.
+ */
+function walkToRoot(startId: string, parentMap: Map<string, string>): string[] {
+  const path: string[] = [startId];
+  const visited = new Set<string>([startId]);
+  let current = startId;
+  while (parentMap.has(current)) {
+    const parent = parentMap.get(current)!;
+    if (visited.has(parent)) break; // cycle detected — stop
+    visited.add(parent);
+    current = parent;
+    path.unshift(current);
+  }
+  return path;
+}
+
+function hashString(s: string): number {
+  let hash = 0;
+  for (let i = 0; i < s.length; i++) {
+    hash = (hash << 5) - hash + s.charCodeAt(i);
+    hash |= 0;
+  }
+  return hash;
+}
+
 function getBranchIndex(nodeId: string, edges: { source: string; target: string }[]): number {
   const parentMap = new Map<string, string>();
   edges.forEach((e) => parentMap.set(e.target, e.source));
 
-  const path: string[] = [nodeId];
-  let current = nodeId;
-  while (parentMap.has(current)) {
-    current = parentMap.get(current)!;
-    path.unshift(current);
-  }
-
+  const path = walkToRoot(nodeId, parentMap);
   const branchId = path.length >= 2 ? path[1] : nodeId;
-  let hash = 0;
-  for (let i = 0; i < branchId.length; i++) {
-    hash = (hash << 5) - hash + branchId.charCodeAt(i);
-    hash |= 0;
-  }
-  return Math.abs(hash) % BRANCH_STROKE_COLORS.length;
+  return Math.abs(hashString(branchId)) % BRANCH_STROKE_COLORS.length;
 }
 
 export function getBranchStrokeColor(
@@ -68,19 +84,10 @@ export function getBranchStrokeColor(
 ): string {
   const parentMap = new Map<string, string>();
   edges.forEach((e) => parentMap.set(e.target, e.source));
-  const path: string[] = [source];
-  let current = source;
-  while (parentMap.has(current)) {
-    current = parentMap.get(current)!;
-    path.unshift(current);
-  }
+
+  const path = walkToRoot(source, parentMap);
   const branchId = path.length >= 2 ? path[1] : target;
-  let hash = 0;
-  for (let i = 0; i < branchId.length; i++) {
-    hash = (hash << 5) - hash + branchId.charCodeAt(i);
-    hash |= 0;
-  }
-  const idx = Math.abs(hash) % BRANCH_STROKE_COLORS.length;
+  const idx = Math.abs(hashString(branchId)) % BRANCH_STROKE_COLORS.length;
   return BRANCH_STROKE_COLORS[idx];
 }
 

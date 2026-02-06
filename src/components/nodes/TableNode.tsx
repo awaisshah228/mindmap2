@@ -96,10 +96,10 @@ function TableNodeComponent({ id, data, selected }: NodeProps) {
           <Plus className="w-4 h-4" />
         </button>
       </div>
-      <Handle id="top" type="target" position={Position.Top} className={cn("!w-5 !h-5 !-top-2.5 !left-1/2 !-translate-x-1/2 !rounded !border-2 !transition-all", selected ? "!border-violet-400/50 !bg-white/90 hover:!bg-violet-50" : "!opacity-0")} />
-      <Handle id="bottom" type="source" position={Position.Bottom} className={cn("!w-5 !h-5 !-bottom-2.5 !left-1/2 !-translate-x-1/2 !rounded !border-2 !transition-all", selected ? "!border-violet-400/50 !bg-white/90 hover:!bg-violet-50" : "!opacity-0")} />
-      <Handle id="left" type="target" position={Position.Left} className={cn("!w-5 !h-5 !-left-2.5 !top-1/2 !-translate-y-1/2 !rounded !border-2 !transition-all", selected ? "!border-violet-400/50 !bg-white/90 hover:!bg-violet-50" : "!opacity-0")} />
-      <Handle id="right" type="source" position={Position.Right} className={cn("!w-5 !h-5 !-right-2.5 !top-1/2 !-translate-y-1/2 !rounded !border-2 !transition-all", selected ? "!border-violet-400/50 !bg-white/90 hover:!bg-violet-50" : "!opacity-0")} />
+      <Handle id="top" type="source" position={Position.Top} className="node-connect-handle" />
+      <Handle id="bottom" type="source" position={Position.Bottom} className="node-connect-handle" />
+      <Handle id="left" type="source" position={Position.Left} className="node-connect-handle" />
+      <Handle id="right" type="source" position={Position.Right} className="node-connect-handle" />
     </BaseNode>
   );
 }

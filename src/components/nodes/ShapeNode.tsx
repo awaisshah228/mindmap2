@@ -2,7 +2,6 @@
 
 import { memo } from "react";
 import { Handle, type NodeProps, Position } from "@xyflow/react";
-import { cn } from "@/lib/utils";
 import { BaseNode } from "./BaseNode";
 import { EditableNodeContent } from "./EditableNodeContent";
 import { SHAPE_PATHS, type ShapeType } from "@/lib/shape-types";
@@ -67,11 +66,11 @@ function ShapeNode({ id, data, selected }: NodeProps) {
             />
           </div>
         </div>
-        {/* Easy Connect: circles visible only when node selected */}
-        <Handle id="top" type="target" position={Position.Top} className={cn("!w-5 !h-5 !-top-2.5 !left-1/2 !-translate-x-1/2 !rounded !border-2 !transition-all", selected ? "!border-violet-400/50 !bg-white/90 hover:!bg-violet-50" : "!opacity-0")} />
-        <Handle id="bottom" type="source" position={Position.Bottom} className={cn("!w-5 !h-5 !-bottom-2.5 !left-1/2 !-translate-x-1/2 !rounded !border-2 !transition-all", selected ? "!border-violet-400/50 !bg-white/90 hover:!bg-violet-50" : "!opacity-0")} />
-        <Handle id="left" type="target" position={Position.Left} className={cn("!w-5 !h-5 !-left-2.5 !top-1/2 !-translate-y-1/2 !rounded !border-2 !transition-all", selected ? "!border-violet-400/50 !bg-white/90 hover:!bg-violet-50" : "!opacity-0")} />
-        <Handle id="right" type="source" position={Position.Right} className={cn("!w-5 !h-5 !-right-2.5 !top-1/2 !-translate-y-1/2 !rounded !border-2 !transition-all", selected ? "!border-violet-400/50 !bg-white/90 hover:!bg-violet-50" : "!opacity-0")} />
+        {/* Connection handles — invisible unless selected (CSS driven) */}
+        <Handle id="top" type="source" position={Position.Top} className="node-connect-handle" />
+        <Handle id="bottom" type="source" position={Position.Bottom} className="node-connect-handle" />
+        <Handle id="left" type="source" position={Position.Left} className="node-connect-handle" />
+        <Handle id="right" type="source" position={Position.Right} className="node-connect-handle" />
     </BaseNode>
   );
 }

@@ -25,10 +25,10 @@ function QueueNode({ id, data, selected }: NodeProps) {
       minWidth={90}
       minHeight={50}
     >
-      <Handle type="target" position={Position.Left} className="!w-2 !h-2 !-left-1 !top-1/2 !-translate-y-1/2" />
-      <Handle type="source" position={Position.Right} className="!w-2 !h-2 !-right-1 !top-1/2 !-translate-y-1/2" />
-      <Handle type="target" position={Position.Top} className="!w-2 !h-2 !-top-1 !left-1/2 !-translate-x-1/2" />
-      <Handle type="source" position={Position.Bottom} className="!w-2 !h-2 !-bottom-1 !left-1/2 !-translate-x-1/2" />
+      <Handle id="left" type="source" position={Position.Left} className="node-connect-handle" />
+      <Handle id="right" type="source" position={Position.Right} className="node-connect-handle" />
+      <Handle id="top" type="source" position={Position.Top} className="node-connect-handle" />
+      <Handle id="bottom" type="source" position={Position.Bottom} className="node-connect-handle" />
 
       <div className="h-full flex items-center gap-3 px-3 py-2 bg-gradient-to-br from-emerald-50 to-emerald-100/80">
         <div className="shrink-0 w-9 h-9 rounded-lg bg-emerald-200/80 flex items-center justify-center">

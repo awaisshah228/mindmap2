@@ -26,6 +26,8 @@ import {
   Trash2,
   Replace,
   ChevronDown,
+  GitBranchPlus,
+  Tag,
 } from "lucide-react";
 import type { Node } from "@xyflow/react";
 import { cn } from "@/lib/utils";
@@ -41,6 +43,7 @@ const SHAPE_COLOR_PALETTE = [
 ];
 import { IconPickerPanel } from "@/components/panels/IconPickerPanel";
 import type { FontSize } from "@/components/nodes/EditableNodeContent";
+import type { ExtraHandle } from "@/components/nodes/BaseNode";
 
 /** Node types that use the shape picker (rectangle, diamond, circle, document). */
 const SHAPE_NODE_TYPES = ["rectangle", "diamond", "circle", "document"];
@@ -64,6 +67,7 @@ export function NodeInlineToolbar({ nodeId, selected = false }: NodeInlineToolba
   const [fontSizeOpen, setFontSizeOpen] = useState(false);
   const [shapeOpen, setShapeOpen] = useState(false);
   const [replaceOpen, setReplaceOpen] = useState(false);
+  const [handlesOpen, setHandlesOpen] = useState(false);
   const hoveredNodeId = useCanvasStore((s) => s.hoveredNodeId);
   const { getNode, getNodes, setNodes, deleteElements, updateNodeData } = useReactFlow();
   const node = getNode(nodeId);
@@ -237,6 +241,55 @@ export function NodeInlineToolbar({ nodeId, selected = false }: NodeInlineToolba
     );
     setReplaceOpen(false);
   };
+
+  // ── Handle management ──
+  const extraHandles: ExtraHandle[] = (node?.data?.extraHandles as ExtraHandle[] | undefined) ?? [];
+  const HANDLE_SIDES: ExtraHandle["position"][] = ["top", "right", "bottom", "left"];
+
+  /** Count of extra handles on a given side */
+  const handleCountPerSide = (side: ExtraHandle["position"]) =>
+    extraHandles.filter((h) => h.position === side).length;
+
+  /** Add a handle on a specific side. Offset is auto-distributed evenly. */
+  const handleAddHandle = (side: ExtraHandle["position"]) => {
+    pushUndo();
+    const existing = extraHandles.filter((h) => h.position === side);
+    const count = existing.length + 1;
+    // Re-distribute offsets evenly across the side (including the new one)
+    const redistributed: ExtraHandle[] = [];
+    for (let i = 0; i < count; i++) {
+      const offset = Math.round(((i + 1) / (count + 1)) * 100);
+      redistributed.push({
+        id: existing[i]?.id ?? `extra-${side}-${Date.now()}-${i}`,
+        position: side,
+        offset,
+      });
+    }
+    // Keep handles from other sides + redistributed handles for this side
+    const otherHandles = extraHandles.filter((h) => h.position !== side);
+    updateNodeData(nodeId, { extraHandles: [...otherHandles, ...redistributed] });
+  };
+
+  /** Remove the last handle on a specific side. */
+  const handleRemoveHandle = (side: ExtraHandle["position"]) => {
+    pushUndo();
+    const existing = extraHandles.filter((h) => h.position === side);
+    if (existing.length === 0) return;
+    // Remove the last one, re-distribute remaining
+    const remaining = existing.slice(0, -1);
+    const count = remaining.length;
+    const redistributed = remaining.map((h, i) => ({
+      ...h,
+      offset: Math.round(((i + 1) / (count + 1)) * 100),
+    }));
+    const otherHandles = extraHandles.filter((h) => h.position !== side);
+    updateNodeData(nodeId, { extraHandles: [...otherHandles, ...redistributed] });
+  };
+
+  /** Whether this node type supports handles management */
+  const hasHandleManagement = ![
+    "freeDraw", "edgeAnchor", "group",
+  ].includes(nodeType);
 
   return (
     <NodeToolbar position={Position.Top} offset={8} align="center" isVisible={toolbarVisible}>
@@ -480,6 +533,88 @@ export function NodeInlineToolbar({ nodeId, selected = false }: NodeInlineToolba
             </Popover.Portal>
           </Popover.Root>
         )}
+        {hasHandleManagement && (
+          <Popover.Root open={handlesOpen} onOpenChange={setHandlesOpen}>
+            <Popover.Trigger asChild>
+              <button
+                type="button"
+                title="Manage handles"
+                className="p-1.5 rounded hover:bg-gray-600 transition-colors flex items-center gap-0.5"
+                aria-label="Manage handles"
+              >
+                <GitBranchPlus className="w-3.5 h-3.5" />
+                {extraHandles.length > 0 && (
+                  <span className="text-[9px] text-violet-300 font-bold">{extraHandles.length}</span>
+                )}
+                <ChevronDown className="w-2.5 h-2.5 opacity-60" />
+              </button>
+            </Popover.Trigger>
+            <Popover.Portal>
+              <Popover.Content
+                className="z-50 w-52 p-2.5 rounded-lg bg-gray-800 border border-gray-600 shadow-lg"
+                sideOffset={4}
+                align="start"
+              >
+                <div className="text-xs font-medium text-gray-400 mb-2">Extra Handles</div>
+                <div className="flex flex-col gap-1.5">
+                  {HANDLE_SIDES.map((side) => {
+                    const count = handleCountPerSide(side);
+                    return (
+                      <div key={side} className="flex items-center justify-between px-1">
+                        <span className="text-xs text-gray-300 capitalize w-14">{side}</span>
+                        <div className="flex items-center gap-1">
+                          <button
+                            type="button"
+                            onClick={() => handleRemoveHandle(side)}
+                            disabled={count === 0}
+                            className="w-6 h-6 flex items-center justify-center rounded hover:bg-gray-600 text-gray-400 hover:text-white disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+                            title={`Remove handle from ${side}`}
+                          >
+                            <Minus className="w-3 h-3" />
+                          </button>
+                          <span className="text-xs font-mono text-gray-200 w-4 text-center">{count}</span>
+                          <button
+                            type="button"
+                            onClick={() => handleAddHandle(side)}
+                            disabled={count >= 5}
+                            className="w-6 h-6 flex items-center justify-center rounded hover:bg-gray-600 text-gray-400 hover:text-white disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+                            title={`Add handle to ${side}`}
+                          >
+                            <Plus className="w-3 h-3" />
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+                {extraHandles.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      pushUndo();
+                      updateNodeData(nodeId, { extraHandles: [] });
+                    }}
+                    className="mt-2 w-full text-xs text-gray-400 hover:text-white py-1.5 rounded hover:bg-gray-700 transition-colors"
+                  >
+                    Remove all handles
+                  </button>
+                )}
+              </Popover.Content>
+            </Popover.Portal>
+          </Popover.Root>
+        )}
+        <ToolbarButton
+          title={node?.data?.annotation ? "Edit label" : "Add label"}
+          onClick={() => {
+            if (!node?.data?.annotation) {
+              pushUndo();
+              updateNodeData(nodeId, { annotation: "Label" });
+            }
+          }}
+          active={!!node?.data?.annotation}
+        >
+          <Tag className="w-3.5 h-3.5" />
+        </ToolbarButton>
         <ToolbarButton title="Focus mode" onClick={handleFocusMode} active={focusedBranchNodeId === nodeId}>
           <Focus className="w-3.5 h-3.5" />
         </ToolbarButton>

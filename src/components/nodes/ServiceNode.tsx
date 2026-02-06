@@ -26,10 +26,10 @@ function ServiceNode({ id, data, selected }: NodeProps) {
       minWidth={100}
       minHeight={56}
     >
-      <Handle type="target" position={Position.Left} id="left" className="!w-2 !h-2 !-left-1 !top-1/2 !-translate-y-1/2" />
-      <Handle type="source" position={Position.Right} id="right" className="!w-2 !h-2 !-right-1 !top-1/2 !-translate-y-1/2" />
-      <Handle type="target" position={Position.Top} id="top" className="!w-2 !h-2 !-top-1 !left-1/2 !-translate-x-1/2" />
-      <Handle type="source" position={Position.Bottom} id="bottom" className="!w-2 !h-2 !-bottom-1 !left-1/2 !-translate-x-1/2" />
+      <Handle type="source" position={Position.Left} id="left" className="node-connect-handle" />
+      <Handle type="source" position={Position.Right} id="right" className="node-connect-handle" />
+      <Handle type="source" position={Position.Top} id="top" className="node-connect-handle" />
+      <Handle type="source" position={Position.Bottom} id="bottom" className="node-connect-handle" />
 
       <div className="h-full flex items-center gap-3 px-4 py-2 bg-gradient-to-br from-slate-50 to-slate-100">
         <div className="shrink-0 w-10 h-10 rounded-lg bg-violet-100 flex items-center justify-center">

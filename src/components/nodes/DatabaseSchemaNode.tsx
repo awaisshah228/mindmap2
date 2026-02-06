@@ -119,10 +119,10 @@ function DatabaseSchemaNode({ id, data, selected }: NodeProps) {
       minHeight={120}
     >
       {/* Edge handles */}
-      <Handle type="target" position={Position.Left} id="left" className="!w-3 !h-3 !-left-1.5 !top-1/2 !-translate-y-1/2 !bg-slate-400 !border-2 !border-white" />
-      <Handle type="source" position={Position.Right} id="right" className="!w-3 !h-3 !-right-1.5 !top-1/2 !-translate-y-1/2 !bg-slate-400 !border-2 !border-white" />
-      <Handle type="target" position={Position.Top} id="top" className="!w-3 !h-3 !-top-1.5 !left-1/2 !-translate-x-1/2 !bg-slate-400 !border-2 !border-white" />
-      <Handle type="source" position={Position.Bottom} id="bottom" className="!w-3 !h-3 !-bottom-1.5 !left-1/2 !-translate-x-1/2 !bg-slate-400 !border-2 !border-white" />
+      <Handle type="source" position={Position.Left} id="left" className="node-connect-handle" />
+      <Handle type="source" position={Position.Right} id="right" className="node-connect-handle" />
+      <Handle type="source" position={Position.Top} id="top" className="node-connect-handle" />
+      <Handle type="source" position={Position.Bottom} id="bottom" className="node-connect-handle" />
 
       <div className="flex flex-col h-full overflow-hidden rounded-lg">
         {/* Header */}

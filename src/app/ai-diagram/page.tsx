@@ -12,7 +12,7 @@ import {
 import { buildSystemPrompt, buildUserMessage } from "@/lib/ai/prompt-builder";
 import { streamDiagramGeneration } from "@/lib/ai/frontend-ai";
 import EditorLayout from "@/components/layout/EditorLayout";
-import { Loader2 } from "lucide-react";
+import { Loader2, Settings } from "lucide-react";
 
 export const DIAGRAM_TYPE_OPTIONS = [
   { value: "auto", label: "Auto detect (default)" },
@@ -40,6 +40,42 @@ export const DIAGRAM_PRESETS = [
 ] as const;
 
 export type PresetValue = (typeof DIAGRAM_PRESETS)[number]["value"];
+
+/** Small badge showing current model + API key status below the prompt textarea. */
+function ModelStatusBadge() {
+  const llmProvider = useCanvasStore((s) => s.llmProvider);
+  const llmModel = useCanvasStore((s) => s.llmModel);
+  const llmApiKey = useCanvasStore((s) => s.llmApiKey);
+  const hasKey = Boolean(llmApiKey);
+
+  const providerLabel =
+    llmProvider === "openai" ? "OpenAI"
+    : llmProvider === "anthropic" ? "Anthropic"
+    : llmProvider === "google" ? "Google"
+    : llmProvider === "openrouter" ? "OpenRouter"
+    : "Custom";
+
+  // Shorten model name for display
+  const modelShort = llmModel.length > 28 ? llmModel.slice(0, 26) + "…" : llmModel;
+
+  return (
+    <button
+      type="button"
+      onClick={() => useCanvasStore.getState().setSettingsOpen(true, "integration")}
+      className="flex items-center gap-2 text-[11px] text-gray-400 hover:text-gray-600 transition-colors"
+      title="Click to change AI model or API key"
+    >
+      <span className="flex items-center gap-1">
+        <span className={`w-1.5 h-1.5 rounded-full ${hasKey ? "bg-green-500" : "bg-amber-400"}`} />
+        {providerLabel}
+      </span>
+      <span className="text-gray-300">·</span>
+      <span className="font-mono truncate max-w-[180px]">{modelShort}</span>
+      <span className="text-gray-300">·</span>
+      <span>{hasKey ? "Own key" : "Server key"}</span>
+    </button>
+  );
+}
 
 export default function AIDiagramPageWrapper() {
   return (
@@ -445,13 +481,23 @@ function AIDiagramPage() {
             <h2 className="text-sm font-semibold text-gray-900">
               AI Diagram Generator
             </h2>
-            <button
-              type="button"
-              onClick={() => router.back()}
-              className="text-xs text-gray-500 hover:text-gray-700"
-            >
-              Close
-            </button>
+            <div className="flex items-center gap-1">
+              <button
+                type="button"
+                onClick={() => useCanvasStore.getState().setSettingsOpen(true, "integration")}
+                className="p-1.5 rounded-lg hover:bg-gray-100 text-gray-400 hover:text-gray-600 transition-colors"
+                title="AI integration settings (model, API key)"
+              >
+                <Settings className="w-4 h-4" />
+              </button>
+              <button
+                type="button"
+                onClick={() => router.back()}
+                className="text-xs text-gray-500 hover:text-gray-700"
+              >
+                Close
+              </button>
+            </div>
           </div>
           <div className="p-4 flex-1 flex flex-col gap-3 overflow-auto">
             {mode === "mindmap-refine" && (focusNode || focusNodeLabelFromQuery) && (
@@ -554,6 +600,8 @@ function AIDiagramPage() {
               className="w-full h-28 px-3 py-2 border border-gray-300 rounded-lg resize-none focus:ring-2 focus:ring-violet-500 focus:border-transparent text-sm"
               disabled={loading}
             />
+            {/* Current model + API key status */}
+            <ModelStatusBadge />
             {error && (
               <p className="text-xs text-red-600">{error}</p>
             )}

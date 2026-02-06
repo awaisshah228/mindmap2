@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { X, Settings, Wand2, Palette, Plus, Trash2, Cpu, Eye, EyeOff, Key } from "lucide-react";
 import { cn } from "@/lib/utils";
 import {
@@ -16,7 +16,18 @@ type SettingsTab = "general" | "integration" | "ai-prompts";
 export function SettingsPanel() {
   const settingsOpen = useCanvasStore((s) => s.settingsOpen);
   const setSettingsOpen = useCanvasStore((s) => s.setSettingsOpen);
+  const settingsInitialTab = useCanvasStore((s) => s.settingsInitialTab);
   const [activeTab, setActiveTab] = useState<SettingsTab>("general");
+
+  // When the panel opens with an initial tab request, switch to it
+  useEffect(() => {
+    if (settingsOpen && settingsInitialTab) {
+      const valid: SettingsTab[] = ["general", "integration", "ai-prompts"];
+      if (valid.includes(settingsInitialTab as SettingsTab)) {
+        setActiveTab(settingsInitialTab as SettingsTab);
+      }
+    }
+  }, [settingsOpen, settingsInitialTab]);
 
   if (!settingsOpen) return null;
 

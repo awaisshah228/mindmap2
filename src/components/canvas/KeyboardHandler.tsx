@@ -170,6 +170,93 @@ export function KeyboardHandler({
         }
       }
 
+      // Ctrl/Cmd+Shift+G: Ungroup selected group
+      if ((e.key === "g" || e.key === "G") && (e.metaKey || e.ctrlKey) && e.shiftKey && !inInput) {
+        e.preventDefault();
+        const selectedGroups = getNodes().filter((n) => n.selected && n.type === "group");
+        if (selectedGroups.length === 0) return;
+        pushUndo?.();
+        const groupIds = new Set(selectedGroups.map((g) => g.id));
+        setNodes((nds) => {
+          // Move children back to absolute position and remove parentId
+          return nds
+            .map((n) => {
+              if (n.parentId && groupIds.has(n.parentId)) {
+                const parentGroup = nds.find((g) => g.id === n.parentId);
+                return {
+                  ...n,
+                  parentId: undefined,
+                  extent: undefined,
+                  position: parentGroup
+                    ? { x: n.position.x + parentGroup.position.x, y: n.position.y + parentGroup.position.y }
+                    : n.position,
+                };
+              }
+              return n;
+            })
+            .filter((n) => !groupIds.has(n.id)); // remove the group nodes
+        });
+        return;
+      }
+
+      // Ctrl/Cmd+G: Group selected nodes into a group/subflow
+      if ((e.key === "g" || e.key === "G") && (e.metaKey || e.ctrlKey) && !inInput) {
+        e.preventDefault();
+        const selectedNodes = getNodes().filter((n) => n.selected && n.type !== "group");
+        if (selectedNodes.length < 2) return;
+
+        pushUndo?.();
+
+        // Calculate bounding box of selected nodes
+        const PADDING = 40;
+        let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+        for (const n of selectedNodes) {
+          const w = (n.measured?.width ?? (n.width as number | undefined)) || 140;
+          const h = (n.measured?.height ?? (n.height as number | undefined)) || 72;
+          minX = Math.min(minX, n.position.x);
+          minY = Math.min(minY, n.position.y);
+          maxX = Math.max(maxX, n.position.x + w);
+          maxY = Math.max(maxY, n.position.y + h);
+        }
+
+        const groupId = `group-${Date.now()}`;
+        const groupX = minX - PADDING;
+        const groupY = minY - PADDING - 28; // extra space for group header
+        const groupW = maxX - minX + PADDING * 2;
+        const groupH = maxY - minY + PADDING * 2 + 28;
+
+        const groupNode: Node = {
+          id: groupId,
+          type: "group",
+          position: { x: groupX, y: groupY },
+          data: { label: "Group" },
+          style: { width: groupW, height: groupH },
+          width: groupW,
+          height: groupH,
+        };
+
+        setNodes((nds) => {
+          // Add group node, then update selected nodes to be children
+          const newNodes = [groupNode, ...nds.map((n) => {
+            if (n.selected && n.type !== "group") {
+              return {
+                ...n,
+                parentId: groupId,
+                extent: "parent" as const,
+                position: {
+                  x: n.position.x - groupX,
+                  y: n.position.y - groupY,
+                },
+                selected: false,
+              };
+            }
+            return n;
+          })];
+          return newNodes;
+        });
+        return;
+      }
+
       if (e.key === "a" && (e.metaKey || e.ctrlKey) && !inInput) {
         e.preventDefault();
         if (e.shiftKey) {

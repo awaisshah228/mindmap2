@@ -22,10 +22,10 @@ function ActorNode({ id, data, selected }: NodeProps) {
       minWidth={70}
       minHeight={90}
     >
-      <Handle type="target" position={Position.Left} className="!w-2 !h-2 !-left-1 !top-1/2 !-translate-y-1/2" />
-      <Handle type="source" position={Position.Right} className="!w-2 !h-2 !-right-1 !top-1/2 !-translate-y-1/2" />
-      <Handle type="target" position={Position.Top} className="!w-2 !h-2 !-top-1 !left-1/2 !-translate-x-1/2" />
-      <Handle type="source" position={Position.Bottom} className="!w-2 !h-2 !-bottom-1 !left-1/2 !-translate-x-1/2" />
+      <Handle id="left" type="source" position={Position.Left} className="node-connect-handle" />
+      <Handle id="right" type="source" position={Position.Right} className="node-connect-handle" />
+      <Handle id="top" type="source" position={Position.Top} className="node-connect-handle" />
+      <Handle id="bottom" type="source" position={Position.Bottom} className="node-connect-handle" />
 
       <div className="flex flex-col items-center gap-2 flex-1 justify-center">
         <div

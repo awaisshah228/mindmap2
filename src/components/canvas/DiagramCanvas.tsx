@@ -18,6 +18,7 @@ import {
   applyNodeChanges,
   applyEdgeChanges,
   SelectionMode,
+  ConnectionMode,
 } from "@xyflow/react";
 import { KeyboardHandler } from "./KeyboardHandler";
 import { PresentationMode } from "@/components/panels/PresentationMode";
@@ -50,6 +51,7 @@ import {
 import type { Stroke } from "./FreeDrawPreview";
 import { EdgeDrawPreview } from "./EdgeDrawPreview";
 import { EraserPreview } from "./EraserPreview";
+import { CustomMarkerDefs } from "@/components/edges/CustomMarkerDefs";
 import { FreehandOverlay } from "./FreehandOverlay";
 import LabeledConnectorEdge from "@/components/edges/LabeledConnectorEdge";
 import { CustomConnectionLine } from "@/components/edges/CustomConnectionLine";
@@ -612,12 +614,14 @@ export default function DiagramCanvas() {
 
   // Sync store → canvas when undo/redo or hydration updates the Zustand store.
   // We track whether the store change originated from the canvas (via onNodesChange/onEdgesChange)
-  // to avoid an infinite loop.
-  const fromCanvasRef = useRef(false);
+  // to avoid an infinite loop.  We use a counter instead of a boolean so that
+  // multiple rapid updates (e.g. setNodes + setEdges) don't accidentally reset
+  // the flag before both are processed.
+  const fromCanvasRef = useRef(0);
 
   useEffect(() => {
-    if (fromCanvasRef.current) {
-      fromCanvasRef.current = false;
+    if (fromCanvasRef.current > 0) {
+      fromCanvasRef.current--;
       return;
     }
     setNodes(storeNodes);
@@ -633,7 +637,7 @@ export default function DiagramCanvas() {
         const updated = applyNodeChanges(changes, nds);
         // Push to Zustand so persistence picks it up.
         // Mark the flag so the store→canvas sync ignores this update.
-        fromCanvasRef.current = true;
+        fromCanvasRef.current++;
         setStoreNodes(updated);
         return updated;
       });
@@ -645,7 +649,7 @@ export default function DiagramCanvas() {
     (changes: EdgeChange[]) => {
       setEdges((eds) => {
         const updated = applyEdgeChanges(changes, eds);
-        fromCanvasRef.current = true;
+        fromCanvasRef.current++;
         setStoreEdges(updated);
         return updated;
       });
@@ -657,19 +661,46 @@ export default function DiagramCanvas() {
   const onConnect = useCallback(
     (params: Connection) => {
       pushUndo();
-      const sh = params.sourceHandle ?? "s";
+      // If the connection originates from the easy-connect overlay, resolve to
+      // a real handle based on relative position of source → target.
+      let resolvedSourceHandle = params.sourceHandle;
+      if (resolvedSourceHandle === "__easy-connect__" && reactFlowRef.current) {
+        const sourceNode = reactFlowRef.current.getNode(params.source);
+        const targetNode = reactFlowRef.current.getNode(params.target);
+        if (sourceNode && targetNode) {
+          const sW = (sourceNode.measured?.width ?? (sourceNode.width as number | undefined)) || 140;
+          const sH = (sourceNode.measured?.height ?? (sourceNode.height as number | undefined)) || 72;
+          const tW = (targetNode.measured?.width ?? (targetNode.width as number | undefined)) || 140;
+          const tH = (targetNode.measured?.height ?? (targetNode.height as number | undefined)) || 72;
+          const dx = (targetNode.position.x + tW / 2) - (sourceNode.position.x + sW / 2);
+          const dy = (targetNode.position.y + tH / 2) - (sourceNode.position.y + sH / 2);
+          if (Math.abs(dx) >= Math.abs(dy)) {
+            resolvedSourceHandle = dx > 0 ? "right" : "left";
+          } else {
+            resolvedSourceHandle = dy > 0 ? "bottom" : "top";
+          }
+        } else {
+          resolvedSourceHandle = "right";
+        }
+      }
+      const sh = resolvedSourceHandle ?? "s";
       const th = params.targetHandle ?? "t";
       const edgeId = `e${params.source}-${sh}-${params.target}-${th}-${Date.now()}`;
       const newEdge: Edge = {
         ...params,
         id: edgeId,
+        sourceHandle: resolvedSourceHandle,
         type: "labeledConnector",
         data: { connectorType: pendingEdgeType },
       };
-      setEdges((eds) => [...eds, newEdge]);
-      addEdgeToStore(newEdge);
+      setEdges((eds) => {
+        const updated = [...eds, newEdge];
+        fromCanvasRef.current++;
+        setStoreEdges(updated);
+        return updated;
+      });
     },
-    [setEdges, addEdgeToStore, pendingEdgeType, pushUndo]
+    [setEdges, setStoreEdges, pendingEdgeType, pushUndo]
   );
 
   const onConnectEnd = useCallback(
@@ -677,48 +708,164 @@ export default function DiagramCanvas() {
       event: MouseEvent | TouchEvent,
       connectionState: {
         fromNode?: { id: string } | null;
-        fromHandle?: { id?: string | null } | null;
+        fromHandle?: { id?: string | null; type?: string | null } | null;
         isValid?: boolean | null;
       }
     ) => {
       if (connectionState.isValid || !connectionState.fromNode || !reactFlowRef.current) return;
-      const fromNodeData = nodes.find((n) => n.id === connectionState.fromNode?.id);
+
+      // Read current nodes from React Flow (avoids stale closure)
+      const currentNodes = reactFlowRef.current.getNodes();
+      const fromNodeData = currentNodes.find((n) => n.id === connectionState.fromNode?.id);
       const isFromMindMap = fromNodeData?.type === "mindMap";
+
       const { clientX, clientY } =
         "changedTouches" in event ? (event as TouchEvent).changedTouches[0] : (event as MouseEvent);
       const position = reactFlowRef.current.screenToFlowPosition({ x: clientX, y: clientY });
       pushUndo();
-      const newNodeId = `node-${Date.now()}`;
-      const newNode: Node = isFromMindMap
-        ? {
-            id: newNodeId,
-            type: "mindMap",
-            position: { x: position.x - MIND_MAP_NODE_WIDTH / 2, y: position.y - 22 },
-            data: { label: "New node" },
+
+      const newNodeId = `node-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+      const fromType = fromNodeData?.type;
+
+      // Create a new node matching the type of the source node
+      let newNode: Node;
+      if (fromType === "mindMap") {
+        newNode = {
+          id: newNodeId,
+          type: "mindMap",
+          position: { x: position.x - MIND_MAP_NODE_WIDTH / 2, y: position.y - 22 },
+          data: { label: "New node" },
+        };
+      } else if (fromType === "icon") {
+        newNode = {
+          id: newNodeId,
+          type: "icon",
+          position: { x: position.x - 32, y: position.y - 32 },
+          data: { emoji: "💡" },
+          width: 64,
+          height: 64,
+        };
+      } else if (fromType === "image") {
+        newNode = {
+          id: newNodeId,
+          type: "image",
+          position: { x: position.x - 80, y: position.y - 60 },
+          data: { label: "", imageUrl: "" },
+          width: 160,
+          height: 120,
+        };
+      } else if (fromType === "stickyNote") {
+        newNode = {
+          id: newNodeId,
+          type: "stickyNote",
+          position: { x: position.x - 80, y: position.y - 80 },
+          data: { label: "" },
+        };
+      } else if (fromType === "databaseSchema") {
+        newNode = {
+          id: newNodeId,
+          type: "databaseSchema",
+          position: { x: position.x - 100, y: position.y - 50 },
+          data: { label: "new_table", columns: [] },
+        };
+      } else if (fromType === "service" || fromType === "queue" || fromType === "actor") {
+        newNode = {
+          id: newNodeId,
+          type: fromType,
+          position: { x: position.x - 60, y: position.y - 40 },
+          data: { label: "New node" },
+        };
+      } else {
+        // Default: rectangle shape node
+        const fromShape = fromNodeData?.data?.shape as string | undefined;
+        newNode = {
+          id: newNodeId,
+          type: fromShape || "rectangle",
+          position: { x: position.x - 70, y: position.y - 36 },
+          data: { label: "New node", shape: fromShape || "rectangle" },
+        };
+      }
+
+      // ── Determine best source / target handle pair ──
+      // ShapeNode handles: top(target), left(target), bottom(source), right(source)
+      // When user drags from a "target" handle (top/left), the edge direction is reversed:
+      //   new node → fromNode  (new node is source, fromNode is target)
+      // When user drags from a "source" handle (bottom/right), direction is normal:
+      //   fromNode → new node  (fromNode is source, new node is target)
+      const rawHandle = connectionState.fromHandle?.id ?? undefined;
+      const rawHandleType = connectionState.fromHandle?.type ?? "source";
+
+      const knownHandles = ["top", "bottom", "left", "right"];
+      const oppositeHandle: Record<string, string> = {
+        top: "bottom",
+        bottom: "top",
+        left: "right",
+        right: "left",
+      };
+
+      // Determine which handle on fromNode and which on newNode
+      let fromNodeHandle: string;
+      let newNodeHandle: string;
+
+      if (rawHandle && knownHandles.includes(rawHandle)) {
+        fromNodeHandle = rawHandle;
+        newNodeHandle = oppositeHandle[rawHandle] ?? "left";
+      } else {
+        // Easy-connect or unknown handle: pick best direction based on position
+        const fromPos = fromNodeData?.position;
+        const fromW = (fromNodeData?.measured?.width ?? (fromNodeData?.width as number | undefined)) || 140;
+        const fromH = (fromNodeData?.measured?.height ?? (fromNodeData?.height as number | undefined)) || 72;
+        if (fromPos) {
+          const dx = position.x - (fromPos.x + fromW / 2);
+          const dy = position.y - (fromPos.y + fromH / 2);
+          if (Math.abs(dx) >= Math.abs(dy)) {
+            fromNodeHandle = dx > 0 ? "right" : "left";
+          } else {
+            fromNodeHandle = dy > 0 ? "bottom" : "top";
           }
-        : {
-            id: newNodeId,
-            type: "rectangle",
-            position: { x: position.x - 70, y: position.y - 36 },
-            data: { label: "New node", shape: "rectangle" },
-          };
-      addNode(newNode);
-      setNodes((nds) => [...nds, { ...newNode, selected: false }]);
-      const sourceHandleId = connectionState.fromHandle?.id ?? undefined;
-      const edgeId = `e-${connectionState.fromNode.id}-${sourceHandleId ?? "s"}-${newNodeId}-left-${Date.now()}`;
+        } else {
+          fromNodeHandle = "right";
+        }
+        newNodeHandle = oppositeHandle[fromNodeHandle] ?? "left";
+      }
+
+      // If the user dragged from a "target"-type handle, the edge direction is reversed:
+      // the new node becomes the source and fromNode becomes the target.
+      const isFromTargetHandle = rawHandleType === "target";
+
+      const edgeSource = isFromTargetHandle ? newNodeId : connectionState.fromNode.id;
+      const edgeTarget = isFromTargetHandle ? connectionState.fromNode.id : newNodeId;
+      const edgeSourceHandle = isFromTargetHandle ? newNodeHandle : fromNodeHandle;
+      const edgeTargetHandle = isFromTargetHandle ? fromNodeHandle : newNodeHandle;
+
+      const edgeId = `e-${edgeSource}-${edgeSourceHandle}-${edgeTarget}-${edgeTargetHandle}-${Date.now()}`;
       const newEdge: Edge = {
         id: edgeId,
-        source: connectionState.fromNode.id,
-        target: newNodeId,
-        sourceHandle: sourceHandleId,
-        targetHandle: "left",
+        source: edgeSource,
+        target: edgeTarget,
+        sourceHandle: edgeSourceHandle,
+        targetHandle: edgeTargetHandle,
         type: "labeledConnector",
         data: { connectorType: pendingEdgeType },
       };
-      setEdges((eds) => [...eds, newEdge]);
-      addEdgeToStore(newEdge);
+
+      // Add both node and edge atomically in a single update cycle.
+      // React Flow handles rendering edges to newly-added nodes within the
+      // same batch (see React Flow "Add Node on Edge Drop" example).
+      // Increment counter twice: once for nodes store update, once for edges store update.
+      fromCanvasRef.current += 2;
+      setNodes((nds) => {
+        const updated = [...nds, { ...newNode, selected: false }];
+        setStoreNodes(updated);
+        return updated;
+      });
+      setEdges((eds) => {
+        const updated = [...eds, newEdge];
+        setStoreEdges(updated);
+        return updated;
+      });
     },
-    [nodes, addNode, setNodes, setEdges, addEdgeToStore, pushUndo, pendingEdgeType]
+    [setNodes, setEdges, setStoreNodes, setStoreEdges, pushUndo, pendingEdgeType]
   );
 
   const handleAddMindMapNode = useCallback(
@@ -1005,7 +1152,24 @@ export default function DiagramCanvas() {
       }
 
       if (activeTool === "emoji") {
-        if (pendingIconId) {
+        const pendingCustomIcon = useCanvasStore.getState().pendingCustomIcon;
+        if (pendingCustomIcon) {
+          pushUndo();
+          const id = `icon-${Date.now()}`;
+          const size = 64;
+          const newNode: Node = {
+            id,
+            type: "icon",
+            position: { x: flowX - size / 2, y: flowY - size / 2 },
+            data: { customIcon: pendingCustomIcon },
+            width: size,
+            height: size,
+          };
+          addNode(newNode);
+          setNodes((nds) => [...nds, { ...newNode, selected: true }]);
+          setActiveTool("select");
+          useCanvasStore.getState().setPendingCustomIcon(null);
+        } else if (pendingIconId) {
           pushUndo();
           const id = `icon-${Date.now()}`;
           const size = 64;
@@ -1175,7 +1339,11 @@ export default function DiagramCanvas() {
           id,
           type: "icon",
           position: { x: flowX - size / 2, y: flowY - size / 2 },
-          data: payload.data.iconId ? { iconId: payload.data.iconId } : { emoji: payload.data.emoji ?? "" },
+          data: payload.data.customIcon
+            ? { customIcon: payload.data.customIcon }
+            : payload.data.iconId
+              ? { iconId: payload.data.iconId }
+              : { emoji: payload.data.emoji ?? "" },
           width: size,
           height: size,
         };
@@ -1443,7 +1611,7 @@ export default function DiagramCanvas() {
           cursor:
             activeTool === "freeDraw" || activeTool === "connector"
               ? "crosshair"
-              : (activeTool === "emoji" && (pendingIconId || pendingEmoji)) ||
+              : (activeTool === "emoji" && (pendingIconId || pendingEmoji || useCanvasStore.getState().pendingCustomIcon)) ||
                   (activeTool === "image" && pendingImageUrl)
                 ? "crosshair"
                 : activeTool === "pan"
@@ -1458,8 +1626,22 @@ export default function DiagramCanvas() {
         <KeyboardHandler
         getNodes={() => nodes}
         getEdges={() => edges}
-        setNodes={setNodes}
-        setEdges={setEdges}
+        setNodes={(nodesOrUpdater) => {
+          setNodes((prev) => {
+            const next = typeof nodesOrUpdater === "function" ? nodesOrUpdater(prev) : nodesOrUpdater;
+            fromCanvasRef.current++;
+            setStoreNodes(next);
+            return next;
+          });
+        }}
+        setEdges={(edgesOrUpdater) => {
+          setEdges((prev) => {
+            const next = typeof edgesOrUpdater === "function" ? edgesOrUpdater(prev) : edgesOrUpdater;
+            fromCanvasRef.current++;
+            setStoreEdges(next);
+            return next;
+          });
+        }}
         screenToFlowPosition={(pos) =>
           reactFlowRef.current?.screenToFlowPosition(pos) ?? pos
         }
@@ -1476,6 +1658,7 @@ export default function DiagramCanvas() {
             zoom={reactFlowRef.current?.getViewport().zoom ?? 1}
           />
         )}
+        <CustomMarkerDefs />
         <ReactFlow
           nodes={visibleNodes}
           edges={visibleEdges}
@@ -1495,7 +1678,7 @@ export default function DiagramCanvas() {
           nodeTypes={nodeTypes}
           edgeTypes={edgeTypes}
           fitView
-          nodesDraggable={!presentationMode && activeTool !== "freeDraw"}
+          nodesDraggable={!presentationMode && activeTool !== "freeDraw" && activeTool !== "connector"}
           nodesConnectable={!presentationMode && activeTool !== "freeDraw"}
           elementsSelectable={activeTool !== "freeDraw"}
           edgesFocusable={activeTool !== "freeDraw"}
@@ -1523,6 +1706,8 @@ export default function DiagramCanvas() {
           snapGrid={[16, 16]}
           snapToGrid
           connectionRadius={40}
+          connectOnClick
+          connectionMode={ConnectionMode.Loose}
           proOptions={{ hideAttribution: true }}
         >
         <HelperLines horizontal={helperLines.horizontal} vertical={helperLines.vertical} />

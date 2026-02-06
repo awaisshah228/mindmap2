@@ -49,3 +49,94 @@ body {
 .dark .react-flow__controls button:hover {
   background-color: #4b5563;
 }
+
+/* Easy-connect overlay handle — covers entire node surface when connector tool active */
+.react-flow__handle[data-handleid="__easy-connect__"] {
+  position: absolute !important;
+  inset: 0 !important;
+  width: 100% !important;
+  height: 100% !important;
+  min-width: 100% !important;
+  min-height: 100% !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+  border: none !important;
+  transform: none !important;
+  cursor: crosshair !important;
+  z-index: 10 !important;
+  opacity: 1 !important;
+  pointer-events: all !important;
+}
+
+.react-flow__handle[data-handleid="__easy-connect__"]:hover {
+  background: rgba(139, 92, 246, 0.08) !important;
+}
+
+/* Node connection handles — invisible but functional by default,
+   visible & expanded when parent node is selected.
+   We keep 8px size so React Flow can calculate handle bounds for connections.
+   We do NOT override pointer-events here — React Flow manages that internally
+   (adds pointer-events:all only during active connections). */
+.react-flow__handle.node-connect-handle {
+  width: 8px !important;
+  height: 8px !important;
+  min-width: 5px !important;
+  min-height: 5px !important;
+  opacity: 0 !important;
+  border: none !important;
+  background: transparent !important;
+  border-radius: 50% !important;
+  padding: 0 !important;
+}
+
+.react-flow__node.selected .react-flow__handle.node-connect-handle {
+  width: 16px !important;
+  height: 16px !important;
+  min-width: 16px !important;
+  min-height: 16px !important;
+  opacity: 1 !important;
+  border: 2px solid rgba(139, 92, 246, 0.5) !important;
+  background: rgba(255, 255, 255, 0.9) !important;
+  border-radius: 4px !important;
+  cursor: crosshair !important;
+  pointer-events: all !important;
+  z-index: 20 !important;
+}
+
+.react-flow__node.selected .react-flow__handle.node-connect-handle:hover {
+  background: #ede9fe !important;
+  border-color: #8b5cf6 !important;
+  box-shadow: 0 0 0 3px rgba(139, 92, 246, 0.2);
+}
+
+/* Extra user-added handles — visible, interactive, properly sized */
+.react-flow__handle.extra-user-handle {
+  width: 12px !important;
+  height: 12px !important;
+  min-width: 12px !important;
+  min-height: 12px !important;
+  background: white !important;
+  border: 2px solid #a78bfa !important;
+  border-radius: 50% !important;
+  z-index: 20 !important;
+  cursor: crosshair !important;
+  pointer-events: all !important;
+  opacity: 1 !important;
+  transition: background-color 0.15s, border-color 0.15s, box-shadow 0.15s;
+}
+
+.react-flow__handle.extra-user-handle:hover {
+  background: #ede9fe !important;
+  border-color: #8b5cf6 !important;
+  box-shadow: 0 0 0 3px rgba(139, 92, 246, 0.2);
+}
+
+/* When connecting, highlight valid targets */
+.react-flow__handle.extra-user-handle.connecting {
+  background: #ddd6fe !important;
+}
+
+.react-flow__handle.extra-user-handle.valid {
+  background: #c4b5fd !important;
+  border-color: #7c3aed !important;
+}
