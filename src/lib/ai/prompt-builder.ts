@@ -25,22 +25,28 @@ export interface PromptParams {
 }
 
 export function buildSystemPrompt(layoutDirection?: string): string {
-  const preferredLayoutDirection =
-    layoutDirection === "vertical" ? "vertical" : "horizontal";
+  const isVertical = layoutDirection === "vertical";
+  const preferredLayoutDirection = isVertical ? "vertical" : "horizontal";
+
+  const handleRule =
+    isVertical
+      ? `EDGE HANDLES (MANDATORY — vertical layout): Use sourceHandle "bottom" and targetHandle "top" on EVERY edge. Edges must leave the parent/source from its BOTTOM and connect to the child/target at its TOP. This keeps the flow top→bottom and connections clean.`
+      : `EDGE HANDLES (MANDATORY — horizontal layout): Use sourceHandle "right" and targetHandle "left" on EVERY edge. Edges must leave the parent/source from its RIGHT side and connect to the child/target on its LEFT side. This keeps the flow left→right and connections clean.`;
 
   return `
 You design diagrams for a React Flow whiteboard. Return only valid JSON. No markdown, no comments.
 
 Node types: mindMap, stickyNote, rectangle, diamond, circle, document, text, image, databaseSchema, service, queue, actor, icon. Do NOT use type "group" — use the groups array instead.
 
-LAYOUT & HANDLES — YOU DECIDE:
-You have full autonomy to decide layout direction, node positions, and handle points so the diagram looks good and is readable. Choose one clear flow (left→right, top→bottom, or right→left) and stick to it. Place nodes so that: (1) edges are short and do not cross unnecessarily, (2) the flow reads naturally in one direction, (3) connected nodes are close together. For each edge, pick sourceHandle and targetHandle that produce clean connections: for left→right use sourceHandle "right" and targetHandle "left"; for top→bottom use "bottom" and "top"; for right→left use "left" and "right". Choose handles so edges enter/exit nodes on the side that faces the connected node — this keeps connections tidy and the flow obvious. Give each node a position {x, y}; use modest gaps (100–200) between related nodes. Auto-layout will refine, but your structure and handle choices determine readability.
+LAYOUT & HANDLES:
+Layout direction is ${preferredLayoutDirection}. Place nodes so that: (1) edges are short and do not cross unnecessarily, (2) the flow reads naturally in one direction, (3) connected nodes are close together. ${handleRule}
+Give each node a position {x, y}; use modest gaps (100–200) between related nodes. Auto-layout will refine, but your structure and handle choices determine readability.
 
 Schema: nodes have id, type, position {x,y}. All nodes are top-level (no parentNode). data: label, shape?, icon?, imageUrl?, subtitle?, columns? (for databaseSchema), annotation?. For grouping: return an optional "groups" array: groups: [{ id: string, label: string, nodeIds: string[] }]. Each nodeIds lists the ids of nodes that belong to that group (e.g. "Frontend" group with nodeIds ["react-spa","cloudfront","s3"]). The app will lay out all nodes flat, then apply grouping visually. Use at most 2–4 groups when they clarify the diagram; omit groups when not needed.
 
-EDGES — CLEAN CONNECTIONS & READABLE FLOW:
-Every edge MUST have: id (unique), source (exact node id), target (exact node id), sourceHandle, targetHandle. You decide the handles: pick sourceHandle and targetHandle so the edge connects nodes from the side that faces each other (e.g. if target is to the right of source, use sourceHandle "right" and targetHandle "left"). This makes edges look good and avoids awkward angles. Consistent handle choice across the diagram keeps the flow readable.
-Edge labels (data.label): Add ONLY when the relationship is not obvious from the node names — e.g. protocol (HTTP, gRPC), event type (OrderCreated), relationship (references, belongs to), or flow type (Pub/Sub, WebSockets). Omit data.label when self-explanatory. Keep labels short (1–3 words). When you add a label, space nodes so the edge has enough length; the UI hides labels on edges that are too short. Accurate source/target and well-chosen handles prevent tangled connections. Keep the graph simple: avoid one node connecting to too many others; prefer a clear directional flow so the reader can follow it easily.
+EDGES — CLEAN CONNECTIONS:
+Every edge MUST have: id (unique), source (exact node id), target (exact node id), sourceHandle, targetHandle. ${handleRule}
+Edge labels (data.label): Add ONLY when the relationship is not obvious from the node names — e.g. protocol (HTTP, gRPC), event type (OrderCreated), relationship (references, belongs to), or flow type (Pub/Sub, WebSockets). Omit data.label when self-explanatory. Keep labels short (1–3 words). When you add a label, space nodes so the edge has enough length; the UI hides labels on edges that are too short. Accurate source/target and correct handles prevent tangled connections. Keep the graph simple: avoid one node connecting to too many others; prefer a clear directional flow so the reader can follow it easily.
 
 Icons — ICON FALLBACK CHAIN (follow this priority):
 1. FIRST try our installed icon library: Set data.icon to one of: ${ICON_IDS_FOR_PROMPT}. Defaults: services "lucide:server", data stores "lucide:database". Only use ids from this list for data.icon.
@@ -79,7 +85,7 @@ Special types: databaseSchema → use ONLY for entity-relationship or schema dia
 
 Images: type "image" with data.imageUrl = https://picsum.photos/seed/<word>/200/150 (seed: user, api, database, server, etc.). data.label = short caption.
 
-Rules: Unique node ids. You decide layout and handle points — choose positions and sourceHandle/targetHandle so node connections look good, edges are clean, and the flow is readable. Every edge: source, target, sourceHandle, targetHandle; data.label only when it adds information (omit when self-explanatory); keep edge labels 1–3 words. Short node labels (2–5 words). Every node: data.icon, data.iconUrl, or data.emoji. For architecture/system design: high-level view only — use service/rectangle for databases. Use databaseSchema only for entity-relationship or schema diagram type. Place nodes and pick handles for clear, readable flow.
+Rules: Unique node ids. Every edge MUST use the correct handles for the layout: horizontal → sourceHandle "right", targetHandle "left"; vertical → sourceHandle "bottom", targetHandle "top". Every edge: source, target, sourceHandle, targetHandle; data.label only when it adds information (omit when self-explanatory); keep edge labels 1–3 words. Short node labels (2–5 words). Every node: data.icon, data.iconUrl, or data.emoji. For architecture/system design: high-level view only — use service/rectangle for databases. Use databaseSchema only for entity-relationship or schema diagram type. Place nodes so the flow matches the handle rule above.
 `.trim();
 }
 
