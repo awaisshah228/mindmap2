@@ -54,6 +54,8 @@ export default function AppSidebar({ isOpen = true, onClose, isMobile }: AppSide
   const toggleFavorite = useCanvasStore((s) => s.toggleFavorite);
   const setNodes = useCanvasStore((s) => s.setNodes);
   const setEdges = useCanvasStore((s) => s.setEdges);
+  const setPendingFitView = useCanvasStore((s) => s.setPendingFitView);
+  const setPendingFitViewNodeIds = useCanvasStore((s) => s.setPendingFitViewNodeIds);
 
   const [favoritesOpen, setFavoritesOpen] = useState(true);
   const [recentOpen, setRecentOpen] = useState(true);
@@ -159,6 +161,8 @@ export default function AppSidebar({ isOpen = true, onClose, isMobile }: AppSide
             ...(e.data && { data: e.data }),
           })) as Edge[];
         applyNodesAndEdgesInChunks(setNodes, setEdges, flatNodes, validEdges);
+        setPendingFitView(true);
+        setPendingFitViewNodeIds(flatNodes.map((n) => n.id));
       } catch {
         // keep streamed state if final parse fails
       }

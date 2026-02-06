@@ -446,6 +446,8 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
           redoStack: [],
         });
         applyNodesAndEdgesInChunks(get().setNodes, get().setEdges, target.nodes, target.edges);
+        get().setPendingFitView(true);
+        get().setPendingFitViewNodeIds(null);
       }
     } else {
       const target = s.projects.find((p) => p.id === id);
@@ -461,6 +463,8 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
           redoStack: [],
         });
         applyNodesAndEdgesInChunks(get().setNodes, get().setEdges, target.nodes, target.edges);
+        get().setPendingFitView(true);
+        get().setPendingFitViewNodeIds(null);
       }
     }
   },

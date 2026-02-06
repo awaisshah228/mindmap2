@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Panel, useStore, useStoreApi } from "@xyflow/react";
-import { Settings2, ArrowRight, ArrowDown, ArrowLeft, ArrowUp, Layout, X, PanelRight } from "lucide-react";
+import { Settings2, ArrowRight, ArrowDown, ArrowLeft, ArrowUp, Layout, X, PanelRight, Save } from "lucide-react";
 import { useCanvasStore } from "@/lib/store/canvas-store";
 import {
   ALGORITHM_FAMILIES,
@@ -15,6 +15,7 @@ import {
 import { useApplyMindMapLayout } from "@/hooks/useApplyMindMapLayout";
 import { useMediaQuery } from "@/hooks/useMediaQuery";
 import { cn } from "@/lib/utils";
+import { saveNow } from "@/lib/store/project-storage";
 import type { Node, Edge } from "@xyflow/react";
 
 const DIRECTIONS: { value: LayoutDirection; label: string; icon: React.ReactNode }[] = [
@@ -275,6 +276,15 @@ export function MindMapLayoutPanel({
               add root node
             </button>
           )}
+          <button
+            type="button"
+            onClick={() => saveNow()}
+            className="w-full py-2 px-3 text-sm font-medium rounded bg-gray-600 hover:bg-gray-500 text-gray-200 transition-colors flex items-center justify-center gap-2"
+            title="Save current positions to project (Ctrl/Cmd+S)"
+          >
+            <Save className="w-4 h-4" />
+            Save layout
+          </button>
         </div>
       </div>
     </Panel>
