@@ -106,7 +106,7 @@ function LabeledConnectorEdge({
   markerEnd,
   markerStart,
 }: import("@xyflow/react").EdgeProps) {
-  const { updateEdgeData, deleteElements, screenToFlowPosition, getEdges, setEdges } = useReactFlow();
+  const { updateEdgeData, deleteElements, screenToFlowPosition, getEdges, getNodes, setEdges } = useReactFlow();
   const pushUndo = useCanvasStore((s) => s.pushUndo);
   // Avoid calling getEdges() on every render — only compute branch color when needed
   const branchColor = useMemo(() => {
@@ -132,6 +132,12 @@ function LabeledConnectorEdge({
   const [activeMarkerSide, setActiveMarkerSide] = useState<"start" | "end" | null>(null);
   const [relationOpen, setRelationOpen] = useState(false);
   const [markerColorOpen, setMarkerColorOpen] = useState(false);
+
+  // When 2+ nodes or 2+ edges selected, hide edge toolbar (even on hover) so canvas stays clear for moving selection
+  const selectedNodeCount = getNodes().filter((n) => n.selected).length;
+  const selectedEdgeCount = getEdges().filter((e) => e.selected).length;
+  const multiSelection = selectedNodeCount >= 2 || selectedEdgeCount >= 2;
+  const edgeToolbarVisible = !multiSelection && (selected || hovered || activeMarkerSide !== null);
 
   // Use raw source/target coordinates — no gap offset
   const aSourceX = sourceX;
@@ -600,7 +606,7 @@ function LabeledConnectorEdge({
         edgeId={id}
         x={labelX}
         y={labelY + TOOLBAR_OFFSET_Y}
-        isVisible={selected || hovered || activeMarkerSide !== null}
+        isVisible={edgeToolbarVisible}
       >
         <div className="flex flex-wrap items-center gap-2 bg-gray-800 text-gray-200 rounded-lg px-3 py-2 shadow-lg border border-gray-700">
           {/* Edge customization */}

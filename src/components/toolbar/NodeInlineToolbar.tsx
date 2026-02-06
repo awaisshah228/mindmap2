@@ -80,7 +80,9 @@ export function NodeInlineToolbar({ nodeId, selected = false }: NodeInlineToolba
   const hasShapePicker = isShapeNode;
   const hasIconPicker = ["rectangle", "diamond", "circle", "document", "mindMap", "stickyNote", "text"].includes(nodeType);
   const isTableNode = nodeType === "table";
-  const toolbarVisible = selected || hoveredNodeId === nodeId;
+  // When 2+ nodes selected (e.g. Ctrl+A), hide toolbar for all — no toolbar even on hover. Single selection or none: show on hover or when this node is selected.
+  const selectedCount = getNodes().filter((n) => n.selected).length;
+  const toolbarVisible = selectedCount <= 1 && (hoveredNodeId === nodeId || (selected && selectedCount === 1));
   const currentShape = (node?.data?.shape as ShapeType) ?? "rectangle";
   const currentIcon = (node?.data?.icon as string) ?? null;
   const currentCustomIcon = (node?.data?.customIcon as string) ?? null;

@@ -123,7 +123,9 @@ function GroupNode({ id, data: dataProp, selected }: NodeProps) {
     }
   }, [id, descValue, description, updateNodeData]);
 
-  const toolbarVisible = selected || hoveredNodeId === id;
+  // When 2+ nodes selected (e.g. Ctrl+A), hide toolbar for all — no toolbar even on hover. Single selection or none: show on hover or when this node is selected.
+  const selectedCount = getNodes().filter((n) => n.selected).length;
+  const toolbarVisible = selectedCount <= 1 && (hoveredNodeId === id || (selected && selectedCount === 1));
 
   // ── Toolbar handlers ──
   const handleBold = () => { pushUndo(); updateNodeData(id, { fontWeight: fontWeight === "bold" ? "normal" : "bold" }); };
