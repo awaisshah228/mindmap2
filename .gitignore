@@ -45,3 +45,7 @@ next-env.d.ts
 
 # subprojects (not part of main app build; avoid pushing to trigger deployment)
 /excalidraw-ai/
+
+# layra/langflow docs (separate Docusaurus project, causes build errors)
+/layra/
+/langflow/

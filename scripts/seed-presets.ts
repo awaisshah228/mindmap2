@@ -243,8 +243,8 @@ async function main() {
       previewImageUrl: getPresetPreviewUrl(t.name, t.label),
       updatedAt: new Date(),
     };
-    const nodes = diagramData?.nodes ?? [];
-    const edges = diagramData?.edges ?? [];
+    const nodes = (diagramData?.nodes ?? []) as object[];
+    const edges = (diagramData?.edges ?? []) as object[];
     const id = byName.get(t.name);
     if (id) {
       await db
