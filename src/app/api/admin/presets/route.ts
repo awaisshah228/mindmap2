@@ -78,7 +78,10 @@ export async function POST(req: NextRequest) {
   const dataFormat = body.dataFormat === "mermaid" || body.dataFormat === "json" ? body.dataFormat : null;
   const mermaidData = typeof body.mermaidData === "string" ? body.mermaidData : null;
   const drawioData = typeof body.drawioData === "string" ? body.drawioData : null;
-  const excalidrawData = body.excalidrawData && typeof body.excalidrawData === "object" ? body.excalidrawData : null;
+  const excalidrawData: { elements: unknown[]; appState?: Record<string, unknown> } | null =
+    body.excalidrawData && typeof body.excalidrawData === "object" && Array.isArray((body.excalidrawData as { elements?: unknown[] }).elements)
+      ? (body.excalidrawData as { elements: unknown[]; appState?: Record<string, unknown> })
+      : null;
 
   if (!name) {
     return NextResponse.json({ error: "name is required" }, { status: 400 });
