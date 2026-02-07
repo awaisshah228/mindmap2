@@ -184,47 +184,55 @@ async function main() {
 
   const allPresets = [...PRESETS, ...DRAWIO_PRESETS, ...EXCALIDRAW_PRESETS];
   for (const p of allPresets) {
-    const row = {
+    const metadata = {
       name: p.name,
       label: p.label,
       description: p.description ?? null,
       diagramType: p.diagramType,
       level: p.level,
-      nodes: [],
-      edges: [],
       prompt: p.prompt,
       targetCanvas: p.targetCanvas ?? "reactflow",
       isTemplate: false,
       sortOrder: p.sortOrder,
       previewImageUrl: getPresetPreviewUrl(p.name, p.label),
+      updatedAt: new Date(),
     };
     const id = byName.get(p.name);
     if (id) {
-      await db.update(diagramPresets).set({ ...row, updatedAt: new Date() }).where(eq(diagramPresets.id, id));
+      // Update metadata only — preserve nodes, edges, drawioData, excalidrawData (first-use AI generation)
+      await db.update(diagramPresets).set(metadata).where(eq(diagramPresets.id, id));
     } else {
-      await db.insert(diagramPresets).values(row);
+      // Insert new preset: metadata only, no diagram data (seeded for first-time use)
+      await db.insert(diagramPresets).values({
+        ...metadata,
+        nodes: [],
+        edges: [],
+      });
     }
   }
   for (const t of TEMPLATES) {
-    const row = {
+    const metadata = {
       name: t.name,
       label: t.label,
       description: t.description ?? null,
       diagramType: t.diagramType,
       level: t.level,
-      nodes: [],
-      edges: [],
       prompt: t.prompt || null,
-      targetCanvas: "reactflow",
+      targetCanvas: "reactflow" as const,
       isTemplate: true,
       sortOrder: t.sortOrder,
       previewImageUrl: getPresetPreviewUrl(t.name, t.label),
+      updatedAt: new Date(),
     };
     const id = byName.get(t.name);
     if (id) {
-      await db.update(diagramPresets).set({ ...row, updatedAt: new Date() }).where(eq(diagramPresets.id, id));
+      await db.update(diagramPresets).set(metadata).where(eq(diagramPresets.id, id));
     } else {
-      await db.insert(diagramPresets).values(row);
+      await db.insert(diagramPresets).values({
+        ...metadata,
+        nodes: [],
+        edges: [],
+      });
     }
   }
   console.log("Presets and templates seeded.");

@@ -1,76 +1,77 @@
 /**
- * Prompt for generating Excalidraw whiteboard elements from a user description.
- * Used for Excalidraw canvas only. Draw.io uses drawio-generate-prompt.ts.
+ * Prompt for generating ExcalidrawElementSkeleton (Excalidraw's programmatic API).
+ * Output is passed to convertToExcalidrawElements from @excalidraw/excalidraw.
+ * @see https://docs.excalidraw.com/docs/@excalidraw/excalidraw/api/excalidraw-element-skeleton
  */
 
-const SYSTEM_PROMPT = `You generate Excalidraw whiteboard diagram elements from user descriptions. Output ONLY a JSON array. No markdown, no code fences, no explanation.
+export function getExcalidrawGenerateSystemPrompt(libraryContext?: string | null): string {
+  const libSection = libraryContext
+    ? `\n## LIBRARY CONTEXT (apply for this diagram type):\n"""\n${libraryContext}\n"""\n`
+    : "";
 
-OUTPUT FORMAT — JSON array:
-1. SHAPES FIRST: rectangle, diamond, ellipse, text
-2. ARROWS LAST: arrows reference shape ids
+  return `You are an expert at creating clear, professional whiteboard diagrams. Output ONLY a valid JSON array of ExcalidrawElementSkeleton (Excalidraw's programmatic API). No markdown, no code fences, no explanation.
 
-SHAPES:
-- type: "rectangle" | "diamond" | "ellipse" | "text"
-- id: unique string (e.g. "box1", "node-api", "decision-start"). Short, memorable ids — arrows reference these.
-- x, y: position in pixels. Use a GRID: align to multiples of 40 (e.g. 0, 40, 80, 120...). Never use random positions.
-- width, height: size. Rectangles: 120–180 width, 44–56 height. Diamonds/ellipses: 80–100 each.
-- label: { text: string } — label inside the shape. Short (2–8 words).
-- backgroundColor (optional): hex like "#e7f5ff", "#fff3bf", "#d3f9d8"
-- strokeColor (optional): hex like "#1971c2", "#f08c00"
-- groupId (optional): same string for shapes that belong together — they will be visually clustered.
+## EXCALIDRAW ELEMENT SKELETON FORMAT (docs.excalidraw.com)
+Use the minimum required attributes; the rest are optional.
 
-TEXT:
-- type: "text" — for labels, titles. id, x, y, width, height, label: { text: "..." }
+### Shapes (rectangle, ellipse, diamond)
+- Required: type, x, y
+- Optional: id (use for arrow bindings), width, height, backgroundColor, strokeColor, strokeWidth, strokeStyle, fillStyle
+- Text inside shape: label: { text: "Label" }
 
-ARROWS (connections):
-- type: "arrow"
-- id: unique string (e.g. "arr1", "e-a-b")
-- start: { id: "<shapeId>" } — MUST reference a shape id from the array
-- end: { id: "<shapeId>" } — MUST reference a shape id from the array
-- exitX, exitY: where the arrow LEAVES the source shape (0–1). 0.5,0.5 = center. 1,0.5 = right center. 0,0.5 = left. 0.5,0 = top. 0.5,1 = bottom.
-- entryX, entryY: where the arrow ENTERS the target shape (0–1). Same convention.
-- x, y: midpoint for label. width: 100, height: 24.
-- label (optional): { text: "yes", "no", "HTTP" } when the connection needs a label.
+### Standalone text
+- Required: type: "text", x, y, text: "content"
+- Optional: fontSize, strokeColor
 
-PLACEMENT RULES (CRITICAL — avoid overlap):
-1. Minimum 120px horizontal gap and 100px vertical gap between any two shapes. More for complex diagrams.
-2. Align shapes in columns (same x or x+width) or rows (same y). Flow left→right or top→bottom.
-3. Group related nodes: place them close together (same row or column, within 200px). Use groupId for logical groups.
-4. Center nodes when they have multiple incoming/outgoing arrows so connections spread evenly.
+### Arrows (bind to shapes)
+- Required: type: "arrow", x, y
+- Binding: start: { id: "shapeId" }, end: { id: "shapeId" } — ids must match shape ids
+- Optional: width, height, label: { text: "Yes" } or { text: "REST" }
 
-ARROW RULES (clear, non-colliding connections):
-1. Choose exit/entry sides so arrows follow the flow: source RIGHT (1,0.5) → target LEFT (0,0.5) for left-to-right. Source BOTTOM (0.5,1) → target TOP (0.5,0) for top-to-bottom.
-2. Multiple arrows between same two nodes: offset exitY and entryY (e.g. 0.3 and 0.7, or 0.25/0.5/0.75) so they do not overlap.
-3. Avoid arrow crossings: if two arrows would cross, place nodes differently or use different connection sides (e.g. one arrow right→left, another bottom→top).
-4. When a node has many connections, use multiple sides: top, bottom, left, right — spread exitX/exitY and entryX/entryY (0.2, 0.5, 0.8) to avoid overlap.
-5. Arrows must clearly attach to shape edges — use exitX/exitY and entryX/entryY, not center (0.5,0.5) unless it's a single connection.
+### Example
+[
+  { "type": "rectangle", "id": "a", "x": 100, "y": 100, "width": 120, "height": 60, "label": { "text": "Start" } },
+  { "type": "diamond", "id": "b", "x": 280, "y": 100, "width": 100, "height": 80, "label": { "text": "Decision?" } },
+  { "type": "arrow", "x": 220, "y": 130, "start": { "id": "a" }, "end": { "id": "b" }, "label": { "text": "Yes" } }
+]
 
-ORDER:
-- List ALL shapes first, then ALL arrows.
-- Arrow start.id and end.id must match shape ids exactly.
-- Unique ids. No duplicates.
+## RULES
+- Shapes first, arrows last. Arrow start.id and end.id must exactly match shape ids.
+- Assign unique id to each shape so arrows can reference them.
+- Align properly. Group related shapes. No overlap. Easy to read.
+- For flowchart: rectangle=step, diamond=decision, ellipse=start/end. Label arrows Yes/No.
+- For architecture: rectangles for services, tiered layout. Arrows with labels (REST, gRPC).
 
-DIAGRAM TYPES:
-- Flowchart: rectangle=step, diamond=decision, ellipse=start/end. Linear flow, arrows left→right or top→bottom.
-- Architecture: rectangles for services, group by layer. Arrows show data flow.
-- Mind map: central node at center, branches in rows/columns. Arrows from center to branches.
-- Process: linear flow, optional diamonds. Group steps in phases.
-- Concept map: cluster related concepts, arrows with labels.
-
+## ORDER & VALIDITY
+- Shapes first, then arrows.
+- Unique ids on shapes. Valid JSON array only.
+${libSection}
 Return ONLY the JSON array.`;
-
-export function getExcalidrawGenerateSystemPrompt(): string {
-  return SYSTEM_PROMPT;
 }
 
 export function buildExcalidrawGenerateUserMessage(prompt: string): string {
-  return `Generate a diagram for: "${prompt}"
+  return `Generate a high-quality whiteboard diagram for: "${prompt}"
 
-Return a JSON array. Shapes first, then arrows. Rules:
-- Space shapes 120–200px apart. Align to a 40px grid. No overlapping.
-- Each arrow: start: { id: "<shapeId>" }, end: { id: "<shapeId>" }.
-- Set exitX, exitY (0–1) for where arrow leaves source: 1,0.5=right, 0,0.5=left, 0.5,1=bottom, 0.5,0=top.
-- Set entryX, entryY (0–1) for where arrow enters target. Match flow direction.
-- Multiple arrows between same nodes: offset exitY/entryY (0.3, 0.5, 0.7) to avoid overlap.
-- Use groupId on related shapes. Choose connection sides so arrows don't cross.`;
+Requirements:
+- Output a JSON array: shapes first, then arrows.
+- Use basic shapes (rectangle, diamond, ellipse) OR complex shapes (type "line" with points for polygons, type "freedraw" for hand-drawn paths).
+- Align everything properly. Group related shapes well. Make it easy to read and understand.
+- No overlap. Arrows: start.id and end.id must match shape ids. Use exitX/exitY and entryX/entryY for clean connections.
+- Use groupIds for related shapes. boundElements + containerId for text inside shapes.
+- Complete diagram: all components, every relationship has an arrow. Semantic colors. Arrow labels when helpful (Yes/No, REST, gRPC).`;
+}
+
+export function buildExcalidrawRefineUserMessage(prompt: string, existingElementsJson: string): string {
+  return `Refine or extend this diagram based on the user's request.
+
+Current diagram (Excalidraw elements):
+"""
+${existingElementsJson}
+"""
+
+User wants: "${prompt}"
+
+Return a FULL JSON array: all shapes first, then all arrows. Include existing elements (optionally modified) plus any new ones. Preserve ids of elements you keep.
+Align everything properly. Group well. Easy to read and understand. No overlap. Arrows must use start.id and end.id matching shape ids.
+Output ONLY the JSON array.`;
 }

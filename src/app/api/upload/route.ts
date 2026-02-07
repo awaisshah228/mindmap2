@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { and, eq, like, desc } from "drizzle-orm";
 import { requireAuth } from "@/lib/auth";
 import { GetObjectCommand, PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
@@ -93,14 +94,49 @@ export async function POST(request: Request) {
   }
 }
 
-/** GET /api/upload/presign?key=... – return a fresh 7-day presigned URL for an uploaded file (own files only). */
+/** GET /api/upload?key=... – presign single file. GET /api/upload?folder=icons – list icons. GET /api/upload?folder=all – list all user files (icons + attachments). */
 export async function GET(req: NextRequest) {
   const userId = await requireAuth();
   if (userId instanceof NextResponse) return userId;
 
   const key = req.nextUrl.searchParams.get("key");
+  const folder = req.nextUrl.searchParams.get("folder");
+
+  const folderParam = folder ?? "icons";
+  if (folderParam === "icons" || folderParam === "all") {
+    try {
+      const keyPrefix = folderParam === "all" ? `${userId}/` : `${userId}/icons/`;
+      const rows = await db
+        .select({ key: userFiles.key, url: userFiles.url, filename: userFiles.filename, mimeType: userFiles.mimeType })
+        .from(userFiles)
+        .where(and(eq(userFiles.userId, userId), like(userFiles.key, `${keyPrefix}%`)))
+        .orderBy(desc(userFiles.createdAt))
+        .limit(folderParam === "all" ? 200 : 100);
+      const bucket = getS3Bucket();
+      const files = bucket
+        ? await Promise.all(
+            rows.map(async (r) => ({
+              key: r.key,
+              url: await createPresignedGetUrl(r.key),
+              filename: r.filename ?? r.key.split("/").pop(),
+              mimeType: r.mimeType,
+            }))
+          )
+        : rows.map((r) => ({
+            key: r.key,
+            url: r.url,
+            filename: r.filename ?? r.key.split("/").pop(),
+            mimeType: r.mimeType,
+          }));
+      return NextResponse.json({ files });
+    } catch (err) {
+      console.error("List user icons error:", err);
+      return NextResponse.json({ error: "Failed to list files", files: [] }, { status: 500 });
+    }
+  }
+
   if (!key || typeof key !== "string") {
-    return NextResponse.json({ error: "key required" }, { status: 400 });
+    return NextResponse.json({ error: "key or folder required" }, { status: 400 });
   }
   if (!key.startsWith(userId + "/")) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });

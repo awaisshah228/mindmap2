@@ -12,18 +12,8 @@ import {
 import { getAuthUserId } from "@/lib/auth";
 import { isAdmin } from "@/lib/admin";
 import { canUseCredits, deductCredits } from "@/lib/credits";
-import {
-  getExcalidrawGenerateSystemPrompt,
-  buildExcalidrawGenerateUserMessage,
-  buildExcalidrawRefineUserMessage,
-} from "@/lib/ai/excalidraw-generate-prompt";
-import { detectExcalidrawLibraryFromPrompt, loadExcalidrawLibrary } from "@/lib/excalidraw-library";
-import {
-  getCacheKey,
-  getCached,
-  setCached,
-  cachedStreamResponse,
-} from "@/lib/ai-response-cache";
+import { getExcalidrawToDiagramSystemPrompt, buildExcalidrawToDiagramUserMessage } from "@/lib/ai/excalidraw-to-diagram-prompt";
+import type { Node, Edge } from "@xyflow/react";
 
 export const runtime = "nodejs";
 
@@ -40,24 +30,40 @@ function resolveModelName(provider: string | undefined, model: string | undefine
   return model.includes("/") ? model.split("/").pop()! : model;
 }
 
+function extractJsonArrayOrObject(text: string): { nodes?: unknown[]; edges?: unknown[] } {
+  const trimmed = text.trim();
+  let jsonStr = trimmed;
+  const codeBlockMatch = trimmed.match(/```(?:json)?\s*([\s\S]*?)```/);
+  if (codeBlockMatch) jsonStr = codeBlockMatch[1].trim();
+  const objMatch = jsonStr.match(/\{[\s\S]*\}/);
+  if (objMatch) {
+    try {
+      return JSON.parse(objMatch[0]) as { nodes?: unknown[]; edges?: unknown[] };
+    } catch {
+      // fallthrough
+    }
+  }
+  return {};
+}
+
 export async function POST(req: NextRequest) {
   try {
     const userId = await getAuthUserId();
     const admin = userId ? await isAdmin() : false;
 
     const body = await req.json();
-    const { prompt, llmProvider, llmModel, llmApiKey, cloudModelId, refine, existingElements } = body as {
-      prompt?: string;
+    const { elements: rawElements = [], llmProvider, llmModel, llmApiKey, cloudModelId } = body as {
+      elements?: unknown[];
       llmProvider?: string;
       llmModel?: string;
       llmApiKey?: string;
       cloudModelId?: string;
-      refine?: boolean;
-      existingElements?: unknown[];
     };
 
-    if (!prompt || typeof prompt !== "string") {
-      return NextResponse.json({ error: "Prompt is required" }, { status: 400 });
+    const elements = Array.isArray(rawElements) ? rawElements : [];
+    const activeEls = elements.filter((e: unknown) => !(e as { isDeleted?: boolean })?.isDeleted);
+    if (activeEls.length === 0) {
+      return NextResponse.json({ nodes: [], edges: [] });
     }
 
     if (userId && !admin && !llmApiKey) {
@@ -67,7 +73,6 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // When no user API key: ignore frontend model selection; use admin-configured cloud model or env default.
     let provider: string;
     let effectiveModel: string;
     let resolvedBaseUrl: string | undefined;
@@ -121,89 +126,69 @@ export async function POST(req: NextRequest) {
 
     if (!apiKey) {
       return NextResponse.json(
-        { error: "No API key. Add your key in Settings → Integration to generate Excalidraw diagrams." },
+        { error: "No API key. Use Instant convert or add a key in Settings." },
         { status: 400 }
       );
     }
 
-    const cacheKey = getCacheKey("excalidraw", prompt.trim(), effectiveModel, provider);
-    const cached = getCached(cacheKey);
-    if (cached) {
-      return cachedStreamResponse(cached);
-    }
-
-    // Always include system-design library context (default libraries loaded on Excalidraw mount)
-    const systemDesignContext = await loadExcalidrawLibrary("system-design");
-    const detectedLib = detectExcalidrawLibraryFromPrompt(prompt.trim());
-    const extraContext =
-      detectedLib && detectedLib !== "system-design"
-        ? await loadExcalidrawLibrary(detectedLib)
-        : null;
-    const libraryContext = [systemDesignContext, extraContext].filter(Boolean).join("\n\n---\n\n") || null;
-    const systemPrompt = getExcalidrawGenerateSystemPrompt(libraryContext ?? undefined);
-    const userMessage =
-      refine && Array.isArray(existingElements) && existingElements.length > 0
-        ? buildExcalidrawRefineUserMessage(prompt.trim(), JSON.stringify(existingElements))
-        : buildExcalidrawGenerateUserMessage(prompt.trim());
+    const systemPrompt = getExcalidrawToDiagramSystemPrompt();
+    const userMessage = buildExcalidrawToDiagramUserMessage(activeEls as Parameters<typeof buildExcalidrawToDiagramUserMessage>[0]);
 
     const llm = new ChatOpenAI({
       model: effectiveModel,
       temperature: 0.2,
       apiKey,
-      streaming: true,
       configuration: {
         baseURL: baseURL ?? undefined,
         defaultHeaders: Object.keys(defaultHeaders).length > 0 ? defaultHeaders : undefined,
       },
     });
 
-    const stream = await llm.stream([
+    const response = await llm.invoke([
       ["system", systemPrompt],
       ["user", userMessage],
     ]);
+    const text = typeof response.content === "string" ? response.content : String(response.content ?? "");
 
-    const encoder = new TextEncoder();
-    let fullText = "";
+    const parsed = extractJsonArrayOrObject(text);
+    const rawNodes = Array.isArray(parsed.nodes) ? parsed.nodes : [];
+    const rawEdges = Array.isArray(parsed.edges) ? parsed.edges : [];
 
-    const readable = new ReadableStream<Uint8Array>({
-      async start(controller) {
-        try {
-          for await (const chunk of stream) {
-            const text =
-              typeof chunk.content === "string"
-                ? chunk.content
-                : Array.isArray(chunk.content)
-                  ? (chunk.content as { text?: string }[])
-                      .map((c) => (typeof c === "string" ? c : c?.text ?? ""))
-                      .join("")
-                  : String(chunk.content ?? "");
-            if (text) {
-              fullText += text;
-              controller.enqueue(encoder.encode(text));
-            }
-          }
-          controller.close();
-          if (fullText) setCached(cacheKey, fullText);
-          if (userId && !admin && !llmApiKey) {
-            await deductCredits(userId);
-          }
-        } catch (err) {
-          console.error("Generate Excalidraw stream error:", err);
-          controller.error(err);
-        }
-      },
+    const nodes: Node[] = rawNodes.map((n, i) => {
+      const node = n as Record<string, unknown>;
+      const id = String(node.id ?? `node-${i}`);
+      const pos = node.position as { x?: number; y?: number } | undefined;
+      const x = Number(pos?.x ?? node.x ?? 0);
+      const y = Number(pos?.y ?? node.y ?? 0);
+      return {
+        id,
+        type: (node.type as string) || "rectangle",
+        position: { x, y },
+        data: { label: node.label ?? (node.data as Record<string, unknown>)?.label ?? "" },
+        width: node.width != null ? Number(node.width) : undefined,
+        height: node.height != null ? Number(node.height) : undefined,
+      } as Node;
     });
 
-    return new Response(readable, {
-      headers: {
-        "Content-Type": "text/plain; charset=utf-8",
-        "Cache-Control": "no-cache, no-transform",
-      },
+    const edges: Edge[] = rawEdges.map((e, i) => {
+      const edge = e as Record<string, unknown>;
+      return {
+        id: String(edge.id ?? `e-${edge.source}-${edge.target}-${i}`),
+        source: String(edge.source ?? ""),
+        target: String(edge.target ?? ""),
+        data: edge.data ?? (edge.label ? { label: edge.label } : {}),
+      } as Edge;
     });
+
+    if (userId && !admin && !llmApiKey) {
+      await deductCredits(userId);
+    }
+
+    return NextResponse.json({ nodes, edges });
   } catch (err) {
-    console.error("Generate Excalidraw error:", err);
+    console.error("Convert Excalidraw to diagram error:", err);
     return NextResponse.json(
-      { error: err instanceof Error ? err.message : "Generation failed" },
+      { error: err instanceof Error ? err.message : "Conversion failed" },
       { status: 500 }
     );
   }

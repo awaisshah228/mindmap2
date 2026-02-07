@@ -8,35 +8,48 @@ export async function GET(req: NextRequest) {
   const userId = await requireAdmin();
   if (userId instanceof NextResponse) return userId;
 
-  const templates = req.nextUrl.searchParams.get("templates");
-  const level = req.nextUrl.searchParams.get("level");
+  try {
+    const templates = req.nextUrl.searchParams.get("templates");
+    const level = req.nextUrl.searchParams.get("level");
 
-  const rows = await db
-    .select()
-    .from(diagramPresets)
-    .orderBy(asc(diagramPresets.sortOrder), asc(diagramPresets.name));
+    const rows = await db
+      .select()
+      .from(diagramPresets)
+      .orderBy(asc(diagramPresets.sortOrder), asc(diagramPresets.name));
 
-  let list = rows.map((r) => ({
-    id: r.id,
-    name: r.name,
-    label: r.label,
-    description: r.description,
-    diagramType: r.diagramType,
-    level: r.level,
-    prompt: r.prompt,
-    isTemplate: r.isTemplate,
-    sortOrder: r.sortOrder,
-    previewImageUrl: r.previewImageUrl,
-    hasNodes: Array.isArray(r.nodes) && r.nodes.length > 0,
-    createdAt: r.createdAt,
-    updatedAt: r.updatedAt,
-  }));
+    let list = rows.map((r) => ({
+      id: r.id,
+      name: r.name,
+      label: r.label,
+      description: r.description,
+      diagramType: r.diagramType,
+      level: r.level,
+      prompt: r.prompt,
+      isTemplate: r.isTemplate,
+      sortOrder: r.sortOrder,
+      previewImageUrl: r.previewImageUrl,
+      targetCanvas: r.targetCanvas ?? "reactflow",
+      dataFormat: r.dataFormat ?? undefined,
+      hasNodes: Array.isArray(r.nodes) && r.nodes.length > 0,
+      hasExcalidraw: !!r.excalidrawData && typeof r.excalidrawData === "object",
+      hasMermaid: !!r.mermaidData,
+      hasDrawio: !!r.drawioData,
+      createdAt: r.createdAt,
+      updatedAt: r.updatedAt,
+    }));
 
-  if (templates === "true") list = list.filter((r) => r.isTemplate);
-  else if (templates === "false") list = list.filter((r) => !r.isTemplate);
-  if (level) list = list.filter((r) => r.level === level);
+    if (templates === "true") list = list.filter((r) => r.isTemplate);
+    else if (templates === "false") list = list.filter((r) => !r.isTemplate);
+    if (level) list = list.filter((r) => r.level === level);
 
-  return NextResponse.json({ presets: list });
+    return NextResponse.json({ presets: list });
+  } catch (err) {
+    console.error("[admin/presets] GET error:", err);
+    return NextResponse.json(
+      { error: err instanceof Error ? err.message : "Failed to load presets" },
+      { status: 500 }
+    );
+  }
 }
 
 export async function POST(req: NextRequest) {
@@ -61,6 +74,11 @@ export async function POST(req: NextRequest) {
   const isTemplate = body.isTemplate === true;
   const sortOrder = typeof body.sortOrder === "number" ? body.sortOrder : 0;
   const previewImageUrl = typeof body.previewImageUrl === "string" ? body.previewImageUrl : "";
+  const targetCanvas = body.targetCanvas === "reactflow" || body.targetCanvas === "excalidraw" || body.targetCanvas === "drawio" ? body.targetCanvas : "reactflow";
+  const dataFormat = body.dataFormat === "mermaid" || body.dataFormat === "json" ? body.dataFormat : null;
+  const mermaidData = typeof body.mermaidData === "string" ? body.mermaidData : null;
+  const drawioData = typeof body.drawioData === "string" ? body.drawioData : null;
+  const excalidrawData = body.excalidrawData && typeof body.excalidrawData === "object" ? body.excalidrawData : null;
 
   if (!name) {
     return NextResponse.json({ error: "name is required" }, { status: 400 });
@@ -80,6 +98,11 @@ export async function POST(req: NextRequest) {
       isTemplate,
       sortOrder,
       previewImageUrl: previewImageUrl || null,
+      targetCanvas,
+      dataFormat,
+      mermaidData,
+      drawioData,
+      excalidrawData,
     })
     .returning({ id: diagramPresets.id });
 

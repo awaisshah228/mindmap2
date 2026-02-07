@@ -11,6 +11,7 @@ const STREAM_CHUNK_SIZE = 256;
  * GET /api/diagrams/preset/stream?preset=<idOrSlug>
  * Returns the same payload as GET /api/diagrams/preset but streams the JSON in small chunks
  * so the client can render nodes/edges in sequence instead of all at once.
+ * Public — no auth required. Available to everyone (signed in or not).
  */
 export async function GET(req: NextRequest) {
   const preset = req.nextUrl.searchParams.get("preset");

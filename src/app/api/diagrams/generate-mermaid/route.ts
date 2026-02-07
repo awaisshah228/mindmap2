@@ -13,17 +13,11 @@ import { getAuthUserId } from "@/lib/auth";
 import { isAdmin } from "@/lib/admin";
 import { canUseCredits, deductCredits } from "@/lib/credits";
 import {
-  getExcalidrawGenerateSystemPrompt,
-  buildExcalidrawGenerateUserMessage,
-  buildExcalidrawRefineUserMessage,
-} from "@/lib/ai/excalidraw-generate-prompt";
+  getMermaidSystemPrompt,
+  buildMermaidUserMessage,
+  buildMermaidRefineUserMessage,
+} from "@/lib/ai/mermaid-generate-prompt";
 import { detectExcalidrawLibraryFromPrompt, loadExcalidrawLibrary } from "@/lib/excalidraw-library";
-import {
-  getCacheKey,
-  getCached,
-  setCached,
-  cachedStreamResponse,
-} from "@/lib/ai-response-cache";
 
 export const runtime = "nodejs";
 
@@ -46,14 +40,14 @@ export async function POST(req: NextRequest) {
     const admin = userId ? await isAdmin() : false;
 
     const body = await req.json();
-    const { prompt, llmProvider, llmModel, llmApiKey, cloudModelId, refine, existingElements } = body as {
+    const { prompt, llmProvider, llmModel, llmApiKey, cloudModelId, refine, existingContext } = body as {
       prompt?: string;
       llmProvider?: string;
       llmModel?: string;
       llmApiKey?: string;
       cloudModelId?: string;
       refine?: boolean;
-      existingElements?: unknown[];
+      existingContext?: string;
     };
 
     if (!prompt || typeof prompt !== "string") {
@@ -67,7 +61,6 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // When no user API key: ignore frontend model selection; use admin-configured cloud model or env default.
     let provider: string;
     let effectiveModel: string;
     let resolvedBaseUrl: string | undefined;
@@ -86,6 +79,7 @@ export async function POST(req: NextRequest) {
         resolvedBaseUrl = resolved.baseUrl;
       }
     }
+
     let apiKey: string;
     let baseURL: string | undefined;
     let defaultHeaders: Record<string, string> = {};
@@ -121,30 +115,26 @@ export async function POST(req: NextRequest) {
 
     if (!apiKey) {
       return NextResponse.json(
-        { error: "No API key. Add your key in Settings → Integration to generate Excalidraw diagrams." },
+        { error: "No API key. Add your key in Settings → Integration to generate Mermaid diagrams." },
         { status: 400 }
       );
     }
 
-    const cacheKey = getCacheKey("excalidraw", prompt.trim(), effectiveModel, provider);
-    const cached = getCached(cacheKey);
-    if (cached) {
-      return cachedStreamResponse(cached);
-    }
-
-    // Always include system-design library context (default libraries loaded on Excalidraw mount)
+    // Load library context for diagram types (flowchart, system-design) — helps Mermaid align with Excalidraw libraries
+    const trimmedPrompt = prompt.trim();
+    const flowchartContext = await loadExcalidrawLibrary("flowchart");
     const systemDesignContext = await loadExcalidrawLibrary("system-design");
-    const detectedLib = detectExcalidrawLibraryFromPrompt(prompt.trim());
+    const detectedLib = detectExcalidrawLibraryFromPrompt(trimmedPrompt);
     const extraContext =
-      detectedLib && detectedLib !== "system-design"
+      detectedLib && detectedLib !== "flowchart" && detectedLib !== "system-design"
         ? await loadExcalidrawLibrary(detectedLib)
         : null;
-    const libraryContext = [systemDesignContext, extraContext].filter(Boolean).join("\n\n---\n\n") || null;
-    const systemPrompt = getExcalidrawGenerateSystemPrompt(libraryContext ?? undefined);
-    const userMessage =
-      refine && Array.isArray(existingElements) && existingElements.length > 0
-        ? buildExcalidrawRefineUserMessage(prompt.trim(), JSON.stringify(existingElements))
-        : buildExcalidrawGenerateUserMessage(prompt.trim());
+    const libraryContext = [flowchartContext, systemDesignContext, extraContext].filter(Boolean).join("\n\n---\n\n") || null;
+    const systemPrompt = getMermaidSystemPrompt(libraryContext ?? undefined);
+
+    const userMessage = refine && existingContext
+      ? buildMermaidRefineUserMessage(trimmedPrompt, existingContext)
+      : buildMermaidUserMessage(trimmedPrompt);
 
     const llm = new ChatOpenAI({
       model: effectiveModel,
@@ -173,9 +163,7 @@ export async function POST(req: NextRequest) {
               typeof chunk.content === "string"
                 ? chunk.content
                 : Array.isArray(chunk.content)
-                  ? (chunk.content as { text?: string }[])
-                      .map((c) => (typeof c === "string" ? c : c?.text ?? ""))
-                      .join("")
+                  ? (chunk.content as { text?: string }[]).map((c) => (typeof c === "string" ? c : c?.text ?? "")).join("")
                   : String(chunk.content ?? "");
             if (text) {
               fullText += text;
@@ -183,12 +171,11 @@ export async function POST(req: NextRequest) {
             }
           }
           controller.close();
-          if (fullText) setCached(cacheKey, fullText);
           if (userId && !admin && !llmApiKey) {
             await deductCredits(userId);
           }
         } catch (err) {
-          console.error("Generate Excalidraw stream error:", err);
+          console.error("Generate Mermaid stream error:", err);
           controller.error(err);
         }
       },
@@ -201,7 +188,7 @@ export async function POST(req: NextRequest) {
       },
     });
   } catch (err) {
-    console.error("Generate Excalidraw error:", err);
+    console.error("Generate Mermaid error:", err);
     return NextResponse.json(
       { error: err instanceof Error ? err.message : "Generation failed" },
       { status: 500 }

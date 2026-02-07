@@ -95,6 +95,13 @@ export const documents = pgTable("documents", {
   updatedAt: timestamp("updated_at").defaultNow(),
 });
 
+/** User Excalidraw library items (cloud sync when signed in) */
+export const userExcalidrawLibraries = pgTable("user_excalidraw_libraries", {
+  userId: text("user_id").primaryKey(),
+  libraryItems: jsonb("library_items").$type<unknown[]>().default([]),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
 /** S3 / storage references for user uploads (icons, attachments) */
 export const userFiles = pgTable("user_files", {
   id: uuid("id").primaryKey().defaultRandom(),
@@ -122,6 +129,9 @@ export const PRESET_LEVELS = [
   "mindmap",
 ] as const;
 
+/** Preset data format: mermaid = Mermaid text source (Excalidraw only); json = direct JSON. Null = legacy. */
+export const PRESET_DATA_FORMATS = ["mermaid", "json"] as const;
+
 /** Target canvas: reactflow, excalidraw, or drawio. Null = legacy (assume reactflow). */
 export const diagramPresets = pgTable("diagram_presets", {
   id: uuid("id").primaryKey().defaultRandom(),
@@ -137,6 +147,10 @@ export const diagramPresets = pgTable("diagram_presets", {
   drawioData: text("drawio_data"),
   /** Excalidraw JSON; populated on first AI generation for excalidraw presets */
   excalidrawData: jsonb("excalidraw_data").$type<{ elements: unknown[]; appState?: Record<string, unknown> }>(),
+  /** Preset data format: mermaid | json. Only for excalidraw presets. Null = legacy (json). */
+  dataFormat: text("data_format"),
+  /** Mermaid diagram definition. Only when dataFormat=mermaid (Excalidraw presets). */
+  mermaidData: text("mermaid_data"),
   /** Target canvas: reactflow | excalidraw | drawio. Null = reactflow. */
   targetCanvas: text("target_canvas"),
   isTemplate: boolean("is_template").notNull().default(false),
@@ -149,6 +163,20 @@ export const diagramPresets = pgTable("diagram_presets", {
 /** Clerk user ids that can access admin dashboard */
 export const adminUsers = pgTable("admin_users", {
   userId: text("user_id").primaryKey(),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+/** Admin-uploaded cloud icons (global, searchable by name/keywords during node generation). */
+export const cloudIcons = pgTable("cloud_icons", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  key: text("key").notNull(),
+  url: text("url").notNull(),
+  filename: text("filename"),
+  /** Display name (e.g. "Redis", "PostgreSQL"). */
+  name: text("name").notNull(),
+  /** Comma-separated keywords for matching node labels (e.g. "redis,cache,session"). */
+  keywords: text("keywords"),
+  sortOrder: integer("sort_order").notNull().default(0),
   createdAt: timestamp("created_at").defaultNow(),
 });
 
@@ -196,3 +224,5 @@ export type DiagramPromptHistory = typeof diagramPromptHistory.$inferSelect;
 export type NewDiagramPromptHistory = typeof diagramPromptHistory.$inferInsert;
 export type AIModel = typeof aiModels.$inferSelect;
 export type NewAIModel = typeof aiModels.$inferInsert;
+export type CloudIcon = typeof cloudIcons.$inferSelect;
+export type NewCloudIcon = typeof cloudIcons.$inferInsert;

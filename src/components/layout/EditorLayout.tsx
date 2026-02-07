@@ -17,6 +17,7 @@ import { drawioXmlToDiagram } from "@/lib/drawio-to-diagram";
 import { parseStreamingElementsBuffer } from "@/lib/ai/streaming-json-parser";
 import { normalizeSkeletons } from "@/lib/skeleton-normalize";
 import { applyNodesAndEdgesInChunks } from "@/lib/chunked-nodes";
+import type { Node, Edge } from "@xyflow/react";
 import { toPng } from "html-to-image";
 
 const ExcalidrawCanvas = dynamic(
@@ -38,6 +39,7 @@ import { SettingsPanel } from "@/components/panels/SettingsPanel";
 import { DailyNotesPanel } from "@/components/panels/DailyNotesPanel";
 import { ExportImportPanel } from "@/components/panels/ExportImportPanel";
 import { SharePanel } from "@/components/panels/SharePanel";
+import { LibraryPanel } from "@/components/panels/LibraryPanel";
 import { ThemeProvider } from "@/components/panels/ThemeProvider";
 import { DrawioProvider } from "@/contexts/DrawioContext";
 import {
@@ -63,6 +65,7 @@ import {
   Minus,
   LayoutTemplate,
   History,
+  FolderOpen,
 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import * as Dropdown from "@radix-ui/react-dropdown-menu";
@@ -78,6 +81,7 @@ export default function EditorLayout() {
   const setSearchOpen = useCanvasStore((s) => s.setSearchOpen);
   const setShortcutsOpen = useCanvasStore((s) => s.setShortcutsOpen);
   const setSettingsOpen = useCanvasStore((s) => s.setSettingsOpen);
+  const setLibraryOpen = useCanvasStore((s) => s.setLibraryOpen);
   const setDailyNotesOpen = useCanvasStore((s) => s.setDailyNotesOpen);
   const focusedBranchNodeId = useCanvasStore((s) => s.focusedBranchNodeId);
   const setFocusedBranchNodeId = useCanvasStore((s) => s.setFocusedBranchNodeId);
@@ -89,6 +93,7 @@ export default function EditorLayout() {
   const llmApiKey = useCanvasStore((s) => s.llmApiKey);
   const canvasMode = useCanvasStore((s) => s.canvasMode);
   const setCanvasMode = useCanvasStore((s) => s.setCanvasMode);
+  const setPendingExcalidrawLibraryUrl = useCanvasStore((s) => s.setPendingExcalidrawLibraryUrl);
   const nodes = useCanvasStore((s) => s.nodes);
   const edges = useCanvasStore((s) => s.edges);
   const setNodes = useCanvasStore((s) => s.setNodes);
@@ -103,6 +108,29 @@ export default function EditorLayout() {
   const canvasBackgroundVariant = useCanvasStore((s) => s.canvasBackgroundVariant);
   const setCanvasBackgroundVariant = useCanvasStore((s) => s.setCanvasBackgroundVariant);
   const isMobile = useMediaQuery("(max-width: 768px)");
+
+  // Detect ?addLibrary or #addLibrary → switch canvas first; ExcalidrawCanvas shows confirm once API loaded
+  useEffect(() => {
+    const check = () => {
+      if (typeof window === "undefined") return;
+      const search = window.location.search?.slice(1) || "";
+      const hash = window.location.hash?.slice(1) || "";
+      const queryParams = new URLSearchParams(search);
+      const hashParams = new URLSearchParams(hash);
+      const addLibrary = queryParams.get("addLibrary") ?? hashParams.get("addLibrary");
+      if (addLibrary && typeof addLibrary === "string" && addLibrary.startsWith("http")) {
+        setCanvasMode("excalidraw");
+        setPendingExcalidrawLibraryUrl(addLibrary);
+      }
+    };
+    check();
+    window.addEventListener("hashchange", check);
+    window.addEventListener("popstate", check);
+    return () => {
+      window.removeEventListener("hashchange", check);
+      window.removeEventListener("popstate", check);
+    };
+  }, [setCanvasMode, setPendingExcalidrawLibraryUrl]);
 
   const handleConvertToExcalidraw = useCallback(async () => {
     const skeletons = diagramToExcalidraw(nodes, edges);
@@ -126,6 +154,95 @@ export default function EditorLayout() {
     setCanvasMode("reactflow");
     setPendingFitView(true);
     setHasUnsavedChanges(true);
+  }, [excalidrawData, pushUndo, setNodes, setEdges, setCanvasMode, setPendingFitView, setHasUnsavedChanges]);
+
+  const handleAddExcalidrawToDiagramAsSvg = useCallback(async () => {
+    const els = excalidrawData?.elements ?? [];
+    const elList = Array.isArray(els) ? els : [];
+    const activeEls = elList.filter((e: unknown) => !(e as { isDeleted?: boolean })?.isDeleted);
+    if (activeEls.length === 0) {
+      if (typeof window !== "undefined") window.alert("No elements in Excalidraw to move.");
+      return;
+    }
+    try {
+      const { exportToSvg } = await import("@excalidraw/excalidraw");
+      const appState = excalidrawData?.appState ?? {};
+      const files = excalidrawData?.files ?? null;
+      const svg = await exportToSvg({
+        elements: activeEls,
+        appState,
+        files,
+        exportPadding: 10,
+      });
+      const svgString = svg.outerHTML;
+      const dataUrl = `data:image/svg+xml;base64,${btoa(unescape(encodeURIComponent(svgString)))}`;
+      const nodeId = `image-excal-${Date.now()}`;
+      const imageNode = {
+        id: nodeId,
+        type: "image",
+        position: { x: 100, y: 100 },
+        data: { label: "Excalidraw", imageUrl: dataUrl },
+        width: 300,
+        height: 200,
+      };
+      pushUndo();
+      const newNodes = [...nodes, imageNode];
+      applyNodesAndEdgesInChunks(setNodes, setEdges, newNodes, edges);
+      setCanvasMode("reactflow");
+      setPendingFitView(true);
+      setHasUnsavedChanges(true);
+    } catch (err) {
+      console.error("Move Excalidraw to diagram as SVG failed:", err);
+      if (typeof window !== "undefined") window.alert("Failed to move Excalidraw elements as SVG.");
+    }
+  }, [excalidrawData, nodes, edges, pushUndo, setNodes, setEdges, setCanvasMode, setPendingFitView, setHasUnsavedChanges]);
+
+  const handleConvertExcalidrawToDiagramWithAI = useCallback(async () => {
+    const els = excalidrawData?.elements ?? [];
+    const elList = Array.isArray(els) ? els : [];
+    const activeEls = elList.filter((e: unknown) => !(e as { isDeleted?: boolean })?.isDeleted);
+    if (activeEls.length === 0) {
+      if (typeof window !== "undefined") window.alert("No elements in Excalidraw to convert.");
+      return;
+    }
+    setConvertExcalidrawToDiagramLoading(true);
+    try {
+      const { llmProvider, llmModel, llmApiKey, cloudModelId } = useCanvasStore.getState();
+      const res = await fetch("/api/diagrams/convert-excalidraw-to-diagram", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({
+          elements: activeEls,
+          llmProvider,
+          llmModel,
+          llmApiKey: llmApiKey || undefined,
+          cloudModelId: !llmApiKey ? cloudModelId ?? undefined : undefined,
+        }),
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error((data?.error as string) || "Conversion failed");
+      }
+      const data = (await res.json()) as { nodes?: unknown[]; edges?: unknown[] };
+      const newNodes = Array.isArray(data.nodes) ? (data.nodes as Node[]) : [];
+      const newEdges = Array.isArray(data.edges) ? (data.edges as Edge[]) : [];
+      if (newNodes.length === 0 && newEdges.length === 0) {
+        if (typeof window !== "undefined") window.alert("AI returned no nodes or edges. Try Instant convert instead.");
+        return;
+      }
+      pushUndo();
+      applyNodesAndEdgesInChunks(setNodes, setEdges, newNodes, newEdges);
+      setCanvasMode("reactflow");
+      setPendingFitView(true);
+      setHasUnsavedChanges(true);
+    } catch (err) {
+      console.error("Convert Excalidraw to diagram (AI) failed:", err);
+      const message = err instanceof Error ? err.message : "Conversion failed";
+      if (typeof window !== "undefined") window.alert(message);
+    } finally {
+      setConvertExcalidrawToDiagramLoading(false);
+    }
   }, [excalidrawData, pushUndo, setNodes, setEdges, setCanvasMode, setPendingFitView, setHasUnsavedChanges]);
 
   const handleConvertDrawioToDiagram = useCallback(() => {
@@ -342,6 +459,7 @@ export default function EditorLayout() {
   const [promptHistoryOpen, setPromptHistoryOpen] = useState(false);
   const [editingTitle, setEditingTitle] = useState(false);
   const [convertExcalidrawLoading, setConvertExcalidrawLoading] = useState(false);
+  const [convertExcalidrawToDiagramLoading, setConvertExcalidrawToDiagramLoading] = useState(false);
   const titleInputRef = useRef<HTMLInputElement>(null);
 
   const handleConvertToExcalidrawWithAI = useCallback(async () => {
@@ -584,14 +702,53 @@ export default function EditorLayout() {
                   </Dropdown.Root>
                 )}
                 {canvasMode === "excalidraw" && (excalidrawData?.elements?.length ?? 0) > 0 && (
-                  <button
-                    type="button"
-                    onClick={handleConvertToDiagram}
-                    className="text-[11px] px-2 py-1 rounded-md text-gray-500 hover:text-violet-600 hover:bg-violet-50 dark:hover:bg-violet-900/20 transition-colors whitespace-nowrap"
-                    title="Convert Excalidraw to diagram"
-                  >
-                    → Diagram
-                  </button>
+                  <Dropdown.Root>
+                    <Dropdown.Trigger asChild>
+                      <button
+                        type="button"
+                        disabled={convertExcalidrawToDiagramLoading}
+                        className="flex items-center gap-0.5 text-[11px] px-2 py-1 rounded-md text-gray-500 hover:text-violet-600 hover:bg-violet-50 dark:hover:bg-violet-900/20 transition-colors whitespace-nowrap disabled:opacity-60"
+                        title="Convert Excalidraw to diagram"
+                      >
+                        {convertExcalidrawToDiagramLoading ? (
+                          <Loader2 className="w-3 h-3 animate-spin" />
+                        ) : (
+                          <>
+                            → Diagram
+                            <ChevronDown className="w-3 h-3" />
+                          </>
+                        )}
+                      </button>
+                    </Dropdown.Trigger>
+                    <Dropdown.Portal>
+                      <Dropdown.Content
+                        className="min-w-[180px] rounded-lg border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-800 shadow-lg py-1 z-[300]"
+                        sideOffset={4}
+                        align="start"
+                      >
+                        <Dropdown.Label className="px-3 py-1.5 text-[10px] font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide">→ Diagram</Dropdown.Label>
+                        <Dropdown.Item
+                          className="px-3 py-2 text-xs text-gray-700 dark:text-gray-200 hover:bg-violet-50 dark:hover:bg-violet-900/20 outline-none cursor-pointer"
+                          onSelect={() => handleConvertToDiagram()}
+                        >
+                          Instant
+                        </Dropdown.Item>
+                        <Dropdown.Item
+                          className="px-3 py-2 text-xs text-gray-700 dark:text-gray-200 hover:bg-violet-50 dark:hover:bg-violet-900/20 outline-none cursor-pointer"
+                          onSelect={() => handleConvertExcalidrawToDiagramWithAI()}
+                        >
+                          With AI
+                        </Dropdown.Item>
+                        <Dropdown.Item
+                          className="px-3 py-2 text-xs text-gray-700 dark:text-gray-200 hover:bg-violet-50 dark:hover:bg-violet-900/20 outline-none cursor-pointer flex items-center gap-2"
+                          onSelect={() => handleAddExcalidrawToDiagramAsSvg()}
+                        >
+                          <ImagePlus className="w-3.5 h-3.5" />
+                          As SVG
+                        </Dropdown.Item>
+                      </Dropdown.Content>
+                    </Dropdown.Portal>
+                  </Dropdown.Root>
                 )}
                 {canvasMode === "drawio" && (drawioData?.trim?.()?.length ?? 0) > 0 && (
                   <button
@@ -662,6 +819,14 @@ export default function EditorLayout() {
                 title="Search (Ctrl+F)"
               >
                 <Search className="w-4 h-4 text-gray-500 dark:text-gray-400" />
+              </button>
+              <button
+                type="button"
+                onClick={() => setLibraryOpen(true)}
+                className="p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
+                title="Your library (all S3 uploads)"
+              >
+                <FolderOpen className="w-4 h-4 text-gray-500 dark:text-gray-400" />
               </button>
               <button
                 type="button"
@@ -876,6 +1041,7 @@ export default function EditorLayout() {
         <NodeDetailsPanel />
         <KeyboardShortcutsPanel />
         <SearchPanel />
+        <LibraryPanel />
         <SettingsPanel />
         <DailyNotesPanel />
         <ExportImportPanel open={exportOpen} onClose={() => setExportOpen(false)} />

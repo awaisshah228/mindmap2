@@ -11,7 +11,10 @@ export function normalizeSkeletons(
   const arrows: Record<string, unknown>[] = [];
   for (const el of elements) {
     const t = (el.type as string) ?? "";
-    if (t === "arrow" || t === "line") arrows.push(el);
+    const pts = (el.points ?? []) as unknown[];
+    // Line with points (path/polygon shape) goes with shapes; arrow/connector line goes last
+    const isPathShape = t === "line" && Array.isArray(pts) && pts.length > 2;
+    if ((t === "arrow" || (t === "line" && !isPathShape))) arrows.push(el);
     else shapes.push(el);
   }
   const shapeIds = new Set(shapes.map((s) => String(s.id ?? "")).filter(Boolean));

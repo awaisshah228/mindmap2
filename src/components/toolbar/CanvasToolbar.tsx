@@ -1,7 +1,8 @@
 "use client";
 
-import { useState, useMemo, useRef } from "react";
+import { useState, useMemo, useRef, useEffect } from "react";
 import { useRouter } from "next/navigation";
+import { useAuth } from "@clerk/nextjs";
 import * as Popover from "@radix-ui/react-popover";
 import * as Tooltip from "@radix-ui/react-tooltip";
 import {
@@ -24,6 +25,7 @@ import {
   MessageSquare,
   User,
   Folder,
+  FolderOpen,
   Plus,
   Search,
   Upload,
@@ -186,6 +188,10 @@ export default function CanvasToolbar({ activeTool, onToolChange }: CanvasToolba
   const [drawOpen, setDrawOpen] = useState(false);
   const [iconsImagesOpen, setIconsImagesOpen] = useState(false);
   const [searchIconsImages, setSearchIconsImages] = useState("");
+  const [libraryOpen, setLibraryOpen] = useState(false);
+  const [librarySearch, setLibrarySearch] = useState("");
+  const [userLibraryIcons, setUserLibraryIcons] = useState<{ key: string; url: string; filename?: string; mimeType?: string }[]>([]);
+  const { isSignedIn } = useAuth();
   const pendingShape = useCanvasStore((s) => s.pendingShape);
   const setPendingShape = useCanvasStore((s) => s.setPendingShape);
   const setPendingIconId = useCanvasStore((s) => (s as any).setPendingIconId);
@@ -247,6 +253,7 @@ export default function CanvasToolbar({ activeTool, onToolChange }: CanvasToolba
   const customImageInputRef = useRef<HTMLInputElement>(null);
   const [customEmojiInput, setCustomEmojiInput] = useState("");
   const [uploadProgress, setUploadProgress] = useState<{ type: "icon" | "image"; name: string; progress: number } | null>(null);
+  const [uploadToS3, setUploadToS3] = useState(true); // when true: upload to S3 + add to canvas; when false: add to canvas only
 
   const uploadApi = typeof window !== "undefined" ? `${window.location.origin}/api/upload` : "/api/upload";
 
@@ -254,6 +261,20 @@ export default function CanvasToolbar({ activeTool, onToolChange }: CanvasToolba
     const file = e.target.files?.[0];
     e.target.value = "";
     if (!file || !file.type.startsWith("image/")) return;
+
+    if (!uploadToS3) {
+      const reader = new FileReader();
+      reader.onload = () => {
+        setPendingIconId(null);
+        setPendingEmoji(null);
+        setPendingImage(null);
+        useCanvasStore.getState().setPendingCustomIcon(reader.result as string);
+        onToolChange("emoji");
+        setIconsImagesOpen(false);
+      };
+      reader.readAsDataURL(file);
+      return;
+    }
 
     setUploadProgress({ type: "icon", name: file.name, progress: 0 });
     const result = await uploadWithProgress(file, uploadApi, "icons", (loaded, total) => {
@@ -268,6 +289,7 @@ export default function CanvasToolbar({ activeTool, onToolChange }: CanvasToolba
       useCanvasStore.getState().setPendingCustomIcon(result.url);
       onToolChange("emoji");
       setIconsImagesOpen(false);
+      setUserLibraryIcons((prev) => [{ key: result.key ?? result.url, url: result.url, filename: file.name, mimeType: file.type }, ...prev]);
     } else {
       const useFallback = /Upload not configured|Unauthorized|401|403|Forbidden/i.test(result.error ?? "");
       if (useFallback) {
@@ -290,6 +312,19 @@ export default function CanvasToolbar({ activeTool, onToolChange }: CanvasToolba
     e.target.value = "";
     if (!file || !file.type.startsWith("image/")) return;
 
+    if (!uploadToS3) {
+      const reader = new FileReader();
+      reader.onload = () => {
+        setPendingImage(reader.result as string, file.name.replace(/\.[^.]+$/, ""));
+        setPendingIconId(null);
+        setPendingEmoji(null);
+        onToolChange("image");
+        setIconsImagesOpen(false);
+      };
+      reader.readAsDataURL(file);
+      return;
+    }
+
     setUploadProgress({ type: "image", name: file.name, progress: 0 });
     const result = await uploadWithProgress(file, uploadApi, "icons", (loaded, total) => {
       setUploadProgress((p) => p?.type === "image" ? { ...p, progress: total ? (loaded / total) * 100 : 0 } : p);
@@ -302,6 +337,7 @@ export default function CanvasToolbar({ activeTool, onToolChange }: CanvasToolba
       setPendingEmoji(null);
       onToolChange("image");
       setIconsImagesOpen(false);
+      setUserLibraryIcons((prev) => [{ key: result.key ?? result.url, url: result.url, filename: file.name, mimeType: file.type }, ...prev]);
     } else {
       const useFallback = /Upload not configured|Unauthorized|401|403|Forbidden/i.test(result.error ?? "");
       if (useFallback) {
@@ -354,6 +390,40 @@ export default function CanvasToolbar({ activeTool, onToolChange }: CanvasToolba
       return kw?.toLowerCase().includes(q);
     });
   }, [searchIconsImages]);
+
+  const filteredUserLibrary = useMemo(() => {
+    const q = searchIconsImages.trim().toLowerCase();
+    if (!q) return userLibraryIcons;
+    return userLibraryIcons.filter(
+      (f) =>
+        (f.filename ?? f.key).toLowerCase().includes(q)
+    );
+  }, [userLibraryIcons, searchIconsImages]);
+
+  const filteredLibraryForPopover = useMemo(() => {
+    const q = librarySearch.trim().toLowerCase();
+    if (!q) return userLibraryIcons;
+    return userLibraryIcons.filter(
+      (f) =>
+        (f.filename ?? f.key).toLowerCase().includes(q)
+    );
+  }, [userLibraryIcons, librarySearch]);
+
+  useEffect(() => {
+    if (!iconsImagesOpen) return;
+    fetch(`${typeof window !== "undefined" ? window.location.origin : ""}/api/upload?folder=icons`, { credentials: "include" })
+      .then((r) => (r.ok ? r.json() : { files: [] }))
+      .then((d) => setUserLibraryIcons(d.files ?? []))
+      .catch(() => setUserLibraryIcons([]));
+  }, [iconsImagesOpen]);
+
+  useEffect(() => {
+    if (!libraryOpen) return;
+    fetch(`${typeof window !== "undefined" ? window.location.origin : ""}/api/upload?folder=icons`, { credentials: "include" })
+      .then((r) => (r.ok ? r.json() : { files: [] }))
+      .then((d) => setUserLibraryIcons(d.files ?? []))
+      .catch(() => setUserLibraryIcons([]));
+  }, [libraryOpen]);
 
   const isSelectGroup = activeTool === "select" || activeTool === "selection";
   const isDrawGroup = activeTool === "freeDraw" || activeTool === "eraser";
@@ -628,6 +698,15 @@ export default function CanvasToolbar({ activeTool, onToolChange }: CanvasToolba
               <div className="flex-1 overflow-y-auto p-2 min-h-0">
                 {/* ── Upload custom icon / image ── */}
                 <div className="flex flex-col gap-1.5 mb-3">
+                  <label className="flex items-center gap-2 text-xs text-gray-600 dark:text-gray-400 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={uploadToS3}
+                      onChange={(e) => setUploadToS3(e.target.checked)}
+                      className="rounded border-gray-400 dark:border-gray-500"
+                    />
+                    Save to S3 library (when unchecked: add to canvas only)
+                  </label>
                   <div className="flex gap-1.5">
                     <input ref={customIconInputRef} type="file" accept="image/*" className="hidden" onChange={handleCustomIconUpload} />
                     <input ref={customImageInputRef} type="file" accept="image/*" className="hidden" onChange={handleCustomImageUpload} />
@@ -665,6 +744,55 @@ export default function CanvasToolbar({ activeTool, onToolChange }: CanvasToolba
                     </div>
                   )}
                 </div>
+
+                {/* ── User library (uploaded icons/images) ── */}
+                <div className="text-xs font-medium text-gray-500 dark:text-gray-400 px-1 py-1.5 border-b border-gray-100 dark:border-gray-700 mb-2">Your library</div>
+                {!isSignedIn ? (
+                  <p className="text-xs text-gray-500 dark:text-gray-400 py-2 mb-4">Sign in to see your uploaded icons and images.</p>
+                ) : filteredUserLibrary.length === 0 ? (
+                  <p className="text-xs text-gray-500 dark:text-gray-400 py-2 mb-4">No uploads yet. Upload icons or images above to use them on the canvas.</p>
+                ) : (
+                  <div className="grid grid-cols-6 gap-1 mb-4 max-h-32 overflow-y-auto">
+                    {filteredUserLibrary.map((f) => (
+                        <button
+                          key={f.key}
+                          type="button"
+                          draggable
+                          onDragStart={(e) => {
+                            const isImg = f.mimeType?.startsWith("image/");
+                            setDragPayload(e.dataTransfer, isImg
+                              ? { type: "icon", data: { customIcon: f.url, label: f.filename ?? undefined } }
+                              : { type: "image", data: { imageUrl: f.url, label: f.filename ?? "Image" } });
+                          }}
+                          onClick={() => {
+                            const isImg = f.mimeType?.startsWith("image/");
+                            if (isImg) {
+                              setPendingIconId(null);
+                              setPendingEmoji(null);
+                              setPendingImage(null);
+                              useCanvasStore.getState().setPendingCustomIcon(f.url);
+                              onToolChange("emoji");
+                            } else {
+                              setPendingImage(f.url, f.filename ?? "Image");
+                              setPendingIconId(null);
+                              setPendingEmoji(null);
+                              onToolChange("image");
+                            }
+                            setIconsImagesOpen(false);
+                          }}
+                          className="flex flex-col items-center justify-center h-10 rounded-md hover:bg-gray-100 dark:hover:bg-gray-700 overflow-hidden"
+                          title={`${f.filename ?? "Image"} (drag to canvas)`}
+                        >
+                          {f.mimeType?.startsWith("image/") ? (
+                            <img src={f.url} alt={f.filename ?? "User icon"} className="w-6 h-6 object-contain" draggable={false} />
+                          ) : (
+                            <Image className="w-4 h-4 text-gray-500" />
+                          )}
+                          <span className="text-[9px] truncate w-full px-0.5">{f.filename ?? "File"}</span>
+                        </button>
+                      ))}
+                  </div>
+                )}
 
                 <div className="text-xs font-medium text-gray-500 dark:text-gray-400 px-1 py-1.5 border-b border-gray-100 dark:border-gray-700 mb-2">Icons</div>
                 <div className="grid grid-cols-6 gap-1 mb-4 max-h-44 overflow-y-auto">
@@ -733,6 +861,98 @@ export default function CanvasToolbar({ activeTool, onToolChange }: CanvasToolba
                     </button>
                   ))}
                 </div>
+              </div>
+            </Popover.Content>
+          </Popover.Portal>
+        </Popover.Root>
+        {/* Library: user-uploaded icons & images from S3 */}
+        <Popover.Root open={libraryOpen} onOpenChange={(open) => { setLibraryOpen(open); if (!open) setLibrarySearch(""); }}>
+          <Tooltip.Root>
+            <Tooltip.Trigger asChild>
+              <Popover.Trigger asChild>
+                <button
+                  type="button"
+                  className={cn(
+                    "relative w-10 h-10 flex items-center justify-center rounded-lg transition-colors",
+                    libraryOpen ? "bg-violet-100 text-violet-600 dark:bg-violet-900/40 dark:text-violet-400" : "hover:bg-gray-100 text-gray-600 dark:hover:bg-gray-700 dark:text-gray-400"
+                  )}
+                  aria-label="Your library"
+                >
+                  <FolderOpen className="w-5 h-5" />
+                  <SubMenuIndicator />
+                </button>
+              </Popover.Trigger>
+            </Tooltip.Trigger>
+            <Tooltip.Portal>
+              <Tooltip.Content side="right" sideOffset={8} className="z-[100] px-2.5 py-1.5 text-xs font-medium text-white bg-gray-800 rounded shadow-lg border border-gray-700">
+                Your library
+              </Tooltip.Content>
+            </Tooltip.Portal>
+          </Tooltip.Root>
+          <Popover.Portal>
+            <Popover.Content className="z-50 w-80 max-h-[75vh] overflow-hidden flex flex-col rounded-lg bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 shadow-lg" sideOffset={8} side="right" align="start">
+              <div className="p-2 border-b border-gray-100 dark:border-gray-700 shrink-0">
+                <h3 className="text-sm font-medium text-gray-800 dark:text-gray-200 mb-2">Your uploaded icons &amp; images</h3>
+                <div className="relative">
+                  <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" />
+                  <input
+                    type="text"
+                    placeholder="Search your uploads..."
+                    value={librarySearch}
+                    onChange={(e) => setLibrarySearch(e.target.value)}
+                    className="w-full pl-8 pr-3 py-2 text-sm rounded-lg border border-gray-200 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-200 focus:ring-2 focus:ring-violet-500 focus:border-transparent"
+                  />
+                </div>
+              </div>
+              <div className="flex-1 overflow-y-auto p-2 min-h-0">
+                {!isSignedIn ? (
+                  <p className="text-xs text-gray-500 dark:text-gray-400 py-6 text-center">Sign in to see your uploaded icons and images from S3.</p>
+                ) : filteredLibraryForPopover.length === 0 ? (
+                  <p className="text-xs text-gray-500 dark:text-gray-400 py-6 text-center">
+                    {userLibraryIcons.length === 0 ? "No uploads yet. Use Icons &amp; images above to upload icons or images." : "No matches for your search."}
+                  </p>
+                ) : (
+                  <div className="grid grid-cols-6 gap-2">
+                    {filteredLibraryForPopover.map((f) => (
+                      <button
+                        key={f.key}
+                        type="button"
+                        draggable
+                        onDragStart={(e) => {
+                          const isImg = f.mimeType?.startsWith("image/");
+                          setDragPayload(e.dataTransfer, isImg
+                            ? { type: "icon", data: { customIcon: f.url, label: f.filename ?? undefined } }
+                            : { type: "image", data: { imageUrl: f.url, label: f.filename ?? "Image" } });
+                        }}
+                        onClick={() => {
+                          const isImg = f.mimeType?.startsWith("image/");
+                          if (isImg) {
+                            setPendingIconId(null);
+                            setPendingEmoji(null);
+                            setPendingImage(null);
+                            useCanvasStore.getState().setPendingCustomIcon(f.url);
+                            onToolChange("emoji");
+                          } else {
+                            setPendingImage(f.url, f.filename ?? "Image");
+                            setPendingIconId(null);
+                            setPendingEmoji(null);
+                            onToolChange("image");
+                          }
+                          setLibraryOpen(false);
+                        }}
+                        className="flex flex-col items-center justify-center h-14 rounded-md hover:bg-gray-100 dark:hover:bg-gray-700 overflow-hidden border border-transparent hover:border-violet-300 dark:hover:border-violet-600"
+                        title={`${f.filename ?? "Image"} (click or drag to canvas)`}
+                      >
+                        {f.mimeType?.startsWith("image/") ? (
+                          <img src={f.url} alt={f.filename ?? "User icon"} className="w-8 h-8 object-contain" draggable={false} />
+                        ) : (
+                          <Image className="w-6 h-6 text-gray-500" />
+                        )}
+                        <span className="text-[9px] truncate w-full px-0.5 mt-0.5">{f.filename ?? "File"}</span>
+                      </button>
+                    ))}
+                  </div>
+                )}
               </div>
             </Popover.Content>
           </Popover.Portal>

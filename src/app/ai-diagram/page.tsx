@@ -27,6 +27,8 @@ import { diagramToExcalidraw } from "@/lib/excalidraw-convert";
 import { excalidrawToDrawioXml } from "@/lib/excalidraw-to-drawio";
 import { validateAndFixXml } from "@/lib/drawio-utils";
 import { normalizeSkeletons } from "@/lib/skeleton-normalize";
+import { applyCloudIconMatching } from "@/lib/cloud-icon-match";
+import { prepareSkeletonForRender, renderExcalidrawFromSkeletons } from "@/lib/excalidraw-render";
 
 export const DIAGRAM_TYPE_OPTIONS = [
   { value: "auto", label: "Auto detect (default)" },
@@ -156,13 +158,20 @@ function AIDiagramPage() {
   const [diagramType, setDiagramType] = useState<DiagramTypeValue>("auto");
   const [preset, setPreset] = useState<string>("none");
   const [apiPresets, setApiPresets] = useState<PresetOption[]>([]);
+  const [presetLoading, setPresetLoading] = useState(false);
   /** Target canvas for AI generation: diagram (React Flow), excalidraw, or drawio. */
   const [targetCanvas, setTargetCanvas] = useState<"reactflow" | "excalidraw" | "drawio">("reactflow");
+  /** Excalidraw sub-mode: Mermaid (LLM→Mermaid→Excalidraw) or JSON (LLM→Excalidraw elements stream). */
+  const [excalidrawMode, setExcalidrawMode] = useState<"mermaid" | "json">("mermaid");
+  /** Generate (new) vs Refine (extend existing) — for Excalidraw. */
+  const [aiMode, setAiMode] = useState<"generate" | "refine">("generate");
   const router = useRouter();
 
+  // Fetch presets when target canvas changes; show loader during fetch
   useEffect(() => {
-    const url = `/api/presets?targetCanvas=${targetCanvas}`;
-    fetch(url)
+    setPresetLoading(true);
+    const url = `/api/presets?targetCanvas=${targetCanvas}&templates=false`;
+    fetch(url, { credentials: "omit" })
       .then((r) => r.ok ? r.json() : [])
       .then(
         (
@@ -185,7 +194,8 @@ function AIDiagramPage() {
           );
         }
       )
-      .catch(() => {});
+      .catch(() => setApiPresets([]))
+      .finally(() => setPresetLoading(false));
   }, [targetCanvas]);
 
   const presetOptions: PresetOption[] = [
@@ -217,6 +227,7 @@ function AIDiagramPage() {
     canvasMode,
     setCanvasMode,
     setExcalidrawData,
+    excalidrawData,
     setDrawioData,
     setHasUnsavedChanges,
   } = useCanvasStore() as any;
@@ -293,7 +304,7 @@ function AIDiagramPage() {
       if (preset !== "none" && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(preset)) {
         const presetRes = await fetch(
           `/api/diagrams/preset?preset=${encodeURIComponent(preset)}`,
-          { credentials: "include" }
+          { credentials: "omit" }
         );
         if (presetRes.ok) {
           const data = await presetRes.json();
@@ -419,13 +430,116 @@ function AIDiagramPage() {
         return;
       }
 
-      // ─── Excalidraw: streaming generation ───
-      if (effectiveTarget === "excalidraw") {
+      // ─── Excalidraw (Mermaid mode): LLM streams Mermaid → mermaid-to-excalidraw → Excalidraw ───
+      if (effectiveTarget === "excalidraw" && excalidrawMode === "mermaid") {
         if (!llmApiKey && !isSignedIn) {
           setLoading(false);
           setError("signup-or-key");
           return;
         }
+        setCanvasMode("excalidraw"); // Switch canvas immediately so it mounts before data arrives
+        const isRefine = aiMode === "refine";
+        const existingEls = excalidrawData?.elements;
+        const hasExisting = Array.isArray(existingEls) && existingEls.length > 0;
+        const existingContext =
+          isRefine && hasExisting
+            ? (existingEls as { type?: string; id?: string; text?: string; label?: { text?: string } }[])
+                .slice(0, 30)
+                .map((e) => {
+                  const label = e.text ?? e.label?.text ?? e.type ?? e.id;
+                  return `${e.type ?? "element"} ${e.id ?? ""}: ${label}`.trim();
+                })
+                .join("; ")
+            : undefined;
+
+        const res = await fetch("/api/diagrams/generate-mermaid", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          credentials: "include",
+          body: JSON.stringify({
+            prompt: effectivePrompt.trim(),
+            llmProvider,
+            llmModel,
+            llmApiKey: llmApiKey || undefined,
+            cloudModelId: !llmApiKey ? cloudModelId ?? undefined : undefined,
+            refine: isRefine && hasExisting,
+            existingContext,
+          }),
+        });
+        if (!res.ok) {
+          const errData = await res.json().catch(() => ({}));
+          throw new Error(errData?.error ?? "Failed to generate Mermaid diagram");
+        }
+        if (!res.body) throw new Error("No response body");
+        const decoder = new TextDecoder();
+        let streamBuffer = "";
+        const reader = res.body.getReader();
+        while (true) {
+          const { done, value } = await reader.read();
+          if (value) streamBuffer += decoder.decode(value, { stream: true });
+          if (done) break;
+        }
+        let mermaid = streamBuffer.trim();
+        const mermaidMatch = mermaid.match(/```(?:mermaid)?\s*([\s\S]*?)```/);
+        if (mermaidMatch) mermaid = mermaidMatch[1].trim();
+        if (!mermaid) {
+          setError("AI did not return valid Mermaid code. Try a different prompt.");
+          setLoading(false);
+          return;
+        }
+        const { parseMermaidToExcalidraw } = await import("@excalidraw/mermaid-to-excalidraw");
+        const { convertToExcalidrawElements } = await import("@excalidraw/excalidraw");
+        const { elements: skeletonElements, files } = await parseMermaidToExcalidraw(mermaid, {
+          themeVariables: { fontSize: "16px" },
+        });
+        if (!skeletonElements?.length) {
+          setError("Mermaid could not be converted. Try flowchart, sequence, or class diagram syntax.");
+          setLoading(false);
+          return;
+        }
+        const elements = convertToExcalidrawElements(skeletonElements as never[]);
+        const viewport = typeof window !== "undefined" ? { width: window.innerWidth, height: window.innerHeight } : undefined;
+        const { computeFitViewAppState } = await import("@/lib/excalidraw-render");
+        const fitState = computeFitViewAppState(elements, viewport);
+        const appState = { scrollX: fitState.scrollX, scrollY: fitState.scrollY, zoom: fitState.zoom };
+        const excalidrawPayload = { elements, appState, files: files ?? undefined };
+        setExcalidrawData(excalidrawPayload);
+        setCanvasMode("excalidraw");
+        setHasUnsavedChanges(true);
+        setLastAIPrompt(effectivePrompt.trim());
+        setLastAIDiagram(null);
+        // Save to preset with mermaid source + excalidraw cached
+        if (preset !== "none" && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(preset)) {
+          fetch(`/api/presets/${preset}`, {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            credentials: "include",
+            body: JSON.stringify({
+              dataFormat: "mermaid",
+              mermaidData: mermaid,
+              excalidrawData: excalidrawPayload,
+            }),
+          }).catch(() => {});
+        }
+        saveNow();
+        recordPromptHistory({ prompt: effectivePrompt.trim(), targetCanvas: "excalidraw" });
+        setPendingFitView(true);
+        setLoading(false);
+        return;
+      }
+
+      // ─── Excalidraw (JSON mode): streaming Excalidraw elements ───
+      if (effectiveTarget === "excalidraw" && excalidrawMode === "json") {
+        if (!llmApiKey && !isSignedIn) {
+          setLoading(false);
+          setError("signup-or-key");
+          return;
+        }
+        setCanvasMode("excalidraw"); // Switch canvas immediately so it mounts before data arrives
+        const isRefine = aiMode === "refine";
+        const existingEls = excalidrawData?.elements;
+        const hasExisting = Array.isArray(existingEls) && existingEls.length > 0;
+
         const res = await fetch("/api/diagrams/generate-excalidraw", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -436,6 +550,8 @@ function AIDiagramPage() {
             llmModel,
             llmApiKey: llmApiKey || undefined,
             cloudModelId: !llmApiKey ? cloudModelId ?? undefined : undefined,
+            refine: isRefine && hasExisting,
+            existingElements: isRefine && hasExisting ? existingEls : undefined,
           }),
         });
         if (!res.ok) {
@@ -456,7 +572,8 @@ function AIDiagramPage() {
           const newCount = parsed.elements.length - lastElementCount;
           const shouldUpdate = parsed.elements.length > lastElementCount && (newCount >= STREAM_BATCH_SIZE || done);
           if (shouldUpdate) {
-            const normalized = normalizeSkeletons(parsed.elements);
+            const prepared = prepareSkeletonForRender(parsed.elements);
+            const normalized = normalizeSkeletons(prepared);
             const elements = convertToExcalidrawElements(normalized as never[], { regenerateIds: false });
             setExcalidrawData({ elements, appState: {} });
             setCanvasMode("excalidraw");
@@ -470,21 +587,24 @@ function AIDiagramPage() {
           setLoading(false);
           return;
         }
-        const normalized = normalizeSkeletons(finalParsed.elements);
-        const elements = convertToExcalidrawElements(normalized as never[], { regenerateIds: false });
-        const excalidrawPayload = { elements, appState: {} };
+        const viewport = typeof window !== "undefined" ? { width: window.innerWidth, height: window.innerHeight } : undefined;
+        const { elements, appState } = await renderExcalidrawFromSkeletons(finalParsed.elements, { viewport });
+        const excalidrawPayload = { elements, appState };
         setExcalidrawData(excalidrawPayload);
         setCanvasMode("excalidraw");
         setHasUnsavedChanges(true);
         setLastAIPrompt(effectivePrompt.trim());
         setLastAIDiagram(null);
-        // Save generated diagram to preset in DB for future loads
+        // Save generated diagram to preset in DB for future loads (JSON format)
         if (preset !== "none" && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(preset)) {
           fetch(`/api/presets/${preset}`, {
             method: "PATCH",
             headers: { "Content-Type": "application/json" },
             credentials: "include",
-            body: JSON.stringify({ excalidrawData: excalidrawPayload }),
+            body: JSON.stringify({
+              dataFormat: "json",
+              excalidrawData: excalidrawPayload,
+            }),
           }).catch(() => {});
         }
         saveNow();
@@ -530,7 +650,7 @@ function AIDiagramPage() {
       if (preset !== "none" && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(preset)) {
         const presetRes = await fetch(
           `/api/diagrams/preset/stream?preset=${encodeURIComponent(preset)}`,
-          { credentials: "include" }
+          { credentials: "omit" }
         );
         if (!presetRes.ok || !presetRes.body) {
           // 404 = preset has no nodes yet (first-time); fall through to AI generation
@@ -871,6 +991,9 @@ function AIDiagramPage() {
           targetHandle,
         };
       });
+
+      // Match node labels to admin-uploaded cloud icons
+      safeNodes = (await applyCloudIconMatching(safeNodes)) as typeof safeNodes;
 
       if (safeNodes.length === 0) {
         setError(
@@ -1246,7 +1369,11 @@ function AIDiagramPage() {
                 </label>
                 <select
                   value={targetCanvas}
-                  onChange={(e) => setTargetCanvas(e.target.value as "reactflow" | "excalidraw" | "drawio")}
+                  onChange={(e) => {
+                    const v = e.target.value as "reactflow" | "excalidraw" | "drawio";
+                    setTargetCanvas(v);
+                    setCanvasMode(v);
+                  }}
                   className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm bg-white focus:ring-2 focus:ring-violet-500 focus:border-transparent"
                   disabled={loading}
                 >
@@ -1256,6 +1383,84 @@ function AIDiagramPage() {
                 </select>
               </div>
             )}
+            {targetCanvas === "excalidraw" && mode !== "mindmap-refine" && (
+              <div className="space-y-1">
+                <label className="text-[11px] font-semibold text-gray-700 block">
+                  Excalidraw mode
+                </label>
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setExcalidrawMode("json")}
+                    className={`flex-1 px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
+                      excalidrawMode === "json"
+                        ? "bg-violet-600 text-white"
+                        : "bg-gray-100 text-gray-700 hover:bg-gray-200"
+                    }`}
+                    disabled={loading}
+                  >
+                    JSON
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setExcalidrawMode("mermaid")}
+                    className={`flex-1 px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
+                      excalidrawMode === "mermaid"
+                        ? "bg-violet-600 text-white"
+                        : "bg-gray-100 text-gray-700 hover:bg-gray-200"
+                    }`}
+                    disabled={loading}
+                  >
+                    Mermaid
+                  </button>
+                </div>
+                <p className="text-[10px] text-gray-500">
+                  {excalidrawMode === "json"
+                    ? "LLM generates Excalidraw elements (shapes, arrows) directly."
+                    : "LLM generates Mermaid code (flowchart, sequence, class) → converted to Excalidraw."}
+                </p>
+              </div>
+            )}
+            {targetCanvas === "excalidraw" && mode !== "mindmap-refine" && (
+              <div className="space-y-1">
+                <label className="text-[11px] font-semibold text-gray-700 block">
+                  Mode
+                </label>
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setAiMode("generate")}
+                    className={`flex-1 px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
+                      aiMode === "generate"
+                        ? "bg-violet-600 text-white"
+                        : "bg-gray-100 text-gray-700 hover:bg-gray-200"
+                    }`}
+                    disabled={loading}
+                  >
+                    Generate
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setAiMode("refine")}
+                    className={`flex-1 px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
+                      aiMode === "refine"
+                        ? "bg-violet-600 text-white"
+                        : "bg-gray-100 text-gray-700 hover:bg-gray-200"
+                    }`}
+                    disabled={loading}
+                  >
+                    Refine
+                  </button>
+                </div>
+                {aiMode === "refine" && (
+                  <p className="text-[10px] text-gray-500">
+                    {Array.isArray(excalidrawData?.elements) && excalidrawData.elements.length > 0
+                      ? `Extend or improve the current diagram (${excalidrawData.elements.length} elements).`
+                      : "Switch to Excalidraw and add content first, or use Generate for a new diagram."}
+                  </p>
+                )}
+              </div>
+            )}
             {mode !== "mindmap-refine" && (
               <>
                 <div className="space-y-1">
@@ -1263,17 +1468,26 @@ function AIDiagramPage() {
                     Load a preset
                   </label>
                   <div className="flex items-center gap-2">
+                    {presetLoading && (
+                      <Loader2 className="w-4 h-4 animate-spin text-gray-400 shrink-0" aria-hidden />
+                    )}
                     <select
                       value={preset}
+                      disabled={loading || presetLoading}
                       onChange={(e) => {
                         const v = e.target.value;
                         setPreset(v);
                         if (v !== "none" && error === "signup-or-key") setError(null);
                         const p = presetOptions.find((x) => x.value === v);
-                        if (p) setPrompt(p.prompt);
+                        if (p) {
+                          setPrompt(p.prompt);
+                          if (p.targetCanvas) {
+                            setTargetCanvas(p.targetCanvas);
+                            setCanvasMode(p.targetCanvas);
+                          }
+                        }
                       }}
                       className="flex-1 min-w-0 px-3 py-2 border border-gray-300 rounded-lg text-sm bg-white focus:ring-2 focus:ring-violet-500 focus:border-transparent"
-                      disabled={loading}
                     >
                       {presetOptions.map((opt) => (
                         <option key={opt.value} value={opt.value}>
@@ -1320,7 +1534,9 @@ function AIDiagramPage() {
             )}
             {targetCanvas === "excalidraw" && (
               <p className="text-[11px] text-violet-700 dark:text-violet-300 bg-violet-50 dark:bg-violet-900/20 rounded-lg px-2.5 py-1.5">
-                Generating for Excalidraw (shapes, arrows). Use prompts like &quot;flowchart for user login&quot;, &quot;simple architecture diagram&quot;, or &quot;mind map about project planning&quot;.
+                {excalidrawMode === "mermaid"
+                  ? "Mermaid: LLM generates Mermaid code → converted to Excalidraw. Prompts: &quot;user login flowchart&quot;, &quot;API request sequence&quot;, &quot;class diagram for e-commerce&quot;."
+                  : "JSON: LLM generates shapes and arrows directly. Prompts: &quot;flowchart for user login&quot;, &quot;architecture diagram&quot;, &quot;mind map about planning&quot;."}
               </p>
             )}
             {targetCanvas === "drawio" && (

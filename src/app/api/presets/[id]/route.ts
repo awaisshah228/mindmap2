@@ -25,6 +25,8 @@ export async function GET(_req: Request, { params }: Params) {
     prompt: row.prompt ?? undefined,
     drawioData: row.drawioData ?? undefined,
     excalidrawData: row.excalidrawData ?? undefined,
+    dataFormat: row.dataFormat ?? undefined,
+    mermaidData: row.mermaidData ?? undefined,
     targetCanvas: row.targetCanvas ?? "reactflow",
     isTemplate: row.isTemplate,
     sortOrder: row.sortOrder,
@@ -35,7 +37,7 @@ export async function GET(_req: Request, { params }: Params) {
 /**
  * PATCH /api/presets/[id]
  * Save generated diagram data to preset (first-time AI generation).
- * Body: { nodes?, edges?, drawioData?, excalidrawData? }
+ * Body: { nodes?, edges?, drawioData?, excalidrawData?, dataFormat?, mermaidData? }
  */
 export async function PATCH(req: NextRequest, { params }: Params) {
   const { id } = await params;
@@ -45,6 +47,8 @@ export async function PATCH(req: NextRequest, { params }: Params) {
   if (Array.isArray(body.edges)) updates.edges = body.edges;
   if (typeof body.drawioData === "string") updates.drawioData = body.drawioData;
   if (body.excalidrawData && typeof body.excalidrawData === "object") updates.excalidrawData = body.excalidrawData;
+  if (body.dataFormat === "mermaid" || body.dataFormat === "json") updates.dataFormat = body.dataFormat;
+  if (typeof body.mermaidData === "string") updates.mermaidData = body.mermaidData || null;
 
   if (Object.keys(updates).length <= 1) {
     return NextResponse.json({ error: "No diagram data to save" }, { status: 400 });

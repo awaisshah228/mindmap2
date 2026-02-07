@@ -119,6 +119,7 @@ function LabeledConnectorEdge({
   const label = (data?.label as string) ?? "";
   const pathPoints = (data?.pathPoints as PathPoint[] | undefined) ?? [];
   const strokeDasharray = (data?.strokeDasharray as string | undefined) ?? undefined;
+  const strokeWidth = (data?.strokeWidth as number | undefined) ?? EDGE_STROKE_WIDTH;
   const erRelation = (data?.erRelation as ERRelation) ?? null;
   const markerColor = (data?.markerColor as string | undefined) ?? undefined;
   const markerScale = (data?.markerScale as number | undefined) ?? 1;
@@ -207,6 +208,40 @@ function LabeledConnectorEdge({
     pushUndo();
     updateEdgeData(id, { pathPoints: [] });
   }, [id, updateEdgeData, pushUndo]);
+
+  const handleRepositionMouseDown = useCallback(
+    (e: React.MouseEvent) => {
+      if (!hasCustomPath || effectivePathPoints.length === 0) return;
+      e.preventDefault();
+      e.stopPropagation();
+      pushUndo();
+      const pointsRef = { current: effectivePathPoints.map((p) => ({ x: p.x, y: p.y })) };
+      let lastFlow = screenToFlowPosition({ x: e.clientX, y: e.clientY });
+      const onMove = (ev: MouseEvent) => {
+        const curr = screenToFlowPosition({ x: ev.clientX, y: ev.clientY });
+        const dx = curr.x - lastFlow.x;
+        const dy = curr.y - lastFlow.y;
+        lastFlow = curr;
+        pointsRef.current = pointsRef.current.map((p) => ({ x: p.x + dx, y: p.y + dy }));
+        updateEdgeData(id, { pathPoints: pointsRef.current });
+      };
+      const onUp = () => {
+        window.removeEventListener("mousemove", onMove);
+        window.removeEventListener("mouseup", onUp);
+      };
+      window.addEventListener("mousemove", onMove);
+      window.addEventListener("mouseup", onUp);
+    },
+    [id, hasCustomPath, effectivePathPoints, screenToFlowPosition, updateEdgeData, pushUndo]
+  );
+
+  const setStrokeWidth = useCallback(
+    (w: number) => {
+      pushUndo();
+      updateEdgeData(id, { strokeWidth: w });
+    },
+    [id, updateEdgeData, pushUndo]
+  );
 
   const handlePointDrag = useCallback(
     (index: number, clientX: number, clientY: number) => {
@@ -595,7 +630,7 @@ function LabeledConnectorEdge({
         path={edgePath}
         selected={selected}
         strokeColor={branchColor}
-        strokeWidth={EDGE_STROKE_WIDTH}
+        strokeWidth={strokeWidth}
         markerEnd={effectiveMarkerEnd}
         markerStart={effectiveMarkerStart}
         strokeDasharray={effectiveStrokeDasharray}
@@ -683,6 +718,22 @@ function LabeledConnectorEdge({
                 Reset
               </button>
             )}
+            <button
+              type="button"
+              onMouseDown={handleRepositionMouseDown}
+              title={hasCustomPath ? "Drag to reposition edge path" : "Add path points first"}
+              disabled={!hasCustomPath}
+              className={cn(
+                "p-1.5 rounded hover:bg-gray-600 disabled:opacity-40 disabled:cursor-not-allowed",
+                hasCustomPath && "cursor-grab"
+              )}
+            >
+              <svg width="14" height="14" viewBox="0 0 12 12" fill="currentColor" aria-hidden>
+                <circle cx="4" cy="4" r="1.2" /><circle cx="8" cy="4" r="1.2" />
+                <circle cx="4" cy="6" r="1.2" /><circle cx="8" cy="6" r="1.2" />
+                <circle cx="4" cy="8" r="1.2" /><circle cx="8" cy="8" r="1.2" />
+              </svg>
+            </button>
             <div className="w-px h-4 bg-gray-600 mx-0.5" />
             <button
               type="button"
@@ -700,6 +751,19 @@ function LabeledConnectorEdge({
             >
               Solid
             </button>
+            <div className="w-px h-4 bg-gray-600 mx-0.5" />
+            <div className="flex items-center gap-1" title="Connector width">
+              <span className="text-[10px] text-gray-500">Width</span>
+              <select
+                value={strokeWidth}
+                onChange={(e) => setStrokeWidth(Number(e.target.value))}
+                className="h-6 px-1.5 rounded bg-gray-700 border border-gray-600 text-xs text-gray-200 focus:ring-1 focus:ring-violet-500 focus:border-violet-500"
+              >
+                {[2, 4, 6, 8, 10, 12].map((w) => (
+                  <option key={w} value={w}>{w}px</option>
+                ))}
+              </select>
+            </div>
             <div className="w-px h-4 bg-gray-600 mx-0.5" />
             <div className="relative flex items-center gap-1">
               <button
@@ -1038,7 +1102,7 @@ function LabeledConnectorEdge({
           )}
         </div>
         )}
-        {selected &&
+        {(selected || hovered) &&
           effectivePathPoints.map((pt, i) => (
             <div
               key={`${id}-point-${i}`}
@@ -1054,7 +1118,7 @@ function LabeledConnectorEdge({
                 borderRadius: "50%",
                 backgroundColor: draggingIndex === i ? "rgb(139 92 246)" : "white",
                 border: "2px solid rgb(139 92 246)",
-                cursor: "grab",
+                cursor: draggingIndex === i ? "grabbing" : "grab",
                 pointerEvents: "all",
                 zIndex: 10,
                 boxShadow: "0 1px 3px rgba(0,0,0,0.2)",
@@ -1069,7 +1133,7 @@ function LabeledConnectorEdge({
                   updateEdgeData(id, { pathPoints: newPoints });
                 }
               }}
-              title="Drag to move • Delete to remove"
+              title="Drag to reshape • Delete to remove"
             />
           ))}
       </EdgeLabelRenderer>

@@ -9,6 +9,7 @@ const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12
  * GET /api/diagrams/preset?preset=<id>
  * Returns preset diagram data from DB. Supports nodes+edges (React Flow), drawioData, excalidrawData.
  * Preset must be UUID. Returns 404 if preset not found or has no diagram data (needs first-time AI generation).
+ * Public — no auth required. Available to everyone (signed in or not).
  */
 export async function GET(req: NextRequest) {
   const preset = req.nextUrl.searchParams.get("preset");
@@ -29,7 +30,13 @@ export async function GET(req: NextRequest) {
   }
   // Excalidraw preset
   if (row.excalidrawData && typeof row.excalidrawData === "object") {
-    return NextResponse.json({ excalidrawData: row.excalidrawData, targetCanvas: "excalidraw" });
+    const payload: { excalidrawData: typeof row.excalidrawData; targetCanvas: string; dataFormat?: string; mermaidData?: string } = {
+      excalidrawData: row.excalidrawData,
+      targetCanvas: "excalidraw",
+    };
+    if (row.dataFormat) payload.dataFormat = row.dataFormat;
+    if (row.mermaidData) payload.mermaidData = row.mermaidData;
+    return NextResponse.json(payload);
   }
   // React Flow preset (nodes + edges)
   if (Array.isArray(row.nodes) && row.nodes.length > 0) {

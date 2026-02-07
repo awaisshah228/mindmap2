@@ -15,6 +15,10 @@ export const SHAPE_TYPES = [
   "triangle",
   "document",
   "table",
+  "arrowRight",
+  "arrowLeft",
+  "arrowUp",
+  "arrowDown",
 ] as const;
 
 export type ShapeType = (typeof SHAPE_TYPES)[number];
@@ -33,6 +37,10 @@ export const SHAPE_PATHS: Record<ShapeType, string> = {
   triangle: "M 50 8 L 95 92 L 5 92 Z",
   document: "M 0 5 L 0 85 L 60 85 L 60 95 L 100 95 L 100 5 Z M 60 85 L 60 75 L 100 75 L 100 85 L 60 85 Z",
   table: "M 0 0 L 100 0 L 100 100 L 0 100 Z", // outline only; grid rendered in component
+  arrowRight: "M 0 25 L 70 25 L 100 50 L 70 75 L 0 75 Z",
+  arrowLeft: "M 100 25 L 30 25 L 0 50 L 30 75 L 100 75 Z",
+  arrowUp: "M 25 100 L 25 30 L 50 0 L 75 30 L 75 100 Z",
+  arrowDown: "M 25 0 L 25 70 L 50 100 L 75 70 L 75 0 Z",
 };
 
 export const SHAPE_LABELS: Record<ShapeType, string> = {
@@ -48,4 +56,8 @@ export const SHAPE_LABELS: Record<ShapeType, string> = {
   triangle: "Triangle",
   document: "Document",
   table: "Table",
+  arrowRight: "Arrow →",
+  arrowLeft: "Arrow ←",
+  arrowUp: "Arrow ↑",
+  arrowDown: "Arrow ↓",
 };

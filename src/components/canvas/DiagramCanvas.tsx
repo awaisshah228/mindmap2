@@ -649,12 +649,28 @@ export default function DiagramCanvas() {
       const sh = resolvedSourceHandle ?? "s";
       const th = params.targetHandle ?? "t";
       const edgeId = `e${params.source}-${sh}-${params.target}-${th}-${Date.now()}`;
+      const sourceNode = reactFlowRef.current?.getNode(params.source);
+      const targetNode = reactFlowRef.current?.getNode(params.target);
+      const srcPos = sourceNode?.position ?? { x: 0, y: 0 };
+      const tgtPos = targetNode?.position ?? { x: 0, y: 0 };
+      const sW = (sourceNode?.measured?.width ?? (sourceNode?.width as number | undefined)) || 140;
+      const sH = (sourceNode?.measured?.height ?? (sourceNode?.height as number | undefined)) || 72;
+      const tW = (targetNode?.measured?.width ?? (targetNode?.width as number | undefined)) || 140;
+      const tH = (targetNode?.measured?.height ?? (targetNode?.height as number | undefined)) || 72;
+      const srcX = srcPos.x + sW / 2;
+      const srcY = srcPos.y + sH / 2;
+      const tgtX = tgtPos.x + tW / 2;
+      const tgtY = tgtPos.y + tH / 2;
+      const defaultPathPoints = [
+        { x: srcX + (tgtX - srcX) * 0.15, y: srcY + (tgtY - srcY) * 0.15 },
+        { x: srcX + (tgtX - srcX) * 0.85, y: srcY + (tgtY - srcY) * 0.85 },
+      ];
       const newEdge: Edge = {
         ...params,
         id: edgeId,
         sourceHandle: resolvedSourceHandle,
         type: "labeledConnector",
-        data: { connectorType: pendingEdgeType },
+        data: { connectorType: pendingEdgeType, pathPoints: defaultPathPoints },
       };
       setEdges((eds) => {
         const updated = [...eds, newEdge];
@@ -828,6 +844,17 @@ export default function DiagramCanvas() {
       // Edge always goes fromNode → newNode (all handles are type="source",
       // ConnectionMode.Loose allows any handle to act as either endpoint).
       const edgeId = `edge-${connectionState.fromNode.id}-${fromNodeHandle}-${newNodeId}-${newNodeHandle}-${Date.now()}`;
+      const fromPos = fromNodeData?.position ?? { x: 0, y: 0 };
+      const fromW = (fromNodeData?.measured?.width ?? (fromNodeData?.width as number | undefined)) || 140;
+      const fromH = (fromNodeData?.measured?.height ?? (fromNodeData?.height as number | undefined)) || 72;
+      const srcX = fromPos.x + fromW / 2;
+      const srcY = fromPos.y + fromH / 2;
+      const tgtX = position.x;
+      const tgtY = position.y;
+      const defaultPathPoints = [
+        { x: srcX + (tgtX - srcX) * 0.15, y: srcY + (tgtY - srcY) * 0.15 },
+        { x: srcX + (tgtX - srcX) * 0.85, y: srcY + (tgtY - srcY) * 0.85 },
+      ];
       const newEdge: Edge = {
         id: edgeId,
         source: connectionState.fromNode.id,
@@ -835,7 +862,7 @@ export default function DiagramCanvas() {
         sourceHandle: fromNodeHandle,
         targetHandle: newNodeHandle,
         type: "labeledConnector",
-        data: { connectorType: pendingEdgeType },
+        data: { connectorType: pendingEdgeType, pathPoints: defaultPathPoints },
       };
 
       // Add both node and edge in a single batched update.
@@ -1060,6 +1087,21 @@ export default function DiagramCanvas() {
             data: {},
           };
           const edgeId = `e-${id1}-${id2}-${Date.now()}`;
+          // Default 2 path points near ends (15% and 85%) for user to drag and reshape
+          const src = edgeDrawStart;
+          const tgt = pos;
+          const defaultPathPoints =
+            pendingEdgeType === "straight"
+              ? [
+                  { x: src.x + (tgt.x - src.x) * 0.15, y: src.y + (tgt.y - src.y) * 0.15 },
+                  { x: src.x + (tgt.x - src.x) * 0.85, y: src.y + (tgt.y - src.y) * 0.85 },
+                ]
+              : edgeDrawPoints.length >= 2
+                ? edgeDrawPoints
+                : [
+                    { x: src.x + (tgt.x - src.x) * 0.15, y: src.y + (tgt.y - src.y) * 0.15 },
+                    { x: src.x + (tgt.x - src.x) * 0.85, y: src.y + (tgt.y - src.y) * 0.85 },
+                  ];
           const newEdge: Edge = {
             id: edgeId,
             source: id1,
@@ -1069,8 +1111,7 @@ export default function DiagramCanvas() {
             type: "labeledConnector",
             data: {
               connectorType: pendingEdgeType,
-              // For straight edges, ignore drag path points so the edge is a true straight line.
-              pathPoints: pendingEdgeType === "straight" ? [] : edgeDrawPoints,
+              pathPoints: defaultPathPoints,
             },
           };
           addNode(anchor1);
@@ -1078,6 +1119,8 @@ export default function DiagramCanvas() {
           addEdgeToStore(newEdge);
           setNodes((nds) => [...nds, anchor1, anchor2]);
           setEdges((eds) => [...eds, newEdge]);
+          // Switch to select so user can immediately drag the anchor nodes to move/resize the connector
+          setActiveTool("select");
         }
 
         setEdgeDrawStart(null);
@@ -1101,6 +1144,7 @@ export default function DiagramCanvas() {
       setNodes,
       setEdges,
       pushUndo,
+      setActiveTool,
       setEdgeDrawStart,
       setEdgeDrawEndPreview,
       setEdgeDrawPoints,
@@ -1626,7 +1670,7 @@ export default function DiagramCanvas() {
           fitView
           nodesDraggable={!presentationMode && activeTool !== "freeDraw" && activeTool !== "connector"}
           nodesConnectable={!presentationMode && activeTool !== "freeDraw"}
-          edgesReconnectable={!presentationMode && activeTool !== "freeDraw"}
+          edgesReconnectable={!presentationMode}
           elementsSelectable={activeTool !== "freeDraw"}
           edgesFocusable={activeTool !== "freeDraw"}
           zoomOnScroll={!presentationMode}

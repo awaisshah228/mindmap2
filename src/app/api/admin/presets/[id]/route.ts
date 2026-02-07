@@ -35,6 +35,11 @@ export async function PATCH(
   if (typeof body.isTemplate === "boolean") updates.isTemplate = body.isTemplate;
   if (typeof body.sortOrder === "number") updates.sortOrder = body.sortOrder;
   if (typeof body.previewImageUrl === "string") updates.previewImageUrl = body.previewImageUrl || null;
+  if (body.targetCanvas === "reactflow" || body.targetCanvas === "excalidraw" || body.targetCanvas === "drawio") updates.targetCanvas = body.targetCanvas;
+  if (body.dataFormat === "mermaid" || body.dataFormat === "json") updates.dataFormat = body.dataFormat;
+  if (typeof body.mermaidData === "string") updates.mermaidData = body.mermaidData || null;
+  if (typeof body.drawioData === "string") updates.drawioData = body.drawioData || null;
+  if (body.excalidrawData && typeof body.excalidrawData === "object") updates.excalidrawData = body.excalidrawData;
 
   if (Object.keys(updates).length === 0) {
     return NextResponse.json({ error: "No fields to update" }, { status: 400 });

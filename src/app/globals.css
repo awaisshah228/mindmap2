@@ -157,7 +157,7 @@ body {
   fill: rgba(255, 255, 255, 0.95) !important;
   stroke: rgba(139, 92, 246, 0.8) !important;
   stroke-width: 2px !important;
-  cursor: move !important;
+  cursor: crosshair !important;
 }
 
 .react-flow__edge.selected .react-flow__edgeupdater:hover,

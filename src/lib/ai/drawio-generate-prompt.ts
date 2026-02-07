@@ -111,7 +111,8 @@ For AWS/cloud diagrams use aws4 conventions. For flowcharts use flowchart. For B
 
 DRAW.IO DIAGRAM TYPES:
 - Flowchart: rectangle=process, diamond=decision, ellipse=start/end. Linear flow. Label decision edges (yes/no).
-- Architecture: rectangles for components. Use tiered rows (no groups) — tier 1 at y=80, tier 2 at y=260, etc. Same tier = exact same y. Edges show data flow.
+- Architecture/System design (high-level): Rectangles for components (API Gateway, Redis, PostgreSQL, etc.). TIERED ROWS: User/Client y=80, Frontend y=260, API y=440, Services y=620, Data/DB y=800. Same tier = exact same y. Space 180px horizontally. Edges show data flow. COMPLETE: include load balancer, cache, queue, DB. Edge labels for protocols (REST, gRPC).
+- Database/ER: Rectangles for tables. Same row = exact same y. Space 180px between tables. Include all tables and relationships. Label edges for FK/relationships.
 - UML-style: rectangles for classes/modules. Edges for relationships.
 - Process/BPMN: swimlane-style grouping only when needed. Sequence of steps.
 - Network: nodes and connections. Clear left-to-right or hierarchical layout.

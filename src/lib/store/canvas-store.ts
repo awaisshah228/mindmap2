@@ -223,6 +223,10 @@ interface CanvasState {
   settingsOpen: boolean;
   settingsInitialTab: string | null;
 
+  /** Library panel — all S3-uploaded icons & images */
+  libraryOpen: boolean;
+  setLibraryOpen: (open: boolean) => void;
+
   /** Daily notes */
   dailyNotes: Record<string, string>; // key = YYYY-MM-DD
   dailyNotesOpen: boolean;
@@ -264,6 +268,9 @@ interface CanvasState {
   /** Current Excalidraw scene (for active project); syncs to project on save / switch. */
   excalidrawData: ExcalidrawScene | null;
   setExcalidrawData: (data: ExcalidrawScene | null) => void;
+  /** Pending library URL from #addLibrary redirect (libraries.excalidraw.com → editor). */
+  pendingExcalidrawLibraryUrl: string | null;
+  setPendingExcalidrawLibraryUrl: (url: string | null) => void;
   /** Draw.io diagram XML (for active project); syncs to project on save / switch. */
   drawioData: string | null;
   setDrawioData: (data: string | null) => void;
@@ -306,7 +313,6 @@ interface CanvasState {
 
   setShortcutsOpen: (open: boolean) => void;
   setSettingsOpen: (open: boolean, initialTab?: string) => void;
-
   setDailyNote: (date: string, note: string) => void;
   setDailyNotesOpen: (open: boolean) => void;
 
@@ -397,6 +403,7 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
   shortcutsOpen: false,
   settingsOpen: false,
   settingsInitialTab: null,
+  libraryOpen: false,
   dailyNotes: {},
   dailyNotesOpen: false,
   aiSidebarOpen: false,
@@ -427,6 +434,8 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
   setPersistenceSource: (source) => set({ persistenceSource: source }),
   excalidrawData: null,
   setExcalidrawData: (data) => set({ excalidrawData: data }),
+  pendingExcalidrawLibraryUrl: null,
+  setPendingExcalidrawLibraryUrl: (url) => set({ pendingExcalidrawLibraryUrl: url }),
   drawioData: null,
   setDrawioData: (data) => set({ drawioData: data }),
 
@@ -650,6 +659,7 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
 
   setShortcutsOpen: (open) => set({ shortcutsOpen: open }),
   setSettingsOpen: (open, initialTab) => set({ settingsOpen: open, settingsInitialTab: initialTab ?? null }),
+  setLibraryOpen: (open) => set({ libraryOpen: open }),
 
   setDailyNote: (date, note) =>
     set((s) => ({ dailyNotes: { ...s.dailyNotes, [date]: note } })),

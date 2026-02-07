@@ -96,7 +96,7 @@ export function getDefaultEnvModel(): ResolvedCloudModel | null {
     return { provider: "openrouter", model: "openai/gpt-4o-mini", baseUrl: urls.openrouter, label: "OpenRouter gpt-4o-mini (env)" };
   }
   if (anthropicKey) {
-    return { provider: "anthropic", model: "claude-3-5-sonnet-20241022", baseUrl: urls.anthropic, label: "Claude 3.5 Sonnet (env)" };
+    return { provider: "anthropic", model: "claude-sonnet-4-5-20250929", baseUrl: urls.anthropic, label: "Claude Sonnet 4.5 (env)" };
   }
   if (googleKey) {
     return { provider: "google", model: "gemini-2.0-flash", baseUrl: urls.google, label: "Gemini 2.0 Flash (env)" };

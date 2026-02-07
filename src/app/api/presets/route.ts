@@ -7,7 +7,7 @@ import { eq, asc, and, or, isNull } from "drizzle-orm";
  * GET /api/presets?templates=true&level=...&targetCanvas=...
  * List presets for dropdown (isTemplate=false) or templates for sidebar (isTemplate=true).
  * targetCanvas: reactflow | excalidraw | drawio — filter by canvas type. Omit = all.
- * Public; no auth. Presets stored in DB only.
+ * Public — no auth required. Available to everyone (signed in or not).
  */
 export async function GET(req: Request) {
   const { searchParams } = new URL(req.url);

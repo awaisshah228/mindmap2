@@ -1,5 +1,5 @@
 /**
- * Add excalidraw_data and drawio_data columns to documents table if missing.
+ * Add missing columns to documents and diagram_presets tables.
  * Run: yarn db:fix-columns
  * Or with DATABASE_URL: DATABASE_URL=... yarn db:fix-columns
  */
@@ -20,6 +20,10 @@ async function main() {
     console.log("Added drawio_data column (or already exists).");
     await sql`ALTER TABLE documents ADD COLUMN IF NOT EXISTS saved_layout jsonb`;
     console.log("Added saved_layout column (or already exists).");
+    await sql`ALTER TABLE diagram_presets ADD COLUMN IF NOT EXISTS data_format text`;
+    console.log("Added diagram_presets.data_format column (or already exists).");
+    await sql`ALTER TABLE diagram_presets ADD COLUMN IF NOT EXISTS mermaid_data text`;
+    console.log("Added diagram_presets.mermaid_data column (or already exists).");
     console.log("Done. Database is ready.");
   } catch (err) {
     console.error("Error:", err);

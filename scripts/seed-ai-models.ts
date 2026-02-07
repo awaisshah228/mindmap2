@@ -10,7 +10,8 @@ import { aiModels } from "../src/db/schema";
 const DEFAULT_MODELS = [
   { provider: "openrouter", model: "openai/gpt-4o-mini", label: "GPT-4o Mini", isDefault: true, sortOrder: 0 },
   { provider: "openrouter", model: "openai/gpt-4o", label: "GPT-4o", isDefault: false, sortOrder: 1 },
-  { provider: "openrouter", model: "anthropic/claude-3.5-sonnet", label: "Claude 3.5 Sonnet", isDefault: false, sortOrder: 2 },
+  { provider: "openrouter", model: "anthropic/claude-sonnet-4-5-20250929", label: "Claude Sonnet 4.5", isDefault: false, sortOrder: 2 },
+  { provider: "anthropic", model: "claude-sonnet-4-5-20250929", label: "Claude Sonnet 4.5 (direct)", isDefault: false, sortOrder: 3 },
 ];
 
 async function seed() {

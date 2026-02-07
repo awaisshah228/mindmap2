@@ -58,6 +58,7 @@ export default function AppSidebar({ isOpen = true, onClose, isMobile }: AppSide
   const setEdges = useCanvasStore((s) => s.setEdges);
   const setPendingFitView = useCanvasStore((s) => s.setPendingFitView);
   const setPendingFitViewNodeIds = useCanvasStore((s) => s.setPendingFitViewNodeIds);
+  const setLibraryOpen = useCanvasStore((s) => s.setLibraryOpen);
 
   const [favoritesOpen, setFavoritesOpen] = useState(true);
   const [recentOpen, setRecentOpen] = useState(true);
@@ -66,8 +67,9 @@ export default function AppSidebar({ isOpen = true, onClose, isMobile }: AppSide
   const [templates, setTemplates] = useState<TemplateItem[]>([]);
   const [templatesLoading, setTemplatesLoading] = useState(false);
 
+  // Load templates for everyone (signed in or not); no auth required
   useEffect(() => {
-    fetch("/api/presets?templates=true")
+    fetch("/api/presets?templates=true", { credentials: "omit" })
       .then((r) => (r.ok ? r.json() : []))
       .then((list: TemplateItem[]) => setTemplates(Array.isArray(list) ? list : []))
       .catch(() => setTemplates([]));
@@ -78,7 +80,7 @@ export default function AppSidebar({ isOpen = true, onClose, isMobile }: AppSide
     setTemplatesLoading(true);
     try {
       const res = await fetch(`/api/diagrams/preset/stream?preset=${encodeURIComponent(id)}`, {
-        credentials: "include",
+        credentials: "omit",
       });
       if (!res.ok || !res.body) {
         setTemplatesLoading(false);
@@ -225,6 +227,17 @@ export default function AppSidebar({ isOpen = true, onClose, isMobile }: AppSide
         >
           <FilePlus className="w-4 h-4" />
           New Project
+        </button>
+      </div>
+      <div className="px-2 pb-2">
+        <button
+          type="button"
+          onClick={() => setLibraryOpen(true)}
+          className="w-full flex items-center gap-2 px-4 py-2 rounded-lg border border-gray-700 hover:bg-gray-800 text-gray-300 hover:text-white text-sm transition-colors"
+          title="Your library (all S3 uploads)"
+        >
+          <FolderOpen className="w-4 h-4" />
+          Library
         </button>
       </div>
 
