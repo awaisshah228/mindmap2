@@ -36,8 +36,11 @@ export async function GET(_req: Request, { params }: Params) {
 
 /**
  * PATCH /api/presets/[id]
- * Save generated diagram data to preset (first-time AI generation).
+ * Save generated diagram data to preset (first-time AI generation from AI panel).
  * Body: { nodes?, edges?, drawioData?, excalidrawData?, dataFormat?, mermaidData? }
+ *
+ * Security: Preset must exist in DB. Frontend cannot create arbitrary presets — only
+ * update diagram data for presets that exist (from seed or admin). Validates id exists.
  */
 export async function PATCH(req: NextRequest, { params }: Params) {
   const { id } = await params;
@@ -52,6 +55,12 @@ export async function PATCH(req: NextRequest, { params }: Params) {
 
   if (Object.keys(updates).length <= 1) {
     return NextResponse.json({ error: "No diagram data to save" }, { status: 400 });
+  }
+
+  // Backend: verify preset exists in DB — cannot create or update non-existent presets
+  const [existing] = await db.select({ id: diagramPresets.id }).from(diagramPresets).where(eq(diagramPresets.id, id));
+  if (!existing) {
+    return NextResponse.json({ error: "Preset not found" }, { status: 404 });
   }
 
   const [row] = await db

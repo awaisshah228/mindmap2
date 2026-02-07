@@ -45,6 +45,8 @@ export function getPresetPreviewUrl(name: string, label?: string): string {
 }
 
 const PRESET_PREVIEW_SLUGS: Record<string, string> = {
+  "our-website-ai-diagram-app": "nextdotjs",
+  "template-our-website-ai-diagram-app": "nextdotjs",
   "ecommerce-full-scale": "amazonaws",
   "ecommerce-mern-aws": "amazonaws",
   "auth-oauth2-jwt-full": "auth0",

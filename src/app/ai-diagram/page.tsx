@@ -176,33 +176,31 @@ function AIDiagramPage() {
     streamEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [streamingText]);
 
-  // Fetch all presets once; filter by canvas mode in local state
+  // Fetch presets and templates; both can be loaded without sign-in
   useEffect(() => {
     setPresetLoading(true);
-    const url = `/api/presets?templates=false`;
-    fetch(url, { credentials: "omit" })
-      .then((r) => r.ok ? r.json() : [])
-      .then(
-        (
-          list: {
-            id: string;
-            label: string;
-            prompt?: string;
-            previewImageUrl?: string;
-            targetCanvas?: string;
-          }[]
-        ) => {
-          setApiPresets(
-            list.map((p) => ({
-              value: p.id,
-              label: p.label,
-              prompt: p.prompt ?? "",
-              previewImageUrl: p.previewImageUrl,
-              targetCanvas: (p.targetCanvas as "reactflow" | "excalidraw" | "drawio") ?? "reactflow",
-            }))
-          );
-        }
-      )
+    Promise.all([
+      fetch("/api/presets?templates=false", { credentials: "omit" }).then((r) => (r.ok ? r.json() : [])),
+      fetch("/api/presets?templates=true", { credentials: "omit" }).then((r) => (r.ok ? r.json() : [])),
+    ])
+      .then(([presetsList, templatesList]) => {
+        type Item = { id: string; label: string; prompt?: string; previewImageUrl?: string; targetCanvas?: string };
+        const presets = (presetsList as Item[]).map((p) => ({
+          value: p.id,
+          label: p.label,
+          prompt: p.prompt ?? "",
+          previewImageUrl: p.previewImageUrl,
+          targetCanvas: (p.targetCanvas as "reactflow" | "excalidraw" | "drawio") ?? "reactflow",
+        }));
+        const templates = (templatesList as Item[]).map((p) => ({
+          value: p.id,
+          label: `${p.label} (Template)`,
+          prompt: p.prompt ?? "",
+          previewImageUrl: p.previewImageUrl,
+          targetCanvas: (p.targetCanvas as "reactflow" | "excalidraw" | "drawio") ?? "reactflow",
+        }));
+        setApiPresets([...presets, ...templates]);
+      })
       .catch(() => setApiPresets([]))
       .finally(() => setPresetLoading(false));
   }, []);
@@ -319,14 +317,24 @@ function AIDiagramPage() {
     const targetCanvasMode = effectiveTarget;
 
     try {
-      // ─── Preset: try load from DB first (skip AI if diagram already saved) ───
+      // ─── Preset/template: try load from DB first; if 404 (no data), generate and save ───
       if (preset !== "none" && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(preset)) {
+        let data: { drawioData?: string; excalidrawData?: unknown; nodes?: Node[]; edges?: Edge[] } | null = null;
         const presetRes = await fetch(
           `/api/diagrams/preset?preset=${encodeURIComponent(preset)}`,
           { credentials: "omit" }
         );
         if (presetRes.ok) {
-          const data = await presetRes.json();
+          data = await presetRes.json();
+        } else if (presetRes.status === 404) {
+          // No diagram data yet — generate via API and save to DB (works without sign-in)
+          const genRes = await fetch(
+            `/api/diagrams/preset/generate?preset=${encodeURIComponent(preset)}`,
+            { method: "POST", credentials: "omit" }
+          );
+          if (genRes.ok) data = await genRes.json();
+        }
+        if (data) {
           if (data.drawioData) {
             setDrawioData(data.drawioData);
             setCanvasMode("drawio");

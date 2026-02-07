@@ -22,6 +22,38 @@ type PresetDef = {
 };
 
 const PRESETS: PresetDef[] = [
+  // —— Our website: AI Diagram App architecture (teaching/learning) ——
+  {
+    name: "our-website-ai-diagram-app",
+    label: "Our website: AI Diagram App (Next.js, Clerk, S3, LangChain)",
+    description: "Architecture of this app – Next.js 16, React Flow, Excalidraw, Draw.io, LangChain, Clerk, S3, Neon",
+    diagramType: "architecture",
+    level: "high-level-system-design",
+    prompt: `Create an architecture diagram for this AI Diagram App (the website you're using). Show how we built it with modern APIs and popular SDKs. Include versions where relevant.
+
+(1) **Frontend – Next.js 16 (App Router)**: Next.js 16.1, React 19, Tailwind 4, Radix UI, Lucide icons. Three canvas modes powered by popular diagram SDKs: (a) React Flow (@xyflow/react v12) – nodes, edges, mind maps, flowchart; (b) Excalidraw (@excalidraw/excalidraw v0.18) – hand-drawn style diagrams; (c) Draw.io (react-drawio v1) – professional diagrams. Pages: main editor, AI diagram generator.
+
+(2) **Auth**: Clerk (@clerk/nextjs v6) for authentication, workspaces, protected routes.
+
+(3) **APIs**: 
+- /api/diagrams/generate – Vercel AI SDK (ai v4) + OpenAI
+- /api/diagrams/langchain – LangChain (langchain v1.2, @langchain/openai) for streaming diagram generation
+- /api/diagrams/generate-drawio, generate-excalidraw, generate-mermaid – LangChain ChatOpenAI for Draw.io/Excalidraw outputs
+- /api/upload – S3 presigned URLs (@aws-sdk/client-s3 v3)
+- /api/presets, /api/documents – CRUD
+
+(4) **Database**: Neon PostgreSQL (@neondatabase/serverless) + Drizzle ORM (v0.38). Tables: documents, diagram_presets, user_files.
+
+(5) **Storage**: AWS S3 for icons/images. @aws-sdk/s3-request-presigner.
+
+(6) **AI – dual stack**: (a) Vercel AI SDK + OpenAI for React Flow diagrams; (b) LangChain (@langchain/core, @langchain/openai, @langchain/anthropic) for Excalidraw, Draw.io, Mermaid conversion. Both leverage LLMs for diagram generation.
+
+(7) **State**: Zustand (v5) for canvas, undo/redo. LocalStorage when anonymous; API sync when authenticated.
+
+Show: User → Next.js → Clerk → API routes → Neon / S3 / OpenAI+LangChain. Group by Frontend (React Flow, Excalidraw, Draw.io), Auth, API, Data, AI.`,
+    isTemplate: false,
+    sortOrder: 0,
+  },
   // —— Advanced: full-scale e-commerce system design ——
   {
     name: "ecommerce-full-scale",
@@ -154,6 +186,7 @@ const EXCALIDRAW_PRESETS: PresetDef[] = [
 
 /** Templates for sidebar: prompt-only; first use generates via AI. */
 const TEMPLATES: PresetDef[] = [
+  { name: "template-our-website-ai-diagram-app", label: "Our website: AI Diagram App", description: "Next.js 16, React Flow, Excalidraw, Draw.io, LangChain, Clerk, S3, Neon", diagramType: "architecture", level: "high-level-system-design", prompt: "Architecture of this AI Diagram App: Next.js 16, React 19, React Flow (@xyflow/react), Excalidraw (@excalidraw/excalidraw), Draw.io (react-drawio). LangChain (langchain, @langchain/openai) for AI diagram generation. Clerk auth, S3 uploads, Neon PostgreSQL, Drizzle ORM, Vercel AI SDK. Show frontend (3 canvas modes), API routes, database, storage, AI (Vercel AI SDK + LangChain).", isTemplate: true, sortOrder: 0 },
   { name: "template-ecommerce-full-scale", label: "E-commerce full system", diagramType: "architecture", level: "high-level-system-design", prompt: "Full-scale e-commerce: microservices, Kafka, S3, auth, DevOps.", isTemplate: true, sortOrder: 1 },
   { name: "template-auth-oauth2-jwt-full", label: "OAuth2/JWT auth flow", diagramType: "flowchart", level: "flows", prompt: "OAuth2/JWT auth: login, tokens, refresh, validation.", isTemplate: true, sortOrder: 2 },
   { name: "template-stripe-payment-advanced", label: "Stripe payment (advanced)", diagramType: "flowchart", level: "flows", prompt: "Stripe with idempotency and webhooks.", isTemplate: true, sortOrder: 3 },

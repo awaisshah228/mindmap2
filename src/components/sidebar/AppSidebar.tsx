@@ -110,14 +110,64 @@ export default function AppSidebar({ isOpen = true, onClose, isMobile }: AppSide
     const { id, label } = template;
     setTemplatesLoading(true);
     try {
-      const res = await fetch(`/api/diagrams/preset/stream?preset=${encodeURIComponent(id)}`, {
+      // Create project with template name first (works without sign-in; uses localStorage when not authenticated)
+      if (!activeProjectId) {
+        await createProjectApi(!!isSignedIn || persistenceSource === "cloud", label || "From template");
+      }
+
+      // Try stream first (template has diagram data in DB)
+      let res = await fetch(`/api/diagrams/preset/stream?preset=${encodeURIComponent(id)}`, {
         credentials: "omit",
       });
+
+      // If 404 (no diagram data yet), generate via API and save to DB — works without sign-in
+      if (res.status === 404) {
+        const genRes = await fetch(`/api/diagrams/preset/generate?preset=${encodeURIComponent(id)}`, {
+          method: "POST",
+          credentials: "omit",
+        });
+        if (!genRes.ok) {
+          setTemplatesLoading(false);
+          return;
+        }
+        const genData = await genRes.json();
+        if (genData.nodes && genData.edges) {
+          const flatNodes = (genData.nodes as { id: string; type?: string; position?: { x: number; y: number }; data?: Record<string, unknown>; parentId?: string }[])
+            .filter((n: { type?: string }) => n.type !== "group")
+            .map((n: { id: string; type?: string; position?: { x: number; y: number }; data?: Record<string, unknown>; parentId?: string }) => ({
+              id: n.id,
+              type: (n.type as string) || "rectangle",
+              position: n.position ?? { x: 0, y: 0 },
+              data: n.data ?? {},
+              ...(n.parentId && { parentId: n.parentId, extent: "parent" as const }),
+            })) as Node[];
+          const nodeIds = new Set(flatNodes.map((n) => n.id));
+          const validEdges = (genData.edges as { id?: string; source: string; target: string; data?: Record<string, unknown> }[])
+            .filter((e: { source: string; target: string }) => e && nodeIds.has(e.source) && nodeIds.has(e.target))
+            .map((e: { id?: string; source: string; target: string; data?: Record<string, unknown> }, i: number) => ({
+              id: e.id || `e-${e.source}-${e.target}-${i}`,
+              source: e.source,
+              target: e.target,
+              ...(e.data && { data: e.data }),
+            })) as Edge[];
+          const direction = genData.layoutDirection === "vertical" ? ("TB" as const) : ("LR" as const);
+          const layoutResult = await getLayoutedElements(flatNodes, validEdges, direction, [160, 120], "elk-layered");
+          pushUndo();
+          await applyNodesAndEdgesInChunks(setNodes, setEdges, layoutResult.nodes, layoutResult.edges);
+          setHasUnsavedChanges(true);
+          saveNow();
+          setPendingFitView(true);
+          setPendingFitViewNodeIds(layoutResult.nodes.map((n) => n.id));
+          onClose?.();
+        }
+        setTemplatesLoading(false);
+        return;
+      }
+
       if (!res.ok || !res.body) {
         setTemplatesLoading(false);
         return;
       }
-      if (!activeProjectId) await createProjectApi(!!isSignedIn || persistenceSource === "cloud", label || "From template");
       const nodeIdMap = new Map<string, string>();
       let streamBuffer = "";
       let streamedNodeCount = 0;
