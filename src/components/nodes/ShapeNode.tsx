@@ -7,6 +7,7 @@ import { EditableNodeContent } from "./EditableNodeContent";
 import { SHAPE_PATHS, type ShapeType } from "@/lib/shape-types";
 import { PALETTE_COLORS } from "@/lib/branch-colors";
 import { getIconById } from "@/lib/icon-registry";
+import { cn } from "@/lib/utils";
 
 const DEFAULT_SHAPE: ShapeType = "rectangle";
 const MIN_WIDTH = 100;
@@ -26,14 +27,20 @@ function ShapeNode({ id, data, selected }: NodeProps) {
   const iconDef = getIconById(data.icon as string);
   const IconComponent = iconDef?.Icon;
 
+  const textAlign = (data.textAlign as "left" | "center" | "right") ?? "center";
+  const textVerticalAlign = (data.textVerticalAlign as "top" | "center" | "bottom") ?? "center";
   const formatProps = {
     formatting: {
       fontWeight: (data.fontWeight as "normal" | "bold") ?? "normal",
       fontStyle: (data.fontStyle as "normal" | "italic") ?? "normal",
       textDecoration: (data.textDecoration as "none" | "line-through") ?? "none",
       fontSize: (data.fontSize as "xs" | "sm" | "base" | "lg" | "xl") ?? "sm",
+      textAlign,
+      textVerticalAlign,
     },
   };
+  const itemsClass = { left: "items-start", center: "items-center", right: "items-end" }[textAlign];
+  const justifyClass = { top: "justify-start", center: "justify-center", bottom: "justify-end" }[textVerticalAlign];
 
   const isLongText = label.length > LONG_TEXT_THRESHOLD;
 
@@ -93,7 +100,7 @@ function ShapeNode({ id, data, selected }: NodeProps) {
           className="pointer-events-auto"
         />
       </svg>
-      <div className="relative flex flex-col items-center justify-center pointer-events-none gap-0.5">
+      <div className={cn("relative flex flex-col pointer-events-none gap-0.5 min-h-full", itemsClass, justifyClass)}>
         {customIcon ? (
           <img src={customIcon} alt="" className="w-5 h-5 object-contain shrink-0 pointer-events-none" />
         ) : IconComponent ? (
@@ -103,7 +110,7 @@ function ShapeNode({ id, data, selected }: NodeProps) {
         ) : iconUrl ? (
           <img src={iconUrl} alt="" className="w-5 h-5 object-contain shrink-0 pointer-events-none" onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }} />
         ) : null}
-        <div className="pointer-events-auto nodrag nokey w-full min-w-0 text-center break-words">
+        <div className="pointer-events-auto nodrag nokey w-full min-w-0 break-words">
           <EditableNodeContent
             nodeId={id}
             value={label}

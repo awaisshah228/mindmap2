@@ -7,11 +7,16 @@ import { useCanvasStore } from "@/lib/store/canvas-store";
 
 export type FontSize = "xs" | "sm" | "base" | "lg" | "xl";
 
+export type TextAlign = "left" | "center" | "right";
+export type TextVerticalAlign = "top" | "center" | "bottom";
+
 export interface NodeFormatting {
   fontWeight?: "normal" | "bold";
   fontStyle?: "normal" | "italic";
   textDecoration?: "none" | "line-through";
   fontSize?: FontSize;
+  textAlign?: TextAlign;
+  textVerticalAlign?: TextVerticalAlign;
 }
 
 interface EditableNodeContentProps {
@@ -38,6 +43,12 @@ const FONT_SIZE_CLASSES: Record<FontSize, string> = {
   base: "text-base",
   lg: "text-lg",
   xl: "text-xl",
+};
+
+const TEXT_ALIGN_CLASSES: Record<TextAlign, string> = {
+  left: "text-left",
+  center: "text-center",
+  right: "text-right",
 };
 
 export function EditableNodeContent({
@@ -88,7 +99,7 @@ export function EditableNodeContent({
       if (onCommit) onCommit(final);
       else updateNodeData(nodeId, { label: final });
     }
-  }, [nodeId, value, placeholder, updateNodeData, onEditingChange, onCommit, editOnlyViaToolbar, setEditingNodeId]);
+  }, [ref, nodeId, value, placeholder, updateNodeData, onEditingChange, onCommit, editOnlyViaToolbar, setEditingNodeId]);
 
   const handleFocus = useCallback(() => {
     pushUndo();
@@ -106,7 +117,7 @@ export function EditableNodeContent({
         ref.current?.blur();
       }
     },
-    [value]
+    [ref, value]
   );
 
   const formatStyle: React.CSSProperties = {};
@@ -115,6 +126,7 @@ export function EditableNodeContent({
   if (formatting?.textDecoration) formatStyle.textDecoration = formatting.textDecoration;
 
   const fontSizeClass = formatting?.fontSize ? FONT_SIZE_CLASSES[formatting.fontSize] : undefined;
+  const textAlignClass = formatting?.textAlign ? TEXT_ALIGN_CLASSES[formatting.textAlign] : undefined;
 
   const handleDoubleClickToEdit = useCallback(() => {
     if (editOnlyViaToolbar) {
@@ -129,7 +141,8 @@ export function EditableNodeContent({
           "nodrag nokey min-w-[1ch] truncate cursor-text",
           !value && "text-gray-400",
           className,
-          fontSizeClass
+          fontSizeClass,
+          textAlignClass
         )}
         style={Object.keys(formatStyle).length > 0 ? formatStyle : undefined}
         onDoubleClick={handleDoubleClickToEdit}
@@ -149,7 +162,8 @@ export function EditableNodeContent({
         "nodrag nokey outline-none min-w-[1ch] cursor-text",
         "empty:before:content-[attr(data-placeholder)] empty:before:text-gray-400",
         className,
-        fontSizeClass
+        fontSizeClass,
+        textAlignClass
       )}
       style={Object.keys(formatStyle).length > 0 ? formatStyle : undefined}
       data-placeholder={placeholder}

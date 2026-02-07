@@ -30,6 +30,8 @@ function TextNode({ id, data, selected }: NodeProps) {
           fontStyle: (data.fontStyle as "normal" | "italic") ?? "normal",
           textDecoration: (data.textDecoration as "none" | "line-through") ?? "none",
           fontSize: (data.fontSize as "xs" | "sm" | "base" | "lg" | "xl") ?? "sm",
+          textAlign: (data.textAlign as "left" | "center" | "right") ?? "left",
+          textVerticalAlign: (data.textVerticalAlign as "top" | "center" | "bottom") ?? "center",
         }}
       />
     </BaseNode>

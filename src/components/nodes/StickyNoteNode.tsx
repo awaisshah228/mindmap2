@@ -21,12 +21,15 @@ const COLORS = [
 function StickyNoteNode({ id, data, selected }: NodeProps) {
   const color = (data.color as string) ?? COLORS[0];
   const label = (data.label as string) || "Sticky note";
+  const textAlign = (data.textAlign as "left" | "center" | "right") ?? "left";
+  const textVerticalAlign = (data.textVerticalAlign as "top" | "center" | "bottom") ?? "top";
+  const justifyClass = { top: "justify-start", center: "justify-center", bottom: "justify-end" }[textVerticalAlign];
 
   return (
     <BaseNode
       nodeId={id}
       selected={selected}
-      className={cn("min-w-[140px] min-h-[100px] rounded-lg shadow-md p-3")}
+      className={cn("min-w-[140px] min-h-[100px] rounded-lg shadow-md p-3 flex flex-col", justifyClass)}
       style={{ backgroundColor: color }}
     >
       <Handle id="top" type="source" position={Position.Top} className="node-connect-handle" />
@@ -44,6 +47,8 @@ function StickyNoteNode({ id, data, selected }: NodeProps) {
           fontStyle: (data.fontStyle as "normal" | "italic") ?? "normal",
           textDecoration: (data.textDecoration as "none" | "line-through") ?? "none",
           fontSize: (data.fontSize as "xs" | "sm" | "base" | "lg" | "xl") ?? "sm",
+          textAlign,
+          textVerticalAlign,
         }}
       />
     </BaseNode>

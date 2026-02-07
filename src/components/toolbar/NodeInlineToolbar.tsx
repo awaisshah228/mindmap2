@@ -28,6 +28,12 @@ import {
   ChevronDown,
   GitBranchPlus,
   Tag,
+  AlignLeft,
+  AlignCenter,
+  AlignRight,
+  AlignVerticalJustifyStart,
+  AlignVerticalJustifyCenter,
+  AlignVerticalJustifyEnd,
 } from "lucide-react";
 import type { Node } from "@xyflow/react";
 import { cn } from "@/lib/utils";
@@ -42,7 +48,7 @@ const SHAPE_COLOR_PALETTE = [
   "#86efac", "#93c5fd", "#f9a8d4", "#c4b5fd", "#fcd34d", "#4ade80",
 ];
 import { IconPickerPanel } from "@/components/panels/IconPickerPanel";
-import type { FontSize } from "@/components/nodes/EditableNodeContent";
+import type { FontSize, TextAlign, TextVerticalAlign } from "@/components/nodes/EditableNodeContent";
 import type { ExtraHandle } from "@/components/nodes/BaseNode";
 
 /** Node types that use the shape picker (rectangle, diamond, circle, document). */
@@ -162,6 +168,8 @@ export function NodeInlineToolbar({ nodeId, selected = false }: NodeInlineToolba
   const fontStyle = (node?.data?.fontStyle as string) ?? "normal";
   const textDecoration = (node?.data?.textDecoration as string) ?? "none";
   const fontSize = (node?.data?.fontSize as FontSize) ?? "sm";
+  const textAlign = (node?.data?.textAlign as TextAlign) ?? "center";
+  const textVerticalAlign = (node?.data?.textVerticalAlign as TextVerticalAlign) ?? "center";
 
   const handleBold = () => {
     pushUndo();
@@ -179,6 +187,15 @@ export function NodeInlineToolbar({ nodeId, selected = false }: NodeInlineToolba
     pushUndo();
     updateNodeData(nodeId, { fontSize: size });
     setFontSizeOpen(false);
+  };
+
+  const handleTextAlign = (align: TextAlign) => {
+    pushUndo();
+    updateNodeData(nodeId, { textAlign: align });
+  };
+  const handleTextVerticalAlign = (align: TextVerticalAlign) => {
+    pushUndo();
+    updateNodeData(nodeId, { textVerticalAlign: align });
   };
 
   const handleShapeChange = (shape: ShapeType) => {
@@ -366,6 +383,29 @@ export function NodeInlineToolbar({ nodeId, selected = false }: NodeInlineToolba
         <ToolbarButton title="Strikethrough" onClick={handleStrikethrough} active={textDecoration === "line-through"}>
           <Strikethrough className="w-3.5 h-3.5" />
         </ToolbarButton>
+        {hasColorPicker && (
+          <>
+            <ToolbarDivider />
+            <ToolbarButton title="Align left" onClick={() => handleTextAlign("left")} active={textAlign === "left"}>
+              <AlignLeft className="w-3.5 h-3.5" />
+            </ToolbarButton>
+            <ToolbarButton title="Align center" onClick={() => handleTextAlign("center")} active={textAlign === "center"}>
+              <AlignCenter className="w-3.5 h-3.5" />
+            </ToolbarButton>
+            <ToolbarButton title="Align right" onClick={() => handleTextAlign("right")} active={textAlign === "right"}>
+              <AlignRight className="w-3.5 h-3.5" />
+            </ToolbarButton>
+            <ToolbarButton title="Align top" onClick={() => handleTextVerticalAlign("top")} active={textVerticalAlign === "top"}>
+              <AlignVerticalJustifyStart className="w-3.5 h-3.5" />
+            </ToolbarButton>
+            <ToolbarButton title="Align middle" onClick={() => handleTextVerticalAlign("center")} active={textVerticalAlign === "center"}>
+              <AlignVerticalJustifyCenter className="w-3.5 h-3.5" />
+            </ToolbarButton>
+            <ToolbarButton title="Align bottom" onClick={() => handleTextVerticalAlign("bottom")} active={textVerticalAlign === "bottom"}>
+              <AlignVerticalJustifyEnd className="w-3.5 h-3.5" />
+            </ToolbarButton>
+          </>
+        )}
         <ToolbarDivider />
         {hasIconPicker && (
           <IconPickerPanel
