@@ -1630,7 +1630,7 @@ export default function DiagramCanvas() {
         <ReactFlow
           nodes={visibleNodes}
           edges={visibleEdges}
-          onInit={onInit}
+          onInit={onInit as React.ComponentProps<typeof ReactFlow>["onInit"]}
           onNodesChange={onNodesChange}
           onEdgesChange={onEdgesChange}
           onReconnect={onReconnect}
