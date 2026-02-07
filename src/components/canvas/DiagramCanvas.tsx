@@ -621,6 +621,10 @@ export default function DiagramCanvas() {
   );
 
   const pendingEdgeType = useCanvasStore((s) => s.pendingEdgeType);
+  const defaultEdgeStrokeColor = useCanvasStore((s) => s.defaultEdgeStrokeColor);
+  const defaultEdgeStrokeWidth = useCanvasStore((s) => s.defaultEdgeStrokeWidth);
+  const defaultEdgeMarkerEnd = useCanvasStore((s) => s.defaultEdgeMarkerEnd);
+  const defaultEdgeMarkerStart = useCanvasStore((s) => s.defaultEdgeMarkerStart);
   const onConnect = useCallback(
     (params: Connection) => {
       pushUndo();
@@ -654,7 +658,14 @@ export default function DiagramCanvas() {
         id: edgeId,
         sourceHandle: resolvedSourceHandle,
         type: "labeledConnector",
-        data: { connectorType: pendingEdgeType, pathPoints: [] },
+        data: {
+          connectorType: pendingEdgeType,
+          pathPoints: [],
+          ...(defaultEdgeStrokeColor && { strokeColor: defaultEdgeStrokeColor }),
+          ...(defaultEdgeStrokeWidth != null && { strokeWidth: defaultEdgeStrokeWidth }),
+        },
+        ...(defaultEdgeMarkerEnd && { markerEnd: defaultEdgeMarkerEnd }),
+        ...(defaultEdgeMarkerStart && { markerStart: defaultEdgeMarkerStart }),
       };
       setEdges((eds) => {
         const updated = [...eds, newEdge];
@@ -663,7 +674,7 @@ export default function DiagramCanvas() {
         return updated;
       });
     },
-    [setEdges, setStoreEdges, pendingEdgeType, pushUndo]
+    [setEdges, setStoreEdges, pendingEdgeType, defaultEdgeStrokeColor, defaultEdgeStrokeWidth, defaultEdgeMarkerEnd, defaultEdgeMarkerStart, pushUndo]
   );
 
   const onConnectEnd = useCallback(
@@ -1072,7 +1083,11 @@ export default function DiagramCanvas() {
             data: {
               connectorType: pendingEdgeType,
               pathPoints: defaultPathPoints,
+              ...(defaultEdgeStrokeColor && { strokeColor: defaultEdgeStrokeColor }),
+              ...(defaultEdgeStrokeWidth != null && { strokeWidth: defaultEdgeStrokeWidth }),
             },
+            ...(defaultEdgeMarkerEnd && { markerEnd: defaultEdgeMarkerEnd }),
+            ...(defaultEdgeMarkerStart && { markerStart: defaultEdgeMarkerStart }),
           };
           addNode(anchor1);
           addNode(anchor2);
@@ -1099,6 +1114,10 @@ export default function DiagramCanvas() {
       edgeDrawStart,
       edgeDrawPoints,
       pendingEdgeType,
+      defaultEdgeStrokeColor,
+      defaultEdgeStrokeWidth,
+      defaultEdgeMarkerEnd,
+      defaultEdgeMarkerStart,
       addNode,
       addEdgeToStore,
       setNodes,
@@ -1652,7 +1671,13 @@ export default function DiagramCanvas() {
           connectionLineComponent={CustomConnectionLine}
           defaultEdgeOptions={{
             type: "labeledConnector",
-            data: { connectorType: "default" },
+            data: {
+              connectorType: "default",
+              ...(defaultEdgeStrokeColor && { strokeColor: defaultEdgeStrokeColor }),
+              ...(defaultEdgeStrokeWidth != null && { strokeWidth: defaultEdgeStrokeWidth }),
+            },
+            ...(defaultEdgeMarkerEnd && { markerEnd: defaultEdgeMarkerEnd }),
+            ...(defaultEdgeMarkerStart && { markerStart: defaultEdgeMarkerStart }),
             reconnectable: true, // allow reconnecting from both source and target
           }}
           snapGrid={[16, 16]}

@@ -17,7 +17,7 @@ import { useCanvasStore } from "@/lib/store/canvas-store";
 import { BaseEdge } from "./BaseEdge";
 import { CUSTOM_MARKER_IDS, MARKER_SHAPES, renderDynamicMarker } from "./CustomMarkerDefs";
 
-const EDGE_STROKE_WIDTH = 6;
+const EDGE_STROKE_WIDTH = 2;
 /** Offset toolbar above the label so it doesn't cover placeholder/input */
 const TOOLBAR_OFFSET_Y = -52;
 /** Min edge length (px) to show a label so the edge stays visible; also require edge >= label width + this padding */
@@ -108,18 +108,26 @@ function LabeledConnectorEdge({
 }: import("@xyflow/react").EdgeProps) {
   const { updateEdgeData, deleteElements, screenToFlowPosition, getEdges, getNodes, setEdges } = useReactFlow();
   const pushUndo = useCanvasStore((s) => s.pushUndo);
+  const globalDefaultEdgeColor = useCanvasStore((s) => s.defaultEdgeStrokeColor);
+  const globalDefaultStrokeWidth = useCanvasStore((s) => s.defaultEdgeStrokeWidth);
+  const globalDefaultMarkerEnd = useCanvasStore((s) => s.defaultEdgeMarkerEnd);
+  const globalDefaultMarkerStart = useCanvasStore((s) => s.defaultEdgeMarkerStart);
   // Avoid calling getEdges() on every render — only compute branch color when needed
   const branchColor = useMemo(() => {
     if (data?.strokeColor) return data.strokeColor as string;
+    if (globalDefaultEdgeColor) return globalDefaultEdgeColor;
     const edges = getEdges();
     return getBranchStrokeColor(source, target, edges);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [source, target, data?.strokeColor]);
+  }, [source, target, data?.strokeColor, globalDefaultEdgeColor]);
   const connectorType = (data?.connectorType as ConnectorType) ?? "default";
   const label = (data?.label as string) ?? "";
   const pathPoints = (data?.pathPoints as PathPoint[] | undefined) ?? [];
   const strokeDasharray = (data?.strokeDasharray as string | undefined) ?? undefined;
-  const strokeWidth = (data?.strokeWidth as number | undefined) ?? EDGE_STROKE_WIDTH;
+  const strokeWidth =
+    (data?.strokeWidth as number | undefined) ?? globalDefaultStrokeWidth ?? EDGE_STROKE_WIDTH;
+  const markerEndWithDefault = markerEnd ?? globalDefaultMarkerEnd ?? undefined;
+  const markerStartWithDefault = markerStart ?? globalDefaultMarkerStart ?? undefined;
   const erRelation = (data?.erRelation as ERRelation) ?? null;
   const markerColor = (data?.markerColor as string | undefined) ?? undefined;
   const markerScale = (data?.markerScale as number | undefined) ?? 1;
@@ -133,6 +141,7 @@ function LabeledConnectorEdge({
   const [activeMarkerSide, setActiveMarkerSide] = useState<"start" | "end" | null>(null);
   const [relationOpen, setRelationOpen] = useState(false);
   const [markerColorOpen, setMarkerColorOpen] = useState(false);
+  const [strokeColorOpen, setStrokeColorOpen] = useState(false);
 
   // When 2+ nodes or 2+ edges selected, hide edge toolbar (even on hover) so canvas stays clear for moving selection
   const selectedNodeCount = getNodes().filter((n) => n.selected).length;
@@ -326,6 +335,16 @@ function LabeledConnectorEdge({
     [id, updateEdgeData, pushUndo]
   );
 
+  /* ── Edge / stroke (border) color ── */
+  const setStrokeColor = useCallback(
+    (color: string | undefined) => {
+      pushUndo();
+      updateEdgeData(id, { strokeColor: color });
+      setStrokeColorOpen(false);
+    },
+    [id, updateEdgeData, pushUndo]
+  );
+
   /* ── Marker size ── */
   const setMarkerSize = useCallback(
     (scale: number) => {
@@ -346,8 +365,8 @@ function LabeledConnectorEdge({
     const match = marker.match(/url\(['"]?#([^'")\s]+)['"]?\)/);
     return match ? match[1] : marker;
   };
-  const rawEndId = extractRawMarkerId(markerEnd);
-  const rawStartId = extractRawMarkerId(markerStart);
+  const rawEndId = extractRawMarkerId(markerEndWithDefault);
+  const rawStartId = extractRawMarkerId(markerStartWithDefault);
 
   const dynEndId = needsDynamic && rawEndId ? `${rawEndId}--${id}` : undefined;
   const dynStartId = needsDynamic && rawStartId ? `${rawStartId}--${id}` : undefined;
@@ -356,8 +375,8 @@ function LabeledConnectorEdge({
   const dynamicScale = markerScale;
 
   // Override markerEnd/markerStart props if dynamic
-  const effectiveMarkerEnd = dynEndId ? `url('#${dynEndId}')` : markerEnd;
-  const effectiveMarkerStart = dynStartId ? `url('#${dynStartId}')` : markerStart;
+  const effectiveMarkerEnd = dynEndId ? `url('#${dynEndId}')` : markerEndWithDefault;
+  const effectiveMarkerStart = dynStartId ? `url('#${dynStartId}')` : markerStartWithDefault;
 
   const effectiveStrokeDasharray = strokeDasharray;
 
@@ -774,7 +793,7 @@ function LabeledConnectorEdge({
                 title="Start marker"
                 className={cn(
                   "p-1.5 rounded hover:bg-gray-600 flex items-center gap-0.5",
-                  markerStart && "bg-violet-600"
+                  markerStartWithDefault && "bg-violet-600"
                 )}
               >
                 <svg width="14" height="10" viewBox="0 0 14 10" fill="none">
@@ -791,7 +810,7 @@ function LabeledConnectorEdge({
                 title="End marker"
                 className={cn(
                   "p-1.5 rounded hover:bg-gray-600 flex items-center gap-0.5",
-                  markerEnd && "bg-violet-600"
+                  markerEndWithDefault && "bg-violet-600"
                 )}
               >
                 <svg width="14" height="10" viewBox="0 0 14 10" fill="none">
@@ -879,7 +898,7 @@ function LabeledConnectorEdge({
             </div>
           </div>
           {/* Flip / Color / Size */}
-          {(markerStart || markerEnd) && (
+          {(markerStartWithDefault || markerEndWithDefault) && (
             <>
               <div className="w-px h-4 bg-gray-600" />
               <div className="flex items-center gap-1">
@@ -894,7 +913,54 @@ function LabeledConnectorEdge({
                     <path d="M7 16V4m0 0L3 8m4-4l4 4M17 8v12m0 0l4-4m-4 4l-4-4" />
                   </svg>
                 </button>
-                {/* Color */}
+                {/* Edge (line) color */}
+                <div className="relative">
+                  <button
+                    type="button"
+                    onClick={() => setStrokeColorOpen((o) => !o)}
+                    title="Edge / line color"
+                    className="p-1.5 rounded hover:bg-gray-600 flex items-center gap-0.5"
+                  >
+                    <span
+                      className="w-3.5 h-3.5 rounded-sm border border-gray-500"
+                      style={{ backgroundColor: branchColor }}
+                    />
+                    <svg width="6" height="6" viewBox="0 0 6 6" fill="none" className="opacity-60"><path d="M1 2 L3 4 L5 2" stroke="currentColor" strokeWidth="1.2" /></svg>
+                  </button>
+                  {strokeColorOpen && (
+                    <div className="absolute top-full left-0 mt-1 z-[200] rounded-lg bg-gray-900 text-white shadow-lg border border-gray-700 p-2">
+                      <div className="text-[9px] uppercase tracking-wider text-gray-500 px-0.5 mb-1">Edge color</div>
+                      <div className="grid grid-cols-5 gap-1">
+                        <button
+                          type="button"
+                          onClick={() => setStrokeColor(undefined)}
+                          title="Default (auto)"
+                          className={cn(
+                            "w-5 h-5 rounded-sm border hover:scale-110 transition-transform",
+                            !data?.strokeColor ? "border-white ring-1 ring-violet-400" : "border-gray-600"
+                          )}
+                          style={{ backgroundColor: "#94a3b8" }}
+                        />
+                        {MARKER_COLORS.filter((c) => c.id !== "default").map((c) => (
+                          <button
+                            key={c.id}
+                            type="button"
+                            onClick={() => setStrokeColor(c.hex)}
+                            title={c.label}
+                            className={cn(
+                              "w-5 h-5 rounded-sm border hover:scale-110 transition-transform",
+                              (data?.strokeColor as string) === c.hex
+                                ? "border-white ring-1 ring-violet-400"
+                                : "border-gray-600"
+                            )}
+                            style={{ backgroundColor: c.hex }}
+                          />
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+                {/* Marker color */}
                 <div className="relative">
                   <button
                     type="button"

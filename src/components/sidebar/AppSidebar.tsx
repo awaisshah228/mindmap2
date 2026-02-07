@@ -20,6 +20,7 @@ import * as Popover from "@radix-ui/react-popover";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@clerk/nextjs";
 import { useCanvasStore, type Project } from "@/lib/store/canvas-store";
+import { CUSTOM_MARKER_IDS } from "@/components/edges/CustomMarkerDefs";
 import { applyNodesAndEdgesInChunks } from "@/lib/chunked-nodes";
 import { parseStreamingDiagramBuffer } from "@/lib/ai/streaming-json-parser";
 import { getLayoutedElements } from "@/lib/layout-engine";
@@ -46,6 +47,22 @@ function timeAgo(ts: number): string {
 
 type TemplateItem = { id: string; label: string; level: string; description?: string; previewImageUrl?: string };
 
+const GLOBAL_EDGE_COLORS = [
+  { id: "red", label: "Red", hex: "#ef4444" },
+  { id: "orange", label: "Orange", hex: "#f97316" },
+  { id: "amber", label: "Amber", hex: "#eab308" },
+  { id: "green", label: "Green", hex: "#22c55e" },
+  { id: "blue", label: "Blue", hex: "#3b82f6" },
+  { id: "violet", label: "Violet", hex: "#8b5cf6" },
+  { id: "pink", label: "Pink", hex: "#ec4899" },
+  { id: "teal", label: "Teal", hex: "#14b8a6" },
+  { id: "gray", label: "Gray", hex: "#6b7280" },
+  { id: "black", label: "Black", hex: "#1f2937" },
+];
+
+const EDGE_STROKE_WIDTHS = [2, 4, 6, 8, 10, 12] as const;
+const ARROW_MARKER_ID = CUSTOM_MARKER_IDS.arrowClosed;
+
 export default function AppSidebar({ isOpen = true, onClose, isMobile }: AppSidebarProps) {
   const { isSignedIn } = useAuth();
   const persistenceSource = useCanvasStore((s) => s.persistenceSource);
@@ -59,8 +76,22 @@ export default function AppSidebar({ isOpen = true, onClose, isMobile }: AppSide
   const setPendingFitView = useCanvasStore((s) => s.setPendingFitView);
   const setPendingFitViewNodeIds = useCanvasStore((s) => s.setPendingFitViewNodeIds);
   const setLibraryOpen = useCanvasStore((s) => s.setLibraryOpen);
+  const defaultEdgeStrokeColor = useCanvasStore((s) => s.defaultEdgeStrokeColor);
+  const setDefaultEdgeStrokeColor = useCanvasStore((s) => s.setDefaultEdgeStrokeColor);
+  const defaultEdgeStrokeWidth = useCanvasStore((s) => s.defaultEdgeStrokeWidth);
+  const setDefaultEdgeStrokeWidth = useCanvasStore((s) => s.setDefaultEdgeStrokeWidth);
+  const defaultEdgeMarkerEnd = useCanvasStore((s) => s.defaultEdgeMarkerEnd);
+  const defaultEdgeMarkerStart = useCanvasStore((s) => s.defaultEdgeMarkerStart);
+  const setDefaultEdgeMarkers = useCanvasStore((s) => s.setDefaultEdgeMarkers);
+  const edges = useCanvasStore((s) => s.edges);
+  const pushUndo = useCanvasStore((s) => s.pushUndo);
+  const selectedEdgeIds = useMemo(
+    () => (edges as Edge[]).filter((e) => (e as { selected?: boolean }).selected).map((e) => e.id),
+    [edges]
+  );
 
   const [favoritesOpen, setFavoritesOpen] = useState(true);
+  const [globalStylesOpen, setGlobalStylesOpen] = useState(false);
   const [recentOpen, setRecentOpen] = useState(true);
   const [allOpen, setAllOpen] = useState(true);
   const [templatesOpen, setTemplatesOpen] = useState(false);
@@ -242,6 +273,175 @@ export default function AppSidebar({ isOpen = true, onClose, isMobile }: AppSide
       </div>
 
       <nav className="flex-1 overflow-y-auto px-2 pb-2">
+        {/* Global styles */}
+        <Section title="Global styles" open={globalStylesOpen} onToggle={() => setGlobalStylesOpen((o) => !o)}>
+          <li className="px-3 py-2">
+            <span className="text-[10px] font-medium text-gray-500 uppercase tracking-wider block mb-1">
+              Default edge color
+            </span>
+            <p className="text-[10px] text-gray-500 mb-2">
+              New edges use this color. Select edges on the canvas to apply to selection only.
+            </p>
+            <div className="flex flex-wrap gap-1.5">
+              <button
+                type="button"
+                onClick={() => setDefaultEdgeStrokeColor(null)}
+                title="Default (auto)"
+                className={cn(
+                  "w-6 h-6 rounded-md border-2 transition-all hover:scale-110",
+                  defaultEdgeStrokeColor === null ? "border-violet-400 ring-1 ring-violet-400/50" : "border-gray-600 hover:border-gray-500"
+                )}
+                style={{ backgroundColor: "#94a3b8" }}
+              />
+              {GLOBAL_EDGE_COLORS.map((c) => (
+                <button
+                  key={c.id}
+                  type="button"
+                  onClick={() => setDefaultEdgeStrokeColor(c.hex)}
+                  title={c.label}
+                  className={cn(
+                    "w-6 h-6 rounded-md border-2 transition-all hover:scale-110",
+                    defaultEdgeStrokeColor === c.hex ? "border-violet-400 ring-1 ring-violet-400/50" : "border-gray-600 hover:border-gray-500"
+                  )}
+                  style={{ backgroundColor: c.hex }}
+                />
+              ))}
+            </div>
+            <span className="text-[10px] font-medium text-gray-500 uppercase tracking-wider block mt-3 mb-1">
+              Default stroke width
+            </span>
+            <div className="flex flex-wrap gap-1">
+              <button
+                type="button"
+                onClick={() => setDefaultEdgeStrokeWidth(null)}
+                title="Default (2px)"
+                className={cn(
+                  "px-2 py-1 rounded text-[10px] font-medium border transition-all",
+                  defaultEdgeStrokeWidth === null
+                    ? "border-violet-400 bg-violet-800/40 text-violet-200"
+                    : "border-gray-600 text-gray-400 hover:border-gray-500 hover:text-gray-300"
+                )}
+              >
+                Auto
+              </button>
+              {EDGE_STROKE_WIDTHS.map((w) => (
+                <button
+                  key={w}
+                  type="button"
+                  onClick={() => setDefaultEdgeStrokeWidth(w)}
+                  title={`${w}px`}
+                  className={cn(
+                    "px-2 py-1 rounded text-[10px] font-medium border transition-all",
+                    defaultEdgeStrokeWidth === w
+                      ? "border-violet-400 bg-violet-800/40 text-violet-200"
+                      : "border-gray-600 text-gray-400 hover:border-gray-500 hover:text-gray-300"
+                  )}
+                >
+                  {w}
+                </button>
+              ))}
+            </div>
+            <span className="text-[10px] font-medium text-gray-500 uppercase tracking-wider block mt-3 mb-1">
+              Default markers
+            </span>
+            <div className="flex flex-wrap gap-1">
+              <button
+                type="button"
+                onClick={() => setDefaultEdgeMarkers(null, null)}
+                title="No arrows"
+                className={cn(
+                  "px-2 py-1 rounded text-[10px] font-medium border transition-all",
+                  defaultEdgeMarkerEnd === null && defaultEdgeMarkerStart === null
+                    ? "border-violet-400 bg-violet-800/40 text-violet-200"
+                    : "border-gray-600 text-gray-400 hover:border-gray-500 hover:text-gray-300"
+                )}
+              >
+                None
+              </button>
+              <button
+                type="button"
+                onClick={() => setDefaultEdgeMarkers(ARROW_MARKER_ID, null)}
+                title="Arrow at end"
+                className={cn(
+                  "px-2 py-1 rounded text-[10px] font-medium border transition-all",
+                  defaultEdgeMarkerEnd === ARROW_MARKER_ID && defaultEdgeMarkerStart === null
+                    ? "border-violet-400 bg-violet-800/40 text-violet-200"
+                    : "border-gray-600 text-gray-400 hover:border-gray-500 hover:text-gray-300"
+                )}
+              >
+                Arrow end
+              </button>
+              <button
+                type="button"
+                onClick={() => setDefaultEdgeMarkers(ARROW_MARKER_ID, ARROW_MARKER_ID)}
+                title="Arrow at both ends"
+                className={cn(
+                  "px-2 py-1 rounded text-[10px] font-medium border transition-all",
+                  defaultEdgeMarkerEnd === ARROW_MARKER_ID && defaultEdgeMarkerStart === ARROW_MARKER_ID
+                    ? "border-violet-400 bg-violet-800/40 text-violet-200"
+                    : "border-gray-600 text-gray-400 hover:border-gray-500 hover:text-gray-300"
+                )}
+              >
+                Arrow both
+              </button>
+            </div>
+            {edges.length > 0 && (
+              <div className="mt-2 flex flex-col gap-1.5">
+                {selectedEdgeIds.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      pushUndo();
+                      const idSet = new Set(selectedEdgeIds);
+                      setEdges(
+                        (edges as Edge[]).map((e) => {
+                          if (!idSet.has(e.id)) return e;
+                          return {
+                            ...e,
+                            data: {
+                              ...(e.data ?? {}),
+                              strokeColor: defaultEdgeStrokeColor ?? undefined,
+                              strokeWidth: defaultEdgeStrokeWidth ?? undefined,
+                            },
+                            markerEnd: defaultEdgeMarkerEnd ?? undefined,
+                            markerStart: defaultEdgeMarkerStart ?? undefined,
+                          };
+                        })
+                      );
+                      setHasUnsavedChanges(true);
+                    }}
+                    className="w-full px-3 py-1.5 rounded-lg text-xs bg-violet-800/80 hover:bg-violet-700 text-white border border-violet-600"
+                  >
+                    Apply to selected edges ({selectedEdgeIds.length})
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={() => {
+                    pushUndo();
+                    setEdges(
+                      (edges as Edge[]).map((e) => ({
+                        ...e,
+                        data: {
+                          ...(e.data ?? {}),
+                          strokeColor: defaultEdgeStrokeColor ?? undefined,
+                          strokeWidth: defaultEdgeStrokeWidth ?? undefined,
+                        },
+                        markerEnd: defaultEdgeMarkerEnd ?? undefined,
+                        markerStart: defaultEdgeMarkerStart ?? undefined,
+                      }))
+                    );
+                    setHasUnsavedChanges(true);
+                  }}
+                  className="w-full px-3 py-1.5 rounded-lg text-xs bg-gray-800 hover:bg-gray-700 text-gray-300 border border-gray-600"
+                >
+                  Apply to all edges
+                </button>
+              </div>
+            )}
+          </li>
+        </Section>
+
         {/* Templates */}
         <Section title="Templates" open={templatesOpen} onToggle={() => setTemplatesOpen((o) => !o)}>
           {templates.length === 0 ? (

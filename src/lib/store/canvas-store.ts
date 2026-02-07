@@ -154,6 +154,17 @@ interface CanvasState {
   pendingImageLabel: string | null;
   /** Connector type for newly drawn edges when connector tool is used. */
   pendingEdgeType: PendingEdgeType;
+  /** Global default edge stroke color (hex/rgb). Null = use branch/auto color. */
+  defaultEdgeStrokeColor: string | null;
+  setDefaultEdgeStrokeColor: (color: string | null) => void;
+  /** Global default edge stroke width (px). Null = use component default (6). */
+  defaultEdgeStrokeWidth: number | null;
+  setDefaultEdgeStrokeWidth: (width: number | null) => void;
+  /** Global default edge end marker (e.g. "cm-arrow-closed"). Null = none. */
+  defaultEdgeMarkerEnd: string | null;
+  /** Global default edge start marker. Null = none. */
+  defaultEdgeMarkerStart: string | null;
+  setDefaultEdgeMarkers: (end: string | null, start: string | null) => void;
   mindMapLayout: MindMapLayoutOptions;
   undoStack: { nodes: Node[]; edges: Edge[] }[];
   redoStack: { nodes: Node[]; edges: Edge[] }[];
@@ -378,6 +389,10 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
   pendingImageUrl: null,
   pendingImageLabel: null,
   pendingEdgeType: "default",
+  defaultEdgeStrokeColor: null,
+  defaultEdgeStrokeWidth: 2,
+  defaultEdgeMarkerEnd: null,
+  defaultEdgeMarkerStart: null,
   mindMapLayout: DEFAULT_MIND_MAP_LAYOUT,
   undoStack: [],
   redoStack: [],
@@ -713,6 +728,9 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
   setPendingImage: (url, label) =>
     set({ pendingImageUrl: url ?? null, pendingImageLabel: label ?? null }),
   setPendingEdgeType: (type) => set({ pendingEdgeType: type }),
+  setDefaultEdgeStrokeColor: (color) => set({ defaultEdgeStrokeColor: color }),
+  setDefaultEdgeStrokeWidth: (width) => set({ defaultEdgeStrokeWidth: width }),
+  setDefaultEdgeMarkers: (end, start) => set({ defaultEdgeMarkerEnd: end, defaultEdgeMarkerStart: start }),
   setPendingFitView: (value) => set({ pendingFitView: value }),
   setPendingFitViewNodeIds: (ids) => set({ pendingFitViewNodeIds: ids }),
   setPendingApplyLayout: (value: boolean) => set({ pendingApplyLayout: value }),

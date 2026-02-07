@@ -57,6 +57,8 @@ const edgeSchema = z.object({
     .object({
       label: z.string().optional(),
       connectionLength: z.number().optional(),
+      /** Edge stroke/border color (hex or rgb) to distinguish connection types. */
+      strokeColor: z.string().optional(),
     })
     .optional(),
 });
