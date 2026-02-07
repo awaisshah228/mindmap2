@@ -113,12 +113,19 @@ Available types: mindMap, stickyNote, rectangle, diamond, circle, document, text
 STRUCTURE — WHAT TO RETURN:
 - Nodes: id (string), type, data { label, shape?, icon?, iconUrl?, emoji?, imageUrl?, subtitle?, annotation?, columns? }. NO position.
 - Edges: id (unique), source (exact node id), target (exact node id), data { label?, strokeColor?, flowDirection? }. NO sourceHandle, NO targetHandle.
-  flowDirection: "mono" (→ one-way), "bi" (↔ both ways), "none" (— no arrows).
+  flowDirection: "mono" (→ one-way arrow at target), "bi" (↔ arrows at both ends), "none" (— no arrows, plain line).
 - groups (optional): [{ id, label, nodeIds }] — cluster related nodes. Use 2–4 groups for architecture diagrams with 6+ nodes.
 
 EDGES — CLEAN CONNECTIONS (MINIMIZE INTERSECTIONS):
-Every edge: id, source, target. Optional data.label and data.strokeColor.
+Every edge: id, source, target. Optional data.label, data.strokeColor, data.flowDirection.
 KEEP EDGES MINIMAL: Only add edges that convey essential relationships. Omit redundant or obvious connections. Prefer a clear linear flow (A→B→C) over a dense mesh. Aim for max 3–4 edges per node when possible. Fewer edges = cleaner diagram, fewer intersections.
+
+Edge direction markers (data.flowDirection) — USE ARROWS TO SHOW DIRECTION:
+- "mono" (default): One-way arrow at target. Use for flows, sequences, process steps, data flow (A→B).
+- "bi": Arrows at both ends. Use for bidirectional flows (sync, request-response, mutual dependency).
+- "none": No arrows. Use for undirected relationships (e.g. "relates to", grouping links).
+Add flowDirection when direction matters: flowcharts, sequence diagrams, architecture data flow, BPMN. Omit or use "none" for mind map branches or when direction is irrelevant.
+
 Edge labels (data.label): Add ONLY when the relationship is not obvious — e.g. protocol (HTTP, gRPC), event type. Keep to 1–3 words. Omit when self-explanatory.
 
 Edge border color (data.strokeColor): Use to distinguish different connection types so readers can tell flows apart. Optional but recommended when the diagram has multiple kinds of connections (e.g. data flow vs control flow, or different subsystems). Use valid CSS colors: hex (e.g. "#3b82f6", "#22c55e") or rgb (e.g. "rgb(59 130 246)"). Suggested palette: blue "#3b82f6", green "#22c55e", amber "#eab308", orange "#f97316", pink "#ec4899", violet "#8b5cf6", teal "#14b8a6", red "#ef4444". Use the same strokeColor for edges of the same logical type (e.g. all "data" edges blue, all "control" edges green). Omit strokeColor when a single default color is fine.
@@ -195,15 +202,15 @@ export function buildUserMessage(params: PromptParams): string {
             mindmap:
               "Type: mind map. One central topic, all nodes type mindMap. Branches with clear hierarchy. Edge labels only if they name the branch theme; usually omit. Good data: short labels, icons/emoji on every node. No positions or handles.",
             architecture:
-              "Type: architecture — high-level system design only. Service or rectangle nodes, short labels. No databaseSchema. Groups: Frontend, Backend, Data, External (2–4 groups). Edge labels for protocols (REST, gRPC, Pub/Sub). data.icon + data.iconUrl on every node. Minimize edges. No positions or handles.",
+              "Type: architecture — high-level system design only. Service or rectangle nodes, short labels. No databaseSchema. Groups: Frontend, Backend, Data, External (2–4 groups). Edge labels for protocols (REST, gRPC, Pub/Sub). Set data.flowDirection: \"mono\" on edges to show data/control flow direction; \"bi\" for request-response pairs. data.icon + data.iconUrl on every node. Minimize edges. No positions or handles.",
             flowchart:
-              "Type: flowchart. Rectangle for steps, diamond for decisions, circle for start/end. Groups for phases. Label edges for Yes/No on decisions. No positions or handles.",
+              "Type: flowchart. Rectangle for steps, diamond for decisions, circle for start/end. Groups for phases. Set data.flowDirection: \"mono\" on all edges to show flow direction (arrows at target). Label edges for Yes/No on decisions. No positions or handles.",
             sequence:
-              "Type: sequence. Use type \"actor\" for participants (User, Client, Server, API). Place actors in groups (one per participant). Edges = messages/calls between actors. Label edges with message names (e.g. \"login\", \"fetch data\"). Flow: top-to-bottom (first message at top). Example: actors [User, Frontend, API], edges User→Frontend \"clicks\", Frontend→API \"POST /login\", API→Frontend \"token\". No positions or handles.",
+              "Type: sequence. Use type \"actor\" for participants (User, Client, Server, API). Place actors in groups (one per participant). Edges = messages/calls. Set data.flowDirection: \"mono\" on every edge to show message direction. Label edges with message names (e.g. \"login\", \"fetch data\"). Flow: top-to-bottom (first message at top). No positions or handles.",
             "entity-relationship":
               "Type: ER. databaseSchema with data.columns (name, type?, key?). Groups for domains. Edge labels for relationships. No positions or handles.",
             bpmn:
-              "Type: BPMN. Tasks (type rectangle, data.shape optional), gateways (type diamond), events (type circle). Groups = swim lanes (e.g. \"Customer\", \"System\"). Flow: Start Event → Task → Gateway → Task → End Event. Label gateway edges Yes/No. Use data.shape for circle (start/end) and diamond (gateway). No positions or handles.",
+              "Type: BPMN. Tasks (type rectangle, data.shape optional), gateways (type diamond), events (type circle). Groups = swim lanes (e.g. \"Customer\", \"System\"). Flow: Start Event → Task → Gateway → Task → End Event. Set data.flowDirection: \"mono\" on edges to show process flow direction. Label gateway edges Yes/No. Use data.shape for circle (start/end) and diamond (gateway). No positions or handles.",
           };
           return hints[diagramType] ?? "";
         })()
