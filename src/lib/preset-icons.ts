@@ -79,4 +79,5 @@ const PRESET_PREVIEW_SLUGS: Record<string, string> = {
   "template-stripe-payment": "stripe",
   "template-simple-3-tier": "nginx",
   "template-ecommerce-sql": "postgresql",
+  "template-selection-grouping": "react",
 };

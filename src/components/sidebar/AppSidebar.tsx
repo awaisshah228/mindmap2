@@ -2,6 +2,7 @@
 
 import { useState, useRef, useEffect, useMemo } from "react";
 import type { Node, Edge } from "@xyflow/react";
+import { Position } from "@xyflow/react";
 import {
   FilePlus,
   Star,
@@ -22,8 +23,6 @@ import { useAuth } from "@clerk/nextjs";
 import { useCanvasStore, type Project } from "@/lib/store/canvas-store";
 import { CUSTOM_MARKER_IDS } from "@/components/edges/CustomMarkerDefs";
 import { applyNodesAndEdgesInChunks } from "@/lib/chunked-nodes";
-import { parseStreamingDiagramBuffer } from "@/lib/ai/streaming-json-parser";
-import { getLayoutedElements } from "@/lib/layout-engine";
 import { saveNow, createProjectApi, renameProjectApi, deleteProjectApi, duplicateProjectApi } from "@/lib/store/project-storage";
 
 interface AppSidebarProps {
@@ -106,162 +105,78 @@ export default function AppSidebar({ isOpen = true, onClose, isMobile }: AppSide
       .catch(() => setTemplates([]));
   }, []);
 
+  /** Apply template data to canvas (supports groups, uses positions as-is). */
+  const applyTemplateData = (data: { nodes: unknown[]; edges?: unknown[] }) => {
+    const rawNodes = data.nodes as {
+      id: string;
+      type?: string;
+      position?: { x: number; y: number };
+      data?: Record<string, unknown>;
+      parentId?: string;
+      extent?: string;
+      style?: Record<string, unknown>;
+      width?: number;
+      height?: number;
+      sourcePosition?: string;
+      targetPosition?: string;
+    }[];
+    const nodeIds = new Set(rawNodes.map((n) => n.id));
+    const nodes: Node[] = rawNodes.map((n) => ({
+      id: n.id,
+      type: (n.type as string) || "rectangle",
+      position: n.position ?? { x: 0, y: 0 },
+      data: n.data ?? {},
+      ...(n.style && { style: n.style }),
+      ...(n.width != null && { width: n.width }),
+      ...(n.height != null && { height: n.height }),
+      ...(n.parentId && nodeIds.has(n.parentId) && { parentId: n.parentId, extent: (n.extent as "parent") ?? "parent" }),
+      ...(n.sourcePosition && { sourcePosition: n.sourcePosition as Position }),
+      ...(n.targetPosition && { targetPosition: n.targetPosition as Position }),
+    }));
+    const rawEdges = (data.edges ?? []) as { id?: string; source: string; target: string; sourceHandle?: string; targetHandle?: string; data?: Record<string, unknown> }[];
+    const edges: Edge[] = rawEdges
+      .filter((e) => e && nodeIds.has(e.source) && nodeIds.has(e.target))
+      .map((e, i) => ({
+        id: e.id || `e-${e.source}-${e.target}-${i}`,
+        source: e.source,
+        target: e.target,
+        ...(e.sourceHandle && { sourceHandle: e.sourceHandle }),
+        ...(e.targetHandle && { targetHandle: e.targetHandle }),
+        ...(e.data && { data: e.data }),
+      }));
+    return { nodes, edges };
+  };
+
   const loadTemplate = async (template: TemplateItem) => {
     const { id, label } = template;
     setTemplatesLoading(true);
     try {
-      // Create project with template name first (works without sign-in; uses localStorage when not authenticated)
-      if (!activeProjectId) {
-        await createProjectApi(!!isSignedIn || persistenceSource === "cloud", label || "From template");
-      }
+      // Always create a new project with template name (works without sign-in)
+      await createProjectApi(!!isSignedIn || persistenceSource === "cloud", label || "From template");
 
-      // Try stream first (template has diagram data in DB)
-      let res = await fetch(`/api/diagrams/preset/stream?preset=${encodeURIComponent(id)}`, {
-        credentials: "omit",
-      });
-
-      // If 404 (no diagram data yet), generate via API and save to DB — works without sign-in
-      if (res.status === 404) {
+      // Fetch template data from API
+      let data: { nodes?: unknown[]; edges?: unknown[] } | null = null;
+      const presetRes = await fetch(`/api/diagrams/preset?preset=${encodeURIComponent(id)}`, { credentials: "omit" });
+      if (presetRes.ok) {
+        data = await presetRes.json();
+      } else if (presetRes.status === 404) {
         const genRes = await fetch(`/api/diagrams/preset/generate?preset=${encodeURIComponent(id)}`, {
           method: "POST",
           credentials: "omit",
         });
-        if (!genRes.ok) {
-          setTemplatesLoading(false);
-          return;
-        }
-        const genData = await genRes.json();
-        if (genData.nodes && genData.edges) {
-          const flatNodes = (genData.nodes as { id: string; type?: string; position?: { x: number; y: number }; data?: Record<string, unknown>; parentId?: string }[])
-            .filter((n: { type?: string }) => n.type !== "group")
-            .map((n: { id: string; type?: string; position?: { x: number; y: number }; data?: Record<string, unknown>; parentId?: string }) => ({
-              id: n.id,
-              type: (n.type as string) || "rectangle",
-              position: n.position ?? { x: 0, y: 0 },
-              data: n.data ?? {},
-              ...(n.parentId && { parentId: n.parentId, extent: "parent" as const }),
-            })) as Node[];
-          const nodeIds = new Set(flatNodes.map((n) => n.id));
-          const validEdges = (genData.edges as { id?: string; source: string; target: string; data?: Record<string, unknown> }[])
-            .filter((e: { source: string; target: string }) => e && nodeIds.has(e.source) && nodeIds.has(e.target))
-            .map((e: { id?: string; source: string; target: string; data?: Record<string, unknown> }, i: number) => ({
-              id: e.id || `e-${e.source}-${e.target}-${i}`,
-              source: e.source,
-              target: e.target,
-              ...(e.data && { data: e.data }),
-            })) as Edge[];
-          const direction = genData.layoutDirection === "vertical" ? ("TB" as const) : ("LR" as const);
-          const layoutResult = await getLayoutedElements(flatNodes, validEdges, direction, [160, 120], "elk-layered");
-          pushUndo();
-          await applyNodesAndEdgesInChunks(setNodes, setEdges, layoutResult.nodes, layoutResult.edges);
-          setHasUnsavedChanges(true);
-          saveNow();
-          setPendingFitView(true);
-          setPendingFitViewNodeIds(layoutResult.nodes.map((n) => n.id));
-          onClose?.();
-        }
-        setTemplatesLoading(false);
-        return;
+        if (genRes.ok) data = await genRes.json();
       }
 
-      if (!res.ok || !res.body) {
-        setTemplatesLoading(false);
-        return;
-      }
-      const nodeIdMap = new Map<string, string>();
-      let streamBuffer = "";
-      let streamedNodeCount = 0;
-      let streamedEdgeCount = 0;
-      const processChunk = (delta: string) => {
-        streamBuffer += delta;
-        const res = parseStreamingDiagramBuffer(streamBuffer);
-        for (let i = streamedNodeCount; i < res.nodes.length; i++) {
-          const raw = res.nodes[i] as { id: string; type?: string; parentId?: string; [k: string]: unknown };
-          if (raw.type === "group") continue;
-          const nid = raw.id;
-          nodeIdMap.set(nid, nid);
-          const node: Node = {
-            id: nid,
-            type: (raw.type as string) || "rectangle",
-            position: (raw.position as { x: number; y: number }) ?? { x: 0, y: 0 },
-            data: (raw.data as Record<string, unknown>) ?? {},
-            ...(raw.parentId && { parentId: raw.parentId as string, extent: "parent" as const }),
-          };
-          if (streamedNodeCount === 0 && i === 0) {
-            setNodes([node]);
-            setEdges([]);
-          } else {
-            setNodes((prev) => (prev.some((n) => n.id === node.id) ? prev : [...prev, node]));
-          }
-        }
-        streamedNodeCount = res.nodes.length;
-        for (let i = streamedEdgeCount; i < res.edges.length; i++) {
-          const raw = res.edges[i] as { id?: string; source: string; target: string; [k: string]: unknown };
-          const source = nodeIdMap.get(raw.source) ?? raw.source;
-          const target = nodeIdMap.get(raw.target) ?? raw.target;
-          const edge: Edge = {
-            id: (raw.id as string) || `e-${source}-${target}-${i}`,
-            source,
-            target,
-            ...(raw.data != null && typeof raw.data === "object" && !Array.isArray(raw.data)
-              ? { data: raw.data as Record<string, unknown> }
-              : {}),
-          };
-          setEdges((prev) => (prev.some((e) => e.id === edge.id) ? prev : [...prev, edge]));
-        }
-        streamedEdgeCount = res.edges.length;
-      };
-      const reader = res.body.getReader();
-      const decoder = new TextDecoder();
-      let full = "";
-      while (true) {
-        const { value, done } = await reader.read();
-        if (done) break;
-        if (value) {
-          const chunk = decoder.decode(value, { stream: true });
-          full += chunk;
-          processChunk(chunk);
-        }
-      }
-      try {
-        const data = JSON.parse(full.trim()) as { nodes?: unknown[]; edges?: unknown[]; layoutDirection?: string };
-        const nodes = Array.isArray(data.nodes) ? data.nodes : [];
-        const edges = Array.isArray(data.edges) ? data.edges : [];
-        const flatNodes = (nodes as { id: string; type?: string; position?: { x: number; y: number }; data?: Record<string, unknown>; parentId?: string }[])
-          .filter((n) => n.type !== "group")
-          .map((n) => ({
-            id: n.id,
-            type: (n.type as string) || "rectangle",
-            position: n.position ?? { x: 0, y: 0 },
-            data: n.data ?? {},
-            ...(n.parentId && { parentId: n.parentId, extent: "parent" as const }),
-          })) as Node[];
-        const nodeIds = new Set(flatNodes.map((n) => n.id));
-        const validEdges = (edges as { id?: string; source: string; target: string; data?: Record<string, unknown> }[])
-          .filter((e) => e && nodeIds.has(e.source) && nodeIds.has(e.target))
-          .map((e, i) => ({
-            id: e.id || `e-${e.source}-${e.target}-${i}`,
-            source: e.source,
-            target: e.target,
-            ...(e.data && { data: e.data }),
-          })) as Edge[];
-        const direction = data.layoutDirection === "vertical" ? ("TB" as const) : ("LR" as const);
-        const layoutResult = await getLayoutedElements(
-          flatNodes,
-          validEdges,
-          direction,
-          [160, 120],
-          "elk-layered"
-        );
-        await applyNodesAndEdgesInChunks(setNodes, setEdges, layoutResult.nodes, layoutResult.edges);
+      if (data && Array.isArray(data.nodes) && data.nodes.length > 0) {
+        const { nodes, edges } = applyTemplateData({ nodes: data.nodes, edges: data.edges ?? [] });
+        pushUndo();
+        await applyNodesAndEdgesInChunks(setNodes, setEdges, nodes, edges);
         setHasUnsavedChanges(true);
         saveNow();
         setPendingFitView(true);
-        setPendingFitViewNodeIds(layoutResult.nodes.map((n) => n.id));
-      } catch {
-        // keep streamed state if final parse fails
+        setPendingFitViewNodeIds(nodes.map((n) => n.id));
+        onClose?.();
       }
-      onClose?.();
     } finally {
       setTemplatesLoading(false);
     }

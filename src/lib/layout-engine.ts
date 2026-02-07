@@ -480,6 +480,54 @@ export function fitGroupBoundsAndCenterChildren(nodes: Node[]): Node[] {
   return result;
 }
 
+/**
+ * Resize each group to fit its children without moving children.
+ * Use when a child is dragged — parent expands to contain all children.
+ * Unlike fitGroupBoundsAndCenterChildren, this does NOT reposition children.
+ */
+export function resizeGroupToFitChildren(nodes: Node[]): Node[] {
+  const groupIds = new Set(nodes.filter((n) => n.type === "group").map((n) => n.id));
+  if (groupIds.size === 0) return nodes;
+
+  const result = nodes.map((node) => ({ ...node }));
+
+  for (const groupId of groupIds) {
+    const children = result.filter((n) => n.parentId === groupId);
+    if (children.length === 0) continue;
+
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    for (const child of children) {
+      const { width, height } = getNodeSize(child);
+      const x = child.position?.x ?? 0;
+      const y = child.position?.y ?? 0;
+      if (x < minX) minX = x;
+      if (y < minY) minY = y;
+      if (x + width > maxX) maxX = x + width;
+      if (y + height > maxY) maxY = y + height;
+    }
+
+    const contentW = Math.max(0, maxX - minX);
+    const contentH = Math.max(0, maxY - minY);
+    const groupW = Math.max(GROUP_NODE_DEFAULT_WIDTH, contentW + 2 * GROUP_PADDING);
+    const groupH = Math.max(GROUP_NODE_DEFAULT_HEIGHT, contentH + 2 * GROUP_PADDING + GROUP_HEADER_INSET);
+
+    for (let i = 0; i < result.length; i++) {
+      if (result[i].id === groupId) {
+        const groupNode = result[i];
+        result[i] = {
+          ...groupNode,
+          width: groupW,
+          height: groupH,
+          style: { ...(groupNode.style as object), width: groupW, height: groupH },
+        };
+        break;
+      }
+    }
+  }
+
+  return result;
+}
+
 /** Shift all nodes left so the leftmost node is at padding (root pulled back on x-axis). */
 function shiftLayoutLeft(nodes: Node[], leftPadding: number): Node[] {
   if (nodes.length === 0) return nodes;

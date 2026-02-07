@@ -24,7 +24,7 @@ import {
 import { KeyboardHandler } from "./KeyboardHandler";
 import { PresentationMode } from "@/components/panels/PresentationMode";
 import { HelperLines } from "./HelperLines";
-import { getLayoutedElements, type LayoutDirection } from "@/lib/layout-engine";
+import { getLayoutedElements, resizeGroupToFitChildren, type LayoutDirection } from "@/lib/layout-engine";
 import { useAutoLayout } from "@/hooks/useAutoLayout";
 import { resolveCollisions } from "@/lib/resolve-collisions";
 import { getHiddenNodeIds } from "@/lib/mindmap-utils";
@@ -64,6 +64,7 @@ import { MindMapLayoutProvider } from "@/contexts/MindMapLayoutContext";
 import { getDragPayload } from "@/lib/dnd-payload";
 import { AIContextMenu } from "@/components/panels/AIContextMenu";
 import { CanvasBottomBar } from "./CanvasBottomBar";
+import { MultiSelectToolbar } from "@/components/toolbar/MultiSelectToolbar";
 
 const EDGE_ANCHOR_SIZE = 12;
 const LAYOUT_EXCLUDED_TYPES = new Set(["freeDraw", "edgeAnchor"]);
@@ -495,8 +496,8 @@ export default function DiagramCanvas() {
             centerY <= g.flowPos.y + g.height + pad
         );
 
-        setNodes((nds) =>
-          nds.map((n) => {
+        setNodes((nds) => {
+          const updated = nds.map((n) => {
             if (n.id !== nodeId) return n;
             if (!containing || containing.node.id === nodeId || isDescendantOf(containing.node, droppedNode, currentNodes)) {
               if (droppedNode.parentId) {
@@ -510,8 +511,10 @@ export default function DiagramCanvas() {
               y: centerY - parentFlow.y - (Number(nodeH) || DEFAULT_NODE_HEIGHT) / 2,
             };
             return { ...n, parentId: containing.node.id, extent: "parent" as const, position: relativePosition };
-          })
-        );
+          });
+          // Resize parent group(s) to fit children when a child is moved (selection grouping behavior)
+          return resizeGroupToFitChildren(updated);
+        });
         // Persist positions to DB/localStorage after drag stop (store is updated via onNodesChange)
         setTimeout(() => saveNow(), 200);
       }, 0);
@@ -1719,6 +1722,7 @@ export default function DiagramCanvas() {
             className="!bg-gray-50"
           />
         )}
+        {!presentationMode && <MultiSelectToolbar />}
         {!presentationMode && (
           <MindMapLayoutPanel
             setNodes={setNodesWithStoreSync}

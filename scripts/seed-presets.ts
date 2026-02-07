@@ -8,6 +8,7 @@ import "dotenv/config";
 import { diagramPresets } from "../src/db/schema";
 import { eq } from "drizzle-orm";
 import { getPresetPreviewUrl } from "../src/lib/preset-icons";
+import { TEMPLATE_DIAGRAM_DATA } from "../src/lib/template-diagram-data";
 
 type PresetDef = {
   name: string;
@@ -184,25 +185,9 @@ const EXCALIDRAW_PRESETS: PresetDef[] = [
   { name: "excalidraw-sequence", label: "Excalidraw: Sequence", diagramType: "sequence", level: "sequence", prompt: "Create a sequence diagram: User, Frontend, API, Database. Show request/response arrows.", isTemplate: false, sortOrder: 204, targetCanvas: "excalidraw" },
 ];
 
-/** Templates for sidebar: prompt-only; first use generates via AI. */
+/** Templates for sidebar: Our website template only (hardcoded diagram data for instant load). */
 const TEMPLATES: PresetDef[] = [
-  { name: "template-our-website-ai-diagram-app", label: "Our website: AI Diagram App", description: "Next.js 16, React Flow, Excalidraw, Draw.io, LangChain, Clerk, S3, Neon", diagramType: "architecture", level: "high-level-system-design", prompt: "Architecture of this AI Diagram App: Next.js 16, React 19, React Flow (@xyflow/react), Excalidraw (@excalidraw/excalidraw), Draw.io (react-drawio). LangChain (langchain, @langchain/openai) for AI diagram generation. Clerk auth, S3 uploads, Neon PostgreSQL, Drizzle ORM, Vercel AI SDK. Show frontend (3 canvas modes), API routes, database, storage, AI (Vercel AI SDK + LangChain).", isTemplate: true, sortOrder: 0 },
-  { name: "template-ecommerce-full-scale", label: "E-commerce full system", diagramType: "architecture", level: "high-level-system-design", prompt: "Full-scale e-commerce: microservices, Kafka, S3, auth, DevOps.", isTemplate: true, sortOrder: 1 },
-  { name: "template-auth-oauth2-jwt-full", label: "OAuth2/JWT auth flow", diagramType: "flowchart", level: "flows", prompt: "OAuth2/JWT auth: login, tokens, refresh, validation.", isTemplate: true, sortOrder: 2 },
-  { name: "template-stripe-payment-advanced", label: "Stripe payment (advanced)", diagramType: "flowchart", level: "flows", prompt: "Stripe with idempotency and webhooks.", isTemplate: true, sortOrder: 3 },
-  { name: "template-kafka-event-flow", label: "Kafka event flow", diagramType: "architecture", level: "high-level-system-design", prompt: "Kafka topics and event flow between services.", isTemplate: true, sortOrder: 4 },
-  { name: "template-ci-cd-advanced", label: "CI/CD (GitHub Actions, K8s)", diagramType: "flowchart", level: "flows", prompt: "CI/CD with staging, approval, rollback.", isTemplate: true, sortOrder: 5 },
-  { name: "template-auth0-flow", label: "Auth0 login flow", diagramType: "flowchart", level: "high-level-flow", prompt: "", isTemplate: true, sortOrder: 6 },
-  { name: "template-stripe-payment", label: "Stripe payment flow", diagramType: "flowchart", level: "flows", prompt: "", isTemplate: true, sortOrder: 7 },
-  { name: "template-simple-3-tier", label: "3-tier architecture", diagramType: "architecture", level: "high-level-system-design", prompt: "", isTemplate: true, sortOrder: 8 },
-  { name: "template-ecommerce-sql", label: "eCommerce ER diagram", diagramType: "entity-relationship", level: "entity-relationship", prompt: "", isTemplate: true, sortOrder: 9 },
-  { name: "template-serverless-api", label: "Serverless API", diagramType: "architecture", level: "high-level-system-design", prompt: "", isTemplate: true, sortOrder: 10 },
-  { name: "template-api-request-sequence", label: "API request sequence", diagramType: "sequence", level: "sequence", prompt: "", isTemplate: true, sortOrder: 11 },
-  { name: "template-order-approval-bpmn", label: "Order approval (BPMN)", diagramType: "bpmn", level: "bpmn", prompt: "", isTemplate: true, sortOrder: 12 },
-  { name: "template-support-ticket-bpmn", label: "Support ticket (BPMN)", diagramType: "bpmn", level: "bpmn", prompt: "", isTemplate: true, sortOrder: 13 },
-  { name: "template-puppy-training", label: "Puppy training journey", diagramType: "flowchart", level: "high-level-flow", prompt: "", isTemplate: true, sortOrder: 14 },
-  { name: "template-twitter-data", label: "Twitter data pipeline", diagramType: "architecture", level: "high-level-system-design", prompt: "", isTemplate: true, sortOrder: 15 },
-  { name: "template-product-microservices", label: "Product microservices", diagramType: "architecture", level: "high-level-system-design", prompt: "", isTemplate: true, sortOrder: 16 },
+  { name: "template-our-website-ai-diagram-app", label: "Our website: AI Diagram App", description: "Next.js 16, React Flow, Excalidraw, Draw.io, LangChain, Clerk, S3, Neon", diagramType: "architecture", level: "high-level-system-design", prompt: "Architecture of this AI Diagram App.", isTemplate: true, sortOrder: 0 },
 ];
 
 async function main() {
@@ -244,6 +229,7 @@ async function main() {
     }
   }
   for (const t of TEMPLATES) {
+    const diagramData = TEMPLATE_DIAGRAM_DATA[t.name];
     const metadata = {
       name: t.name,
       label: t.label,
@@ -257,14 +243,19 @@ async function main() {
       previewImageUrl: getPresetPreviewUrl(t.name, t.label),
       updatedAt: new Date(),
     };
+    const nodes = diagramData?.nodes ?? [];
+    const edges = diagramData?.edges ?? [];
     const id = byName.get(t.name);
     if (id) {
-      await db.update(diagramPresets).set(metadata).where(eq(diagramPresets.id, id));
+      await db
+        .update(diagramPresets)
+        .set({ ...metadata, nodes, edges })
+        .where(eq(diagramPresets.id, id));
     } else {
       await db.insert(diagramPresets).values({
         ...metadata,
-        nodes: [],
-        edges: [],
+        nodes,
+        edges,
       });
     }
   }
