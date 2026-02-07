@@ -1,5 +1,17 @@
+import type { Metadata } from "next";
 import Link from "next/link";
 import { SignUpButton, SignedIn, SignedOut } from "@clerk/nextjs";
+
+export const metadata: Metadata = {
+  title: "Smart diagrams from text",
+  description:
+    "Generate architecture diagrams, mind maps, flowcharts, and Excalidraw sketches with AI. Use without signing in — data is saved in your browser. Sign in for cloud sync.",
+  openGraph: {
+    title: "Smart diagrams from text",
+    description:
+      "Generate architecture diagrams, mind maps, flowcharts, and Excalidraw sketches with AI. Try free, no sign-in required.",
+  },
+};
 
 export default function LandingPage() {
   return (
