@@ -54,11 +54,10 @@ export function buildExcalidrawGenerateUserMessage(prompt: string): string {
 
 Requirements:
 - Output a JSON array: shapes first, then arrows.
-- Use basic shapes (rectangle, diamond, ellipse) OR complex shapes (type "line" with points for polygons, type "freedraw" for hand-drawn paths).
-- Align everything properly. Group related shapes well. Make it easy to read and understand.
-- No overlap. Arrows: start.id and end.id must match shape ids. Use exitX/exitY and entryX/entryY for clean connections.
-- Use groupIds for related shapes. boundElements + containerId for text inside shapes.
-- Complete diagram: all components, every relationship has an arrow. Semantic colors. Arrow labels when helpful (Yes/No, REST, gRPC).`;
+- Every shape MUST have an id (e.g. "a", "b", "c"). Arrows connect via start: { id: "a" }, end: { id: "b" } — ids must exactly match.
+- Use rectangle, diamond, ellipse. Use label: { text: "..." } for text inside shapes.
+- Align everything properly. No overlap. Every arrow must have valid start.id and end.id.
+- Complete diagram: all relationships connected. Arrow labels when helpful (Yes/No, REST).`;
 }
 
 export function buildExcalidrawRefineUserMessage(prompt: string, existingElementsJson: string): string {

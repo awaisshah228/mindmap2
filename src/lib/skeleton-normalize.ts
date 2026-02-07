@@ -18,15 +18,25 @@ export function normalizeSkeletons(
     else shapes.push(el);
   }
   const shapeIds = new Set(shapes.map((s) => String(s.id ?? "")).filter(Boolean));
+  const shapeIdsLower = new Map<string, string>();
+  for (const id of shapeIds) {
+    shapeIdsLower.set(id.toLowerCase(), id);
+  }
   if (extraShapeIds) {
     for (const id of extraShapeIds) {
       const s = String(id);
       shapeIds.add(s);
       if (!s.startsWith("ex-")) shapeIds.add(`ex-${s}`);
+      shapeIdsLower.set(s.toLowerCase(), s);
     }
   }
-  const ensureId = (id: string): string =>
-    shapeIds.has(id) ? id : shapeIds.has(`ex-${id}`) ? `ex-${id}` : id.startsWith("ex-") ? id : id;
+  const ensureId = (id: string): string => {
+    if (shapeIds.has(id)) return id;
+    if (shapeIds.has(`ex-${id}`)) return `ex-${id}`;
+    const lower = id.toLowerCase();
+    if (shapeIdsLower.has(lower)) return shapeIdsLower.get(lower)!;
+    return id;
+  };
   for (const arr of arrows) {
     const start = arr.start as { id?: string } | undefined;
     const end = arr.end as { id?: string } | undefined;

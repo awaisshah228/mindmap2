@@ -7,7 +7,7 @@ import { Excalidraw } from "@excalidraw/excalidraw";
 import "@excalidraw/excalidraw/index.css";
 import { useCanvasStore } from "@/lib/store/canvas-store";
 import {
-  DEFAULT_LIBRARY_URLS,
+  getLibraryUrlsToLoad,
   getStoredLibraryItems,
   setStoredLibraryItems,
   clearLibrary,
@@ -36,7 +36,7 @@ function resolvablePromise<T>(): Promise<T> & { resolve: (v: T) => void; reject:
 async function loadLibraryItems(): Promise<unknown[]> {
   let items = getStoredLibraryItems();
   if (items.length === 0 && !hasDefaultsSeeded()) {
-    for (const url of DEFAULT_LIBRARY_URLS) {
+    for (const url of getLibraryUrlsToLoad()) {
       try {
         const res = await fetch(`/api/excalidraw-library?url=${encodeURIComponent(url)}`);
         if (res.ok) {
@@ -91,6 +91,7 @@ export default function ExcalidrawCanvas() {
     scrollToContent?: (target?: unknown, opts?: { fitToContent?: boolean }) => void;
   } | null>(null);
   const syncingFromStoreRef = useRef(false);
+  const lastAppliedElementCountRef = useRef<number>(0);
 
   /** Resolvable promise for libraryItems - resolve when API is ready and items loaded (Camelot pattern). */
   const libraryItemsPromiseRef = useRef<ReturnType<typeof resolvablePromise<unknown[]>> | null>(null);
@@ -317,13 +318,17 @@ export default function ExcalidrawCanvas() {
 
   // Sync excalidrawData from store to scene when it changes externally (e.g. AI generation).
   // initialData is only used on mount; updateScene is needed for programmatic updates.
+  // Only call scrollToContent when elements change (new AI content), not on user pan/zoom sync — otherwise pan/zoom gets reset.
   const applyStoreToScene = useCallback(() => {
     if (!excalidrawData?.elements?.length) return false;
     const api = apiRef.current;
     if (!api?.updateScene) return false;
     syncingFromStoreRef.current = true;
+    const elements = excalidrawData.elements;
+    const elementCount = elements.length;
+    const elementsChanged = elementCount !== lastAppliedElementCountRef.current;
+    lastAppliedElementCountRef.current = elementCount;
     try {
-      // Add image files first if present (required for image elements)
       const files = excalidrawData.files && typeof excalidrawData.files === "object" ? excalidrawData.files : undefined;
       if (files && Object.keys(files).length > 0 && api.addFiles) {
         api.addFiles(files);
@@ -334,11 +339,11 @@ export default function ExcalidrawCanvas() {
         typeof (appState as Record<string, unknown>).scrollY === "number" &&
         (appState as Record<string, unknown>).zoom != null;
       api.updateScene({
-        elements: excalidrawData.elements,
-        ...(hasViewState ? { appState } : {}),
+        elements,
+        ...(hasViewState && elementsChanged ? { appState } : {}),
       });
-      // Move viewport to show the diagram; user can pan/zoom freely after
-      if (typeof api.scrollToContent === "function") {
+      // Fit view only when elements changed (new AI content); skip when syncing user pan/zoom so they stay free
+      if (elementsChanged && typeof api.scrollToContent === "function") {
         api.scrollToContent(undefined, { fitToContent: true });
       }
       return true;

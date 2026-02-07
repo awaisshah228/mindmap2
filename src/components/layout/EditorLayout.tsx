@@ -100,6 +100,8 @@ export default function EditorLayout() {
   const setEdges = useCanvasStore((s) => s.setEdges);
   const setExcalidrawData = useCanvasStore((s) => s.setExcalidrawData);
   const excalidrawData = useCanvasStore((s) => s.excalidrawData);
+  const excalidrawSceneKey = useCanvasStore((s) => s.excalidrawSceneKey ?? 0);
+  const excalidrawGenerating = useCanvasStore((s) => s.excalidrawGenerating ?? false);
   const drawioData = useCanvasStore((s) => s.drawioData);
   const setDrawioData = useCanvasStore((s) => s.setDrawioData);
   const pushUndo = useCanvasStore((s) => s.pushUndo);
@@ -1022,7 +1024,14 @@ export default function EditorLayout() {
             )}
             {canvasMode === "excalidraw" && (
               <div className="flex-1 relative min-w-0">
-                <ExcalidrawCanvas />
+                {excalidrawGenerating ? (
+                  <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 bg-white dark:bg-gray-900">
+                    <Loader2 className="w-10 h-10 animate-spin text-violet-500" />
+                    <p className="text-sm text-gray-500 dark:text-gray-400">Generating diagram…</p>
+                  </div>
+                ) : (
+                  <ExcalidrawCanvas key={excalidrawSceneKey} />
+                )}
               </div>
             )}
             {canvasMode === "drawio" && (

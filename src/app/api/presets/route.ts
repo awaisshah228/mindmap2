@@ -34,8 +34,21 @@ export async function GET(req: Request) {
               ...(level ? [eq(diagramPresets.level, level)] : [])
             );
 
+    // Select only lightweight columns for list (no nodes, edges, drawioData, excalidrawData, mermaidData)
     const rows = await db
-      .select()
+      .select({
+        id: diagramPresets.id,
+        name: diagramPresets.name,
+        label: diagramPresets.label,
+        description: diagramPresets.description,
+        diagramType: diagramPresets.diagramType,
+        level: diagramPresets.level,
+        prompt: diagramPresets.prompt,
+        targetCanvas: diagramPresets.targetCanvas,
+        isTemplate: diagramPresets.isTemplate,
+        sortOrder: diagramPresets.sortOrder,
+        previewImageUrl: diagramPresets.previewImageUrl,
+      })
       .from(diagramPresets)
       .where(whereClause)
       .orderBy(asc(diagramPresets.sortOrder), asc(diagramPresets.name));
@@ -52,9 +65,6 @@ export async function GET(req: Request) {
       sortOrder: r.sortOrder,
       previewImageUrl: r.previewImageUrl ?? undefined,
       targetCanvas: r.targetCanvas ?? "reactflow",
-      hasNodes: Array.isArray(r.nodes) && r.nodes.length > 0,
-      hasDrawioData: Boolean(r.drawioData),
-      hasExcalidrawData: Boolean(r.excalidrawData),
     }));
     return NextResponse.json(items);
   } catch {

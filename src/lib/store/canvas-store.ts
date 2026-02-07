@@ -268,6 +268,12 @@ interface CanvasState {
   /** Current Excalidraw scene (for active project); syncs to project on save / switch. */
   excalidrawData: ExcalidrawScene | null;
   setExcalidrawData: (data: ExcalidrawScene | null) => void;
+  /** Increment to force Excalidraw canvas remount after AI generation (J2/Mermaid). */
+  excalidrawSceneKey: number;
+  incrementExcalidrawScene: () => void;
+  /** When true, AI is generating for Excalidraw; show loader instead of canvas until full response. */
+  excalidrawGenerating: boolean;
+  setExcalidrawGenerating: (v: boolean) => void;
   /** Pending library URL from #addLibrary redirect (libraries.excalidraw.com → editor). */
   pendingExcalidrawLibraryUrl: string | null;
   setPendingExcalidrawLibraryUrl: (url: string | null) => void;
@@ -434,6 +440,10 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
   setPersistenceSource: (source) => set({ persistenceSource: source }),
   excalidrawData: null,
   setExcalidrawData: (data) => set({ excalidrawData: data }),
+  excalidrawSceneKey: 0,
+  incrementExcalidrawScene: () => set((s) => ({ excalidrawSceneKey: (s.excalidrawSceneKey ?? 0) + 1 })),
+  excalidrawGenerating: false,
+  setExcalidrawGenerating: (v) => set({ excalidrawGenerating: v }),
   pendingExcalidrawLibraryUrl: null,
   setPendingExcalidrawLibraryUrl: (url) => set({ pendingExcalidrawLibraryUrl: url }),
   drawioData: null,

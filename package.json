@@ -12,6 +12,7 @@
     "db:push": "drizzle-kit push",
     "db:fix-columns": "tsx scripts/fix-db-columns.ts",
     "db:studio": "drizzle-kit studio",
+    "db:truncate-presets": "tsx scripts/truncate-presets.ts",
     "db:seed": "tsx scripts/seed-presets.ts",
     "db:seed:plans": "tsx scripts/seed-plans.ts",
     "seed": "tsx scripts/seed-presets.ts",

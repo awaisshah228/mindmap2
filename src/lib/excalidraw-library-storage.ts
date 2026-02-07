@@ -15,6 +15,18 @@ export const DEFAULT_LIBRARY_URLS = [
   "https://raw.githubusercontent.com/excalidraw/excalidraw-libraries/main/libraries/cloud/cloud.excalidrawlib",
 ] as const;
 
+/** Extra library URLs from env. Set NEXT_PUBLIC_EXCALIDRAW_EXTRA_LIBRARY_URLS (comma-separated) in .env.local to add your custom libraries. */
+function getExtraLibraryUrls(): string[] {
+  if (typeof process === "undefined" || !process.env) return [];
+  const raw = process.env.NEXT_PUBLIC_EXCALIDRAW_EXTRA_LIBRARY_URLS ?? "";
+  return raw.split(",").map((u) => u.trim()).filter(Boolean);
+}
+
+/** All library URLs to load: defaults + your custom libraries from env. */
+export function getLibraryUrlsToLoad(): string[] {
+  return [...DEFAULT_LIBRARY_URLS, ...getExtraLibraryUrls()];
+}
+
 /** Get stored library items from localStorage */
 export function getStoredLibraryItems(): unknown[] {
   if (typeof window === "undefined") return [];

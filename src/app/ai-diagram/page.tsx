@@ -28,7 +28,8 @@ import { excalidrawToDrawioXml } from "@/lib/excalidraw-to-drawio";
 import { validateAndFixXml } from "@/lib/drawio-utils";
 import { normalizeSkeletons } from "@/lib/skeleton-normalize";
 import { applyCloudIconMatching } from "@/lib/cloud-icon-match";
-import { prepareSkeletonForRender, renderExcalidrawFromSkeletons } from "@/lib/excalidraw-render";
+import { dslToExcalidraw } from "@/lib/j2-converter";
+import { computeFitViewAppState } from "@/lib/excalidraw-render";
 
 export const DIAGRAM_TYPE_OPTIONS = [
   { value: "auto", label: "Auto detect (default)" },
@@ -161,16 +162,24 @@ function AIDiagramPage() {
   const [presetLoading, setPresetLoading] = useState(false);
   /** Target canvas for AI generation: diagram (React Flow), excalidraw, or drawio. */
   const [targetCanvas, setTargetCanvas] = useState<"reactflow" | "excalidraw" | "drawio">("reactflow");
-  /** Excalidraw sub-mode: Mermaid (LLM→Mermaid→Excalidraw) or JSON (LLM→Excalidraw elements stream). */
-  const [excalidrawMode, setExcalidrawMode] = useState<"mermaid" | "json">("mermaid");
+  /** Excalidraw sub-mode: J2 DSL (default) or Mermaid. J2 DSL = create AI Excalidraw default. */
+  const [excalidrawMode, setExcalidrawMode] = useState<"mermaid" | "json">("json");
   /** Generate (new) vs Refine (extend existing) — for Excalidraw. */
   const [aiMode, setAiMode] = useState<"generate" | "refine">("generate");
+  /** Live LLM response text shown at bottom of AI panel during generation. */
+  const [streamingText, setStreamingText] = useState("");
+  const streamEndRef = useRef<HTMLDivElement>(null);
   const router = useRouter();
 
-  // Fetch presets when target canvas changes; show loader during fetch
+  // Auto-scroll streaming response to bottom as new content arrives
+  useEffect(() => {
+    streamEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [streamingText]);
+
+  // Fetch all presets once; filter by canvas mode in local state
   useEffect(() => {
     setPresetLoading(true);
-    const url = `/api/presets?targetCanvas=${targetCanvas}&templates=false`;
+    const url = `/api/presets?templates=false`;
     fetch(url, { credentials: "omit" })
       .then((r) => r.ok ? r.json() : [])
       .then(
@@ -196,11 +205,12 @@ function AIDiagramPage() {
       )
       .catch(() => setApiPresets([]))
       .finally(() => setPresetLoading(false));
-  }, [targetCanvas]);
+  }, []);
 
+  // Show only presets that match current canvas mode (filter in local state)
   const presetOptions: PresetOption[] = [
     { value: "none", label: "None (default)", prompt: "" },
-    ...apiPresets,
+    ...apiPresets.filter((p) => p.targetCanvas === targetCanvas),
   ];
 
   const searchParams = useSearchParams();
@@ -227,6 +237,8 @@ function AIDiagramPage() {
     canvasMode,
     setCanvasMode,
     setExcalidrawData,
+    incrementExcalidrawScene,
+    setExcalidrawGenerating,
     excalidrawData,
     setDrawioData,
     setHasUnsavedChanges,
@@ -237,7 +249,7 @@ function AIDiagramPage() {
     setTargetCanvas(canvasMode);
   }, [canvasMode]);
 
-  // Reset preset when target canvas changes (preset options differ per canvas)
+  // Reset preset when target canvas changes (filtered options differ per canvas)
   const prevTargetCanvas = useRef<"reactflow" | "excalidraw" | "drawio">(targetCanvas);
   useEffect(() => {
     if (prevTargetCanvas.current !== targetCanvas) {
@@ -245,6 +257,12 @@ function AIDiagramPage() {
       setPreset("none");
     }
   }, [targetCanvas]);
+
+  // If current preset is not in the filtered list (wrong canvas), reset to none
+  const presetInList = preset === "none" || apiPresets.some((p) => p.value === preset && p.targetCanvas === targetCanvas);
+  useEffect(() => {
+    if (preset !== "none" && !presetInList) setPreset("none");
+  }, [preset, presetInList]);
 
   // Initialize from URL when redirected from AI sidebar or other entry points
   useEffect(() => {
@@ -291,6 +309,7 @@ function AIDiagramPage() {
     if (!effectivePrompt.trim()) return;
     setLoading(true);
     setError(null);
+    setStreamingText("");
     const effectiveTarget =
       preset !== "none" && selectedPreset?.targetCanvas
         ? selectedPreset.targetCanvas
@@ -384,7 +403,10 @@ function AIDiagramPage() {
         const reader = res.body.getReader();
         while (true) {
           const { done, value } = await reader.read();
-          if (value) streamBuffer += decoder.decode(value, { stream: true });
+          if (value) {
+            streamBuffer += decoder.decode(value, { stream: true });
+            setStreamingText(streamBuffer);
+          }
           const parsed = parseStreamingElementsBuffer(streamBuffer);
           const newCount = parsed.elements.length - lastElementCount;
           const shouldUpdate = parsed.elements.length > lastElementCount && (newCount >= STREAM_BATCH_SIZE || done);
@@ -437,7 +459,8 @@ function AIDiagramPage() {
           setError("signup-or-key");
           return;
         }
-        setCanvasMode("excalidraw"); // Switch canvas immediately so it mounts before data arrives
+        setCanvasMode("excalidraw");
+        setExcalidrawGenerating(true); // Show loader until full response
         const isRefine = aiMode === "refine";
         const existingEls = excalidrawData?.elements;
         const hasExisting = Array.isArray(existingEls) && existingEls.length > 0;
@@ -467,6 +490,7 @@ function AIDiagramPage() {
           }),
         });
         if (!res.ok) {
+          setExcalidrawGenerating(false);
           const errData = await res.json().catch(() => ({}));
           throw new Error(errData?.error ?? "Failed to generate Mermaid diagram");
         }
@@ -476,13 +500,17 @@ function AIDiagramPage() {
         const reader = res.body.getReader();
         while (true) {
           const { done, value } = await reader.read();
-          if (value) streamBuffer += decoder.decode(value, { stream: true });
+          if (value) {
+            streamBuffer += decoder.decode(value, { stream: true });
+            setStreamingText(streamBuffer);
+          }
           if (done) break;
         }
         let mermaid = streamBuffer.trim();
         const mermaidMatch = mermaid.match(/```(?:mermaid)?\s*([\s\S]*?)```/);
         if (mermaidMatch) mermaid = mermaidMatch[1].trim();
         if (!mermaid) {
+          setExcalidrawGenerating(false);
           setError("AI did not return valid Mermaid code. Try a different prompt.");
           setLoading(false);
           return;
@@ -493,17 +521,20 @@ function AIDiagramPage() {
           themeVariables: { fontSize: "16px" },
         });
         if (!skeletonElements?.length) {
+          setExcalidrawGenerating(false);
           setError("Mermaid could not be converted. Try flowchart, sequence, or class diagram syntax.");
           setLoading(false);
           return;
         }
-        const elements = convertToExcalidrawElements(skeletonElements as never[]);
+        const elements = convertToExcalidrawElements(skeletonElements as never[], { regenerateIds: false });
         const viewport = typeof window !== "undefined" ? { width: window.innerWidth, height: window.innerHeight } : undefined;
         const { computeFitViewAppState } = await import("@/lib/excalidraw-render");
         const fitState = computeFitViewAppState(elements, viewport);
         const appState = { scrollX: fitState.scrollX, scrollY: fitState.scrollY, zoom: fitState.zoom };
         const excalidrawPayload = { elements, appState, files: files ?? undefined };
         setExcalidrawData(excalidrawPayload);
+        incrementExcalidrawScene(); // Remount canvas with full parsed data
+        setExcalidrawGenerating(false);
         setCanvasMode("excalidraw");
         setHasUnsavedChanges(true);
         setLastAIPrompt(effectivePrompt.trim());
@@ -525,17 +556,20 @@ function AIDiagramPage() {
         recordPromptHistory({ prompt: effectivePrompt.trim(), targetCanvas: "excalidraw" });
         setPendingFitView(true);
         setLoading(false);
+        // Navigate to editor and close AI panel when Excalidraw (Mermaid) generation completes
+        router.push("/editor");
         return;
       }
 
-      // ─── Excalidraw (JSON mode): streaming Excalidraw elements ───
+      // ─── Excalidraw (J2 DSL mode): streaming DSL → j2-converter → Excalidraw ───
       if (effectiveTarget === "excalidraw" && excalidrawMode === "json") {
         if (!llmApiKey && !isSignedIn) {
           setLoading(false);
           setError("signup-or-key");
           return;
         }
-        setCanvasMode("excalidraw"); // Switch canvas immediately so it mounts before data arrives
+        setCanvasMode("excalidraw");
+        setExcalidrawGenerating(true); // Show loader until full response
         const isRefine = aiMode === "refine";
         const existingEls = excalidrawData?.elements;
         const hasExisting = Array.isArray(existingEls) && existingEls.length > 0;
@@ -555,47 +589,42 @@ function AIDiagramPage() {
           }),
         });
         if (!res.ok) {
+          setExcalidrawGenerating(false);
           const errData = await res.json().catch(() => ({}));
           throw new Error(errData?.error ?? "Failed to generate Excalidraw diagram");
         }
         if (!res.body) throw new Error("No response body");
         const decoder = new TextDecoder();
         let streamBuffer = "";
-        let lastElementCount = 0;
-        const STREAM_BATCH_SIZE = 5;
-        const { convertToExcalidrawElements } = await import("@excalidraw/excalidraw");
         const reader = res.body.getReader();
         while (true) {
           const { done, value } = await reader.read();
-          if (value) streamBuffer += decoder.decode(value, { stream: true });
-          const parsed = parseStreamingElementsBuffer(streamBuffer);
-          const newCount = parsed.elements.length - lastElementCount;
-          const shouldUpdate = parsed.elements.length > lastElementCount && (newCount >= STREAM_BATCH_SIZE || done);
-          if (shouldUpdate) {
-            const prepared = prepareSkeletonForRender(parsed.elements);
-            const normalized = normalizeSkeletons(prepared);
-            const elements = convertToExcalidrawElements(normalized as never[], { regenerateIds: false });
-            setExcalidrawData({ elements, appState: {} });
-            setCanvasMode("excalidraw");
-            lastElementCount = parsed.elements.length;
+          if (value) {
+            streamBuffer += decoder.decode(value, { stream: true });
+            setStreamingText(streamBuffer);
           }
           if (done) break;
         }
         const finalParsed = parseStreamingElementsBuffer(streamBuffer);
         if (finalParsed.elements.length === 0) {
+          setExcalidrawGenerating(false);
           setError("AI returned no elements. Try a different prompt.");
           setLoading(false);
           return;
         }
+        const elements = dslToExcalidraw(finalParsed.elements);
         const viewport = typeof window !== "undefined" ? { width: window.innerWidth, height: window.innerHeight } : undefined;
-        const { elements, appState } = await renderExcalidrawFromSkeletons(finalParsed.elements, { viewport });
+        const fitState = computeFitViewAppState(elements, viewport);
+        const appState = { scrollX: fitState.scrollX, scrollY: fitState.scrollY, zoom: fitState.zoom };
         const excalidrawPayload = { elements, appState };
         setExcalidrawData(excalidrawPayload);
+        incrementExcalidrawScene(); // Remount canvas with full parsed data
+        setExcalidrawGenerating(false);
         setCanvasMode("excalidraw");
         setHasUnsavedChanges(true);
         setLastAIPrompt(effectivePrompt.trim());
         setLastAIDiagram(null);
-        // Save generated diagram to preset in DB for future loads (JSON format)
+        // Save generated diagram to preset in DB for future loads (J2/DSL format)
         if (preset !== "none" && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(preset)) {
           fetch(`/api/presets/${preset}`, {
             method: "PATCH",
@@ -611,6 +640,8 @@ function AIDiagramPage() {
         recordPromptHistory({ prompt: effectivePrompt.trim(), targetCanvas: "excalidraw" });
         setPendingFitView(true);
         setLoading(false);
+        // Navigate to editor and close AI panel when Excalidraw (J2 DSL) generation completes
+        router.push("/editor");
         return;
       }
 
@@ -816,7 +847,10 @@ function AIDiagramPage() {
             baseUrl: llmBaseUrl || undefined,
             systemPrompt,
             userMessage,
-            onChunk: processStreamChunk,
+            onChunk: (delta) => {
+              processStreamChunk(delta);
+              setStreamingText((prev) => prev + delta);
+            },
           });
         } else {
           // Signed in, no API key: use server Langchain; response is streamed and processed in chunks.
@@ -858,6 +892,7 @@ function AIDiagramPage() {
             if (value) {
               const chunk = decoder.decode(value, { stream: true });
               full += chunk;
+              setStreamingText(full);
               processStreamChunk(chunk);
             }
           }
@@ -1278,6 +1313,7 @@ function AIDiagramPage() {
       // Fit diagram into view. Stay on ai-diagram page; user closes to go back to editor.
       setPendingFitView(true);
     } catch (err) {
+      useCanvasStore.getState().setExcalidrawGenerating(false);
       const msg = err instanceof Error ? err.message : "Something went wrong";
       // For API-key-related errors, provide a friendlier message
       if (msg.toLowerCase().includes("api key") || msg.toLowerCase().includes("no api key")) {
@@ -1287,6 +1323,7 @@ function AIDiagramPage() {
       }
     } finally {
       setLoading(false);
+      setStreamingText("");
     }
   };
 
@@ -1399,7 +1436,7 @@ function AIDiagramPage() {
                     }`}
                     disabled={loading}
                   >
-                    JSON
+                    J2 DSL
                   </button>
                   <button
                     type="button"
@@ -1416,7 +1453,7 @@ function AIDiagramPage() {
                 </div>
                 <p className="text-[10px] text-gray-500">
                   {excalidrawMode === "json"
-                    ? "LLM generates Excalidraw elements (shapes, arrows) directly."
+                    ? "LLM generates J2 DSL (compact format) → converted to Excalidraw."
                     : "LLM generates Mermaid code (flowchart, sequence, class) → converted to Excalidraw."}
                 </p>
               </div>
@@ -1536,7 +1573,7 @@ function AIDiagramPage() {
               <p className="text-[11px] text-violet-700 dark:text-violet-300 bg-violet-50 dark:bg-violet-900/20 rounded-lg px-2.5 py-1.5">
                 {excalidrawMode === "mermaid"
                   ? "Mermaid: LLM generates Mermaid code → converted to Excalidraw. Prompts: &quot;user login flowchart&quot;, &quot;API request sequence&quot;, &quot;class diagram for e-commerce&quot;."
-                  : "JSON: LLM generates shapes and arrows directly. Prompts: &quot;flowchart for user login&quot;, &quot;architecture diagram&quot;, &quot;mind map about planning&quot;."}
+                  : "J2 DSL: LLM generates compact DSL (rect, ellipse, startBind/endBind) → converted to Excalidraw. Prompts: &quot;flowchart for user login&quot;, &quot;architecture diagram&quot;, &quot;system design&quot;."}
               </p>
             )}
             {targetCanvas === "drawio" && (
@@ -1562,6 +1599,18 @@ function AIDiagramPage() {
             />
             {/* Current model + API key status */}
             <ModelStatusBadge />
+            {/* Live LLM response at bottom of panel during generation */}
+            {(loading || streamingText) && (
+              <div className="flex flex-col gap-1 shrink-0">
+                <p className="text-[11px] font-semibold text-gray-500">
+                  {streamingText ? "Receiving response…" : "Waiting for response…"}
+                </p>
+                <div className="bg-gray-900 text-gray-100 rounded-lg p-2.5 max-h-36 overflow-y-auto font-mono text-[11px] whitespace-pre-wrap break-words">
+                  {streamingText || "\u00A0"}
+                  <div ref={streamEndRef} />
+                </div>
+              </div>
+            )}
             {error && (
               error === "signup-or-key" ? (
                 <div className="flex flex-col gap-2 px-2.5 py-2 rounded-lg bg-amber-50 border border-amber-200 text-amber-800 text-xs">

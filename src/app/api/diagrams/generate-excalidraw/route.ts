@@ -13,10 +13,10 @@ import { getAuthUserId } from "@/lib/auth";
 import { isAdmin } from "@/lib/admin";
 import { canUseCredits, deductCredits } from "@/lib/credits";
 import {
-  getExcalidrawGenerateSystemPrompt,
-  buildExcalidrawGenerateUserMessage,
-  buildExcalidrawRefineUserMessage,
-} from "@/lib/ai/excalidraw-generate-prompt";
+  getDSLGenerateSystemPrompt,
+  buildDSLGenerateUserMessage,
+  buildDSLRefineUserMessage,
+} from "@/lib/ai/dsl-generate-prompt";
 import { detectExcalidrawLibraryFromPrompt, loadExcalidrawLibrary } from "@/lib/excalidraw-library";
 import {
   getCacheKey,
@@ -140,11 +140,11 @@ export async function POST(req: NextRequest) {
         ? await loadExcalidrawLibrary(detectedLib)
         : null;
     const libraryContext = [systemDesignContext, extraContext].filter(Boolean).join("\n\n---\n\n") || null;
-    const systemPrompt = getExcalidrawGenerateSystemPrompt(libraryContext ?? undefined);
+    const systemPrompt = getDSLGenerateSystemPrompt(libraryContext ?? undefined);
     const userMessage =
       refine && Array.isArray(existingElements) && existingElements.length > 0
-        ? buildExcalidrawRefineUserMessage(prompt.trim(), JSON.stringify(existingElements))
-        : buildExcalidrawGenerateUserMessage(prompt.trim());
+        ? buildDSLRefineUserMessage(prompt.trim(), JSON.stringify(existingElements))
+        : buildDSLGenerateUserMessage(prompt.trim());
 
     const llm = new ChatOpenAI({
       model: effectiveModel,
