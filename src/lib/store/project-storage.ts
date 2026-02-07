@@ -9,7 +9,7 @@
 
 import { useEffect, useRef } from "react";
 import { useAuth } from "@clerk/nextjs";
-import { useCanvasStore, DEFAULT_MIND_MAP_LAYOUT, type Project, type SavedLayout, type ExcalidrawScene } from "./canvas-store";
+import { useCanvasStore, type Project, type SavedLayout, type ExcalidrawScene } from "./canvas-store";
 import type { Node, Edge } from "@xyflow/react";
 import { applyNodesAndEdgesInChunks } from "@/lib/chunked-nodes";
 import {
@@ -413,22 +413,15 @@ function migrateLegacy(): Project | null {
 
 // ─── Default mind-map template for brand-new projects ─────────────────
 
-const MIND_MAP_NODE_WIDTH = 170;
-const INITIAL_CANVAS_PADDING = 100;
-
+/** Hardcoded initial mind map: nodes and edges used for new projects / default template. */
 function getDefaultMindMapTemplate(): { nodes: Node[]; edges: Edge[] } {
-  const { spacingX, spacingY } = DEFAULT_MIND_MAP_LAYOUT;
-  const pad = INITIAL_CANVAS_PADDING;
-  const layer1X = pad + MIND_MAP_NODE_WIDTH + spacingX;
-  const layer2X = layer1X + MIND_MAP_NODE_WIDTH + spacingX;
-
   const nodes: Node[] = [
-    { id: "mind-root", type: "mindMap", position: { x: pad, y: pad }, data: { label: "Mind Map Overview" } },
-    { id: "mind-goals", type: "mindMap", position: { x: layer1X, y: pad - spacingY }, data: { label: "Goals" } },
-    { id: "mind-tasks", type: "mindMap", position: { x: layer1X, y: pad }, data: { label: "Key Tasks" } },
-    { id: "mind-stakeholders", type: "mindMap", position: { x: layer1X, y: pad + spacingY }, data: { label: "Stakeholders" } },
-    { id: "mind-task-ideas", type: "mindMap", position: { x: layer2X, y: pad - spacingY }, data: { label: "Milestones" } },
-    { id: "mind-task-next", type: "mindMap", position: { x: layer2X, y: pad + spacingY }, data: { label: "Next Actions" } },
+    { id: "mind-root", type: "mindMap", position: { x: 80, y: 148 }, data: { label: "Mind Map Overview" } },
+    { id: "mind-goals", type: "mindMap", position: { x: 464.5, y: 20 }, data: { label: "Goals" } },
+    { id: "mind-tasks", type: "mindMap", position: { x: 451, y: 150 }, data: { label: "Key Tasks" } },
+    { id: "mind-stakeholders", type: "mindMap", position: { x: 442, y: 276 }, data: { label: "Stakeholders" } },
+    { id: "mind-task-ideas", type: "mindMap", position: { x: 767.5, y: 22 }, data: { label: "Milestones" } },
+    { id: "mind-task-next", type: "mindMap", position: { x: 762, y: 278 }, data: { label: "Next Actions" } },
   ];
 
   const edgeBase = { type: "labeledConnector" as const, data: { connectorType: "default" } };
