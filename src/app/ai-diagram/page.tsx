@@ -370,11 +370,8 @@ function AIDiagramPage() {
         );
         if (presetRes.ok) {
           data = await presetRes.json();
-        } else if (presetRes.status === 404) {
-          setLoading(false);
-          setError("No saved diagram for this preset. Choose \"Generate with AI\" to create it.");
-          return;
         }
+        // If preset not in DB (404 or !ok), leave data null and fall through to AI generation with preset prompt
         if (data) {
           if (data.drawioData) {
             setDrawioData(data.drawioData);
@@ -736,11 +733,7 @@ function AIDiagramPage() {
           `/api/diagrams/preset/stream?preset=${encodeURIComponent(preset)}`,
           { credentials: "omit" }
         );
-        if (!presetRes.ok || !presetRes.body) {
-          setLoading(false);
-          setError("No saved diagram for this preset. Choose \"Generate with AI\" to create it.");
-          return;
-        } else {
+        if (presetRes.ok && presetRes.body) {
           const MIN_NODES_PER_CHUNK_PRESET = 2;
           let full = "";
           let streamBuffer = "";
@@ -910,12 +903,10 @@ function AIDiagramPage() {
             setLoading(false);
             return;
           }
-          // If preset has no pre-built diagram, show error when loading saved only
+          // If preset has no pre-built diagram (empty nodes), fall through to AI with preset prompt
           const presetNodes = parsed?.nodes;
           if (Array.isArray(presetNodes) && presetNodes.length === 0) {
-            setLoading(false);
-            setError("No saved diagram for this preset. Choose \"Generate with AI\" to create it.");
-            return;
+            parsed = null;
           }
         }
       }
