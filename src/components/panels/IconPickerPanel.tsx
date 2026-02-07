@@ -10,6 +10,7 @@ import {
   getIconById,
   type IconDefinition,
 } from "@/lib/icon-registry";
+import { getLocalUserIcons, addLocalUserIcon } from "@/lib/local-user-icons";
 
 interface IconPickerPanelProps {
   value: string | null | undefined;
@@ -30,7 +31,12 @@ export function IconPickerPanel({
 }: IconPickerPanelProps) {
   const [open, setOpen] = useState(false);
   const [search, setSearch] = useState("");
+  const [localLibrary, setLocalLibrary] = useState<{ key: string; url: string; filename?: string }[]>([]);
   const fileInputRef = React.useRef<HTMLInputElement>(null);
+
+  React.useEffect(() => {
+    if (open) setLocalLibrary(getLocalUserIcons());
+  }, [open]);
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -39,6 +45,8 @@ export function IconPickerPanel({
     const reader = new FileReader();
     reader.onload = () => {
       const dataUrl = reader.result as string;
+      addLocalUserIcon({ url: dataUrl, filename: file.name, mimeType: file.type });
+      setLocalLibrary(getLocalUserIcons());
       onCustomIconChange(dataUrl);
       setOpen(false);
     };
@@ -93,7 +101,7 @@ export function IconPickerPanel({
           </div>
           {onCustomIconChange != null && (
             <div className="p-2 border-b border-gray-100">
-              <div className="text-xs font-medium text-gray-500 px-1 py-1.5">Custom icon</div>
+              <div className="text-xs font-medium text-gray-500 px-1 py-1.5">Custom icon / Upload</div>
               <div className="flex items-center gap-2">
                 <input
                   ref={fileInputRef}
@@ -122,6 +130,24 @@ export function IconPickerPanel({
               {customIcon && (
                 <div className="mt-2 flex justify-center">
                   <img src={customIcon} alt="Custom" className="w-8 h-8 object-contain rounded border border-gray-200" />
+                </div>
+              )}
+              {localLibrary.length > 0 && (
+                <div className="mt-2">
+                  <div className="text-[11px] font-medium text-gray-500 px-1 py-1">My library</div>
+                  <div className="grid grid-cols-5 gap-1 max-h-20 overflow-y-auto">
+                    {localLibrary.map((item) => (
+                      <button
+                        key={item.key}
+                        type="button"
+                        onClick={() => { onCustomIconChange(item.url); setOpen(false); }}
+                        className="aspect-square flex items-center justify-center rounded border border-gray-200 hover:bg-gray-50 overflow-hidden p-0.5"
+                        title={item.filename ?? "Image"}
+                      >
+                        <img src={item.url} alt="" className="w-full h-full object-contain" />
+                      </button>
+                    ))}
+                  </div>
                 </div>
               )}
             </div>

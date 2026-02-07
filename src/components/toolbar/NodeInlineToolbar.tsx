@@ -34,6 +34,7 @@ import {
   AlignVerticalJustifyStart,
   AlignVerticalJustifyCenter,
   AlignVerticalJustifyEnd,
+  Image,
 } from "lucide-react";
 import type { Node } from "@xyflow/react";
 import { cn } from "@/lib/utils";
@@ -48,6 +49,7 @@ const SHAPE_COLOR_PALETTE = [
   "#86efac", "#93c5fd", "#f9a8d4", "#c4b5fd", "#fcd34d", "#4ade80",
 ];
 import { IconPickerPanel } from "@/components/panels/IconPickerPanel";
+import { IconImageReplacerPanel } from "@/components/panels/IconImageReplacerPanel";
 import type { FontSize, TextAlign, TextVerticalAlign } from "@/components/nodes/EditableNodeContent";
 import type { ExtraHandle } from "@/components/nodes/BaseNode";
 
@@ -84,7 +86,8 @@ export function NodeInlineToolbar({ nodeId, selected = false }: NodeInlineToolba
   const isShapeNode = SHAPE_NODE_TYPES.includes(nodeType);
   const hasColorPicker = ["mindMap", "stickyNote", "text", "rectangle", "diamond", "circle", "document", "table"].includes(nodeType);
   const hasShapePicker = isShapeNode;
-  const hasIconPicker = ["rectangle", "diamond", "circle", "document", "mindMap", "stickyNote", "text"].includes(nodeType);
+  const hasIconPicker = ["rectangle", "diamond", "circle", "document", "mindMap", "stickyNote", "text", "service", "queue", "actor", "databaseSchema", "group"].includes(nodeType);
+  const hasIconImageReplacer = nodeType === "icon" || nodeType === "image";
   const isTableNode = nodeType === "table";
   // When 2+ nodes selected (e.g. Ctrl+A), hide toolbar for all — no toolbar even on hover. Single selection or none: show on hover or when this node is selected.
   const selectedCount = getNodes().filter((n) => n.selected).length;
@@ -92,6 +95,10 @@ export function NodeInlineToolbar({ nodeId, selected = false }: NodeInlineToolba
   const currentShape = (node?.data?.shape as ShapeType) ?? "rectangle";
   const currentIcon = (node?.data?.icon as string) ?? null;
   const currentCustomIcon = (node?.data?.customIcon as string) ?? null;
+  const currentIconId = (node?.data?.iconId as string) ?? null;
+  const currentEmoji = (node?.data?.emoji as string) ?? null;
+  const currentIconUrl = (node?.data?.iconUrl as string) ?? null;
+  const currentImageUrl = (node?.data?.imageUrl as string) ?? (node?.data?.image as string) ?? null;
 
   const handleDuplicate = () => {
     const node = getNode(nodeId);
@@ -207,11 +214,84 @@ export function NodeInlineToolbar({ nodeId, selected = false }: NodeInlineToolba
   };
 
   const handleIconChange = (iconId: string | null) => {
-    if (hasIconPicker) { pushUndo(); updateNodeData(nodeId, { icon: iconId ?? undefined }); }
+    if (hasIconPicker) {
+      pushUndo();
+      updateNodeData(nodeId, {
+        icon: iconId ?? undefined,
+        customIcon: undefined,
+        iconUrl: undefined,
+      });
+    }
   };
 
   const handleCustomIconChange = (dataUrl: string | null) => {
-    if (hasIconPicker) { pushUndo(); updateNodeData(nodeId, { customIcon: dataUrl ?? undefined }); }
+    if (hasIconPicker) {
+      pushUndo();
+      updateNodeData(nodeId, {
+        customIcon: dataUrl ?? undefined,
+        icon: undefined,
+        iconUrl: undefined,
+      });
+    }
+  };
+
+  // Icon/Image node replacer handlers
+  const handleIconNodeIconIdChange = (id: string | null) => {
+    if (nodeType === "icon") {
+      pushUndo();
+      const cleared = {
+        iconId: id ?? undefined,
+        emoji: undefined,
+        customIcon: undefined,
+        iconUrl: undefined,
+      };
+      updateNodeData(nodeId, cleared);
+    }
+  };
+  const handleIconNodeEmojiChange = (emojiVal: string | null) => {
+    if (nodeType === "icon") {
+      pushUndo();
+      updateNodeData(nodeId, {
+        emoji: emojiVal ?? undefined,
+        iconId: undefined,
+        customIcon: undefined,
+        iconUrl: undefined,
+      });
+    }
+  };
+  const handleIconNodeCustomIconChange = (dataUrl: string | null) => {
+    if (nodeType === "icon") {
+      pushUndo();
+      updateNodeData(nodeId, {
+        customIcon: dataUrl ?? undefined,
+        iconId: undefined,
+        emoji: undefined,
+        iconUrl: undefined,
+      });
+    }
+  };
+  const handleIconNodeIconUrlChange = (url: string | null) => {
+    if (nodeType === "icon") {
+      pushUndo();
+      updateNodeData(nodeId, {
+        iconUrl: url ?? undefined,
+        iconId: undefined,
+        emoji: undefined,
+        customIcon: undefined,
+      });
+    }
+  };
+  const handleImageNodeUrlChange = (url: string | null) => {
+    if (nodeType === "image") {
+      pushUndo();
+      updateNodeData(nodeId, { imageUrl: url ?? undefined, image: url ?? undefined });
+    }
+  };
+  const handleImageNodeUpload = (dataUrl: string) => {
+    if (nodeType === "image") {
+      pushUndo();
+      updateNodeData(nodeId, { imageUrl: dataUrl, image: dataUrl });
+    }
   };
 
   const tableRows = (node?.data?.tableRows as number) ?? 3;
@@ -243,10 +323,12 @@ export function NodeInlineToolbar({ nodeId, selected = false }: NodeInlineToolba
     { type: "stickyNote", label: "Sticky Note" },
     { type: "text", label: "Text" },
     { type: "mindMap", label: "Mind Map" },
+    { type: "icon", label: "Icon" },
+    { type: "image", label: "Image" },
   ];
 
   /** Whether this node type can be replaced */
-  const canReplace = ["rectangle", "diamond", "circle", "document", "stickyNote", "text", "mindMap"].includes(nodeType);
+  const canReplace = ["rectangle", "diamond", "circle", "document", "stickyNote", "text", "mindMap", "icon", "image"].includes(nodeType);
 
   const handleReplaceType = (newType: string) => {
     if (!node || newType === nodeType) return;
@@ -425,6 +507,36 @@ export function NodeInlineToolbar({ nodeId, selected = false }: NodeInlineToolba
               </button>
             }
           />
+        )}
+        {hasIconImageReplacer && (
+          <>
+            <ToolbarDivider />
+            <IconImageReplacerPanel
+              mode={nodeType as "icon" | "image"}
+              trigger={
+                <button
+                  type="button"
+                  title={nodeType === "icon" ? "Replace icon" : "Replace image"}
+                  className="p-1.5 rounded hover:bg-gray-600 transition-colors flex items-center gap-0.5"
+                  aria-label={nodeType === "icon" ? "Replace icon" : "Replace image"}
+                >
+                  <Image className="w-3.5 h-3.5" />
+                  <ChevronDown className="w-2.5 h-2.5 opacity-60" />
+                </button>
+              }
+              iconId={currentIconId}
+              emoji={currentEmoji}
+              customIcon={nodeType === "icon" ? currentCustomIcon : null}
+              iconUrl={currentIconUrl}
+              onIconIdChange={handleIconNodeIconIdChange}
+              onEmojiChange={handleIconNodeEmojiChange}
+              onCustomIconChange={handleIconNodeCustomIconChange}
+              onIconUrlChange={handleIconNodeIconUrlChange}
+              imageUrl={currentImageUrl}
+              onImageUrlChange={handleImageNodeUrlChange}
+              onImageUpload={handleImageNodeUpload}
+            />
+          </>
         )}
         {hasColorPicker && (
           <Popover.Root open={colorOpen} onOpenChange={setColorOpen}>

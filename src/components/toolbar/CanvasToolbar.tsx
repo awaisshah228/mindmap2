@@ -42,6 +42,7 @@ import type { Tool } from "@/lib/store/canvas-store";
 import type { PendingEdgeType } from "@/lib/store/canvas-store";
 import { setDragPayload, type DragNodePayload } from "@/lib/dnd-payload";
 import { uploadWithProgress } from "@/lib/upload-with-progress";
+import { getLocalUserIcons, addLocalUserIcon } from "@/lib/local-user-icons";
 
 function getDragPayloadForTool(tool: Tool): DragNodePayload | null {
   switch (tool) {
@@ -253,7 +254,7 @@ export default function CanvasToolbar({ activeTool, onToolChange }: CanvasToolba
   const customImageInputRef = useRef<HTMLInputElement>(null);
   const [customEmojiInput, setCustomEmojiInput] = useState("");
   const [uploadProgress, setUploadProgress] = useState<{ type: "icon" | "image"; name: string; progress: number } | null>(null);
-  const [uploadToS3, setUploadToS3] = useState(true); // when true: upload to S3 + add to canvas; when false: add to canvas only
+  const [uploadToS3, setUploadToS3] = useState(false); // when true: upload to S3 + add to canvas; when false: add to canvas with local data URL (no API)
 
   const uploadApi = typeof window !== "undefined" ? `${window.location.origin}/api/upload` : "/api/upload";
 
@@ -265,12 +266,15 @@ export default function CanvasToolbar({ activeTool, onToolChange }: CanvasToolba
     if (!uploadToS3) {
       const reader = new FileReader();
       reader.onload = () => {
+        const dataUrl = reader.result as string;
         setPendingIconId(null);
         setPendingEmoji(null);
         setPendingImage(null);
-        useCanvasStore.getState().setPendingCustomIcon(reader.result as string);
+        useCanvasStore.getState().setPendingCustomIcon(dataUrl);
         onToolChange("emoji");
         setIconsImagesOpen(false);
+        const next = addLocalUserIcon({ url: dataUrl, filename: file.name, mimeType: file.type });
+        setUserLibraryIcons(next);
       };
       reader.readAsDataURL(file);
       return;
@@ -295,12 +299,15 @@ export default function CanvasToolbar({ activeTool, onToolChange }: CanvasToolba
       if (useFallback) {
         const reader = new FileReader();
         reader.onload = () => {
+          const dataUrl = reader.result as string;
           setPendingIconId(null);
           setPendingEmoji(null);
           setPendingImage(null);
-          useCanvasStore.getState().setPendingCustomIcon(reader.result as string);
+          useCanvasStore.getState().setPendingCustomIcon(dataUrl);
           onToolChange("emoji");
           setIconsImagesOpen(false);
+          const next = addLocalUserIcon({ url: dataUrl, filename: file.name, mimeType: file.type });
+          setUserLibraryIcons(next);
         };
         reader.readAsDataURL(file);
       }
@@ -315,11 +322,14 @@ export default function CanvasToolbar({ activeTool, onToolChange }: CanvasToolba
     if (!uploadToS3) {
       const reader = new FileReader();
       reader.onload = () => {
-        setPendingImage(reader.result as string, file.name.replace(/\.[^.]+$/, ""));
+        const dataUrl = reader.result as string;
+        setPendingImage(dataUrl, file.name.replace(/\.[^.]+$/, ""));
         setPendingIconId(null);
         setPendingEmoji(null);
         onToolChange("image");
         setIconsImagesOpen(false);
+        const next = addLocalUserIcon({ url: dataUrl, filename: file.name, mimeType: file.type });
+        setUserLibraryIcons(next);
       };
       reader.readAsDataURL(file);
       return;
@@ -343,11 +353,14 @@ export default function CanvasToolbar({ activeTool, onToolChange }: CanvasToolba
       if (useFallback) {
         const reader = new FileReader();
         reader.onload = () => {
-          setPendingImage(reader.result as string, file.name.replace(/\.[^.]+$/, ""));
+          const dataUrl = reader.result as string;
+          setPendingImage(dataUrl, file.name.replace(/\.[^.]+$/, ""));
           setPendingIconId(null);
           setPendingEmoji(null);
           onToolChange("image");
           setIconsImagesOpen(false);
+          const next = addLocalUserIcon({ url: dataUrl, filename: file.name, mimeType: file.type });
+          setUserLibraryIcons(next);
         };
         reader.readAsDataURL(file);
       }
@@ -411,19 +424,27 @@ export default function CanvasToolbar({ activeTool, onToolChange }: CanvasToolba
 
   useEffect(() => {
     if (!iconsImagesOpen) return;
-    fetch(`${typeof window !== "undefined" ? window.location.origin : ""}/api/upload?folder=icons`, { credentials: "include" })
-      .then((r) => (r.ok ? r.json() : { files: [] }))
-      .then((d) => setUserLibraryIcons(d.files ?? []))
-      .catch(() => setUserLibraryIcons([]));
-  }, [iconsImagesOpen]);
+    if (isSignedIn) {
+      fetch(`${typeof window !== "undefined" ? window.location.origin : ""}/api/upload?folder=icons`, { credentials: "include" })
+        .then((r) => (r.ok ? r.json() : { files: [] }))
+        .then((d) => setUserLibraryIcons(d.files ?? []))
+        .catch(() => setUserLibraryIcons([]));
+    } else {
+      setUserLibraryIcons(getLocalUserIcons());
+    }
+  }, [iconsImagesOpen, isSignedIn]);
 
   useEffect(() => {
     if (!libraryOpen) return;
-    fetch(`${typeof window !== "undefined" ? window.location.origin : ""}/api/upload?folder=icons`, { credentials: "include" })
-      .then((r) => (r.ok ? r.json() : { files: [] }))
-      .then((d) => setUserLibraryIcons(d.files ?? []))
-      .catch(() => setUserLibraryIcons([]));
-  }, [libraryOpen]);
+    if (isSignedIn) {
+      fetch(`${typeof window !== "undefined" ? window.location.origin : ""}/api/upload?folder=icons`, { credentials: "include" })
+        .then((r) => (r.ok ? r.json() : { files: [] }))
+        .then((d) => setUserLibraryIcons(d.files ?? []))
+        .catch(() => setUserLibraryIcons([]));
+    } else {
+      setUserLibraryIcons(getLocalUserIcons());
+    }
+  }, [libraryOpen, isSignedIn]);
 
   const isSelectGroup = activeTool === "select" || activeTool === "selection";
   const isDrawGroup = activeTool === "freeDraw" || activeTool === "eraser";
