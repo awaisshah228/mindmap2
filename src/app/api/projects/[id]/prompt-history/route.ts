@@ -59,7 +59,7 @@ export async function POST(request: Request, { params }: Params) {
   }
 
   let body: {
-    prompt: string;
+    prompt?: string;
     nodes?: object[];
     edges?: object[];
     targetCanvas?: string;
@@ -67,7 +67,7 @@ export async function POST(request: Request, { params }: Params) {
     edgeCount?: number;
   } = {};
   try {
-    body = await request.json();
+    body = (await request.json()) as typeof body;
   } catch {
     return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
   }
