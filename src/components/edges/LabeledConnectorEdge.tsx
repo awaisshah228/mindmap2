@@ -37,6 +37,9 @@ const pathParams = (sp: Position, tp: Position) => ({
   targetPosition: tp,
 });
 
+/** Gap (px) between parallel edges (same source/target) so they don’t overlap on the canvas */
+const PARALLEL_EDGE_GAP = 14;
+
 /* ─── Edge gap helper ─── */
 /**
  * Offset a point along the direction from `from` → `to` by `gap` pixels.
@@ -55,6 +58,81 @@ function offsetPoint(
   if (len === 0 || gap === 0) return { x: fromX, y: fromY };
   const ratio = gap / len;
   return { x: fromX + dx * ratio, y: fromY + dy * ratio };
+}
+
+/**
+ * Apply a perpendicular offset to a Bezier path so parallel edges separate.
+ * Offsets only the control points so the path still starts/ends at the nodes.
+ */
+function applyBezierParallelOffset(
+  pathStr: string,
+  offsetX: number,
+  offsetY: number
+): string {
+  const match = pathStr.match(/^M\s*([\d.-]+)\s+([\d.-]+)\s+C\s*([\d.-]+)\s+([\d.-]+)\s+([\d.-]+)\s+([\d.-]+)\s+([\d.-]+)\s+([\d.-]+)$/);
+  if (!match) return pathStr;
+  const [, sx, sy, c1x, c1y, c2x, c2y, tx, ty] = match.map(Number);
+  return `M ${sx} ${sy} C ${c1x + offsetX} ${c1y + offsetY} ${c2x + offsetX} ${c2y + offsetY} ${tx} ${ty}`;
+}
+
+/**
+ * Translate every coordinate pair in an SVG path by (offsetX, offsetY).
+ */
+function translatePath(pathStr: string, offsetX: number, offsetY: number): string {
+  return pathStr.replace(/([\d.-]+)\s+([\d.-]+)/g, (_, a, b) =>
+    `${Number(a) + offsetX} ${Number(b) + offsetY}`
+  );
+}
+
+/**
+ * Apply parallel offset to smooth step / step path: translate full path then add
+ * short segments at start/end so the edge still connects to the nodes. Preserves C/Q curves.
+ */
+function applySmoothStepParallelOffset(
+  pathStr: string,
+  sourceX: number,
+  sourceY: number,
+  targetX: number,
+  targetY: number,
+  offsetX: number,
+  offsetY: number
+): string {
+  const translated = translatePath(pathStr, offsetX, offsetY);
+  const rest = translated.replace(/^M\s*[\d.-]+\s+[\d.-]+/, "").trim();
+  return (
+    "M " +
+    sourceX +
+    " " +
+    sourceY +
+    " L " +
+    (sourceX + offsetX) +
+    " " +
+    (sourceY + offsetY) +
+    " " +
+    rest +
+    " L " +
+    targetX +
+    " " +
+    targetY
+  );
+}
+
+/**
+ * Build straight path with parallel offset: short segments at start/end so path still connects to nodes.
+ */
+function getStraightPathWithParallelOffset(
+  sourceX: number,
+  sourceY: number,
+  targetX: number,
+  targetY: number,
+  offsetX: number,
+  offsetY: number
+): string {
+  const s2 = sourceX + offsetX;
+  const t2 = targetX + offsetX;
+  const s3 = sourceY + offsetY;
+  const t3 = targetY + offsetY;
+  return `M ${sourceX} ${sourceY} L ${s2} ${s3} L ${t2} ${t3} L ${targetX} ${targetY}`;
 }
 
 /* ─── ER relationship types ─── */
@@ -112,6 +190,7 @@ function LabeledConnectorEdge({
   const globalDefaultStrokeWidth = useCanvasStore((s) => s.defaultEdgeStrokeWidth);
   const globalDefaultMarkerEnd = useCanvasStore((s) => s.defaultEdgeMarkerEnd);
   const globalDefaultMarkerStart = useCanvasStore((s) => s.defaultEdgeMarkerStart);
+  const globalDefaultConnectorType = useCanvasStore((s) => s.defaultEdgeConnectorType);
   // Avoid calling getEdges() on every render — only compute branch color when needed
   const branchColor = useMemo(() => {
     if (data?.strokeColor) return data.strokeColor as string;
@@ -120,30 +199,41 @@ function LabeledConnectorEdge({
     return getBranchStrokeColor(source, target, edges);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [source, target, data?.strokeColor, globalDefaultEdgeColor]);
-  const connectorType = (data?.connectorType as ConnectorType) ?? "default";
+  const connectorType = (data?.connectorType as ConnectorType) ?? (globalDefaultConnectorType as ConnectorType | null) ?? "default";
   const label = (data?.label as string) ?? "";
   const pathPoints = (data?.pathPoints as PathPoint[] | undefined) ?? [];
   const strokeDasharray = (data?.strokeDasharray as string | undefined) ?? undefined;
   const strokeWidth =
     (data?.strokeWidth as number | undefined) ?? globalDefaultStrokeWidth ?? EDGE_STROKE_WIDTH;
   const flowDirection = (data?.flowDirection as "mono" | "bi" | "none") ?? "mono";
-  let markerEndWithDefault = markerEnd ?? globalDefaultMarkerEnd ?? undefined;
-  let markerStartWithDefault = markerStart ?? globalDefaultMarkerStart ?? undefined;
-  if (flowDirection === "mono") {
-    markerEndWithDefault = CUSTOM_MARKER_IDS.arrowClosed;
-    markerStartWithDefault = undefined;
-  } else if (flowDirection === "bi") {
-    markerEndWithDefault = CUSTOM_MARKER_IDS.arrowClosed;
-    markerStartWithDefault = CUSTOM_MARKER_IDS.arrowClosed;
-  } else if (flowDirection === "none") {
-    markerEndWithDefault = undefined;
-    markerStartWithDefault = undefined;
-  }
+  const dataMarkerEnd = data?.markerEnd as string | undefined;
+  const dataMarkerStart = data?.markerStart as string | undefined;
+  const flowDirectionMarkerEnd = flowDirection === "mono" || flowDirection === "bi" ? CUSTOM_MARKER_IDS.arrowClosed : flowDirection === "none" ? undefined : undefined;
+  const flowDirectionMarkerStart = flowDirection === "bi" ? CUSTOM_MARKER_IDS.arrowClosed : undefined;
+  const markerEndWithDefault = dataMarkerEnd ?? markerEnd ?? globalDefaultMarkerEnd ?? flowDirectionMarkerEnd;
+  const markerStartWithDefault = dataMarkerStart ?? markerStart ?? globalDefaultMarkerStart ?? flowDirectionMarkerStart;
   const erRelation = (data?.erRelation as ERRelation) ?? null;
   const markerColor = (data?.markerColor as string | undefined) ?? undefined;
   const markerScale = (data?.markerScale as number | undefined) ?? 1;
   const effectivePathPoints = pathPoints;
   const hasCustomPath = effectivePathPoints.length > 0;
+
+  // Parallel-edge offset: when multiple edges share the same (source, target), offset path so they don’t overlap
+  const parallelEdgeOffset = useMemo(() => {
+    const edges = getEdges().filter((e) => e.source === source && e.target === target);
+    if (edges.length <= 1) return { offsetX: 0, offsetY: 0 };
+    const sorted = [...edges].sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+    const index = sorted.findIndex((e) => e.id === id);
+    if (index < 0) return { offsetX: 0, offsetY: 0 };
+    const dx = targetX - sourceX;
+    const dy = targetY - sourceY;
+    const len = Math.hypot(dx, dy);
+    if (len === 0) return { offsetX: 0, offsetY: 0 };
+    const perpX = -dy / len;
+    const perpY = dx / len;
+    const amount = (index - (edges.length - 1) / 2) * PARALLEL_EDGE_GAP;
+    return { offsetX: perpX * amount, offsetY: perpY * amount };
+  }, [source, target, id, sourceX, sourceY, targetX, targetY, getEdges]);
 
   const [isEditingLabel, setIsEditingLabel] = useState(false);
   const [editValue, setEditValue] = useState(label);
@@ -182,12 +272,41 @@ function LabeledConnectorEdge({
         ? getBezierPath({ ...params, curvature: 0.2 })
         : getSmoothStepPath({
             ...params,
-            borderRadius: connectorType === "step" ? 0 : 5,
+            borderRadius: connectorType === "step" ? 8 : 12,
           });
 
+  const hasParallelOffset =
+    !hasCustomPath &&
+    (parallelEdgeOffset.offsetX !== 0 || parallelEdgeOffset.offsetY !== 0);
+  const basePath = defaultPathResult?.[0] ?? "";
   const edgePath = hasCustomPath
     ? buildCustomPath(aSourceX, aSourceY, aTargetX, aTargetY, effectivePathPoints)
-    : defaultPathResult?.[0] ?? "";
+    : hasParallelOffset
+      ? connectorType === "straight"
+        ? getStraightPathWithParallelOffset(
+            aSourceX,
+            aSourceY,
+            aTargetX,
+            aTargetY,
+            parallelEdgeOffset.offsetX,
+            parallelEdgeOffset.offsetY
+          )
+        : connectorType === "default"
+          ? applyBezierParallelOffset(
+              basePath,
+              parallelEdgeOffset.offsetX,
+              parallelEdgeOffset.offsetY
+            )
+          : applySmoothStepParallelOffset(
+              basePath,
+              aSourceX,
+              aSourceY,
+              aTargetX,
+              aTargetY,
+              parallelEdgeOffset.offsetX,
+              parallelEdgeOffset.offsetY
+            )
+      : basePath;
   const rawLabelX = defaultPathResult?.[1] ?? (aSourceX + aTargetX) / 2;
   const rawLabelY = defaultPathResult?.[2] ?? (aSourceY + aTargetY) / 2;
   const edgeLength = Math.hypot(aTargetX - aSourceX, aTargetY - aSourceY);
@@ -400,9 +519,15 @@ function LabeledConnectorEdge({
   const dynamicColor = markerColor ?? "#94a3b8";
   const dynamicScale = markerScale;
 
-  // Override markerEnd/markerStart props if dynamic
-  const effectiveMarkerEnd = dynEndId ? `url('#${dynEndId}')` : markerEndWithDefault;
-  const effectiveMarkerStart = dynStartId ? `url('#${dynStartId}')` : markerStartWithDefault;
+  // SVG markerStart/markerEnd must be url(#id); raw IDs (e.g. cm-arrow-closed) must be wrapped so markers render
+  const toMarkerUrl = (m: string | undefined): string | undefined => {
+    if (!m || typeof m !== "string") return undefined;
+    if (m.startsWith("url(")) return m;
+    return `url(#${m})`;
+  };
+  // Override markerEnd/markerStart props if dynamic; otherwise ensure url(#id) form
+  const effectiveMarkerEnd = dynEndId ? `url(#${dynEndId})` : toMarkerUrl(markerEndWithDefault);
+  const effectiveMarkerStart = dynStartId ? `url(#${dynStartId})` : toMarkerUrl(markerStartWithDefault);
 
   const effectiveStrokeDasharray = strokeDasharray;
 

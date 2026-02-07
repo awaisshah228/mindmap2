@@ -20,7 +20,7 @@ import {
 import * as Popover from "@radix-ui/react-popover";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@clerk/nextjs";
-import { useCanvasStore, type Project } from "@/lib/store/canvas-store";
+import { useCanvasStore, type Project, type DefaultEdgeConnectorType } from "@/lib/store/canvas-store";
 import { CUSTOM_MARKER_IDS } from "@/components/edges/CustomMarkerDefs";
 import { applyNodesAndEdgesInChunks } from "@/lib/chunked-nodes";
 import { saveNow, createProjectApi, renameProjectApi, deleteProjectApi, duplicateProjectApi } from "@/lib/store/project-storage";
@@ -82,6 +82,8 @@ export default function AppSidebar({ isOpen = true, onClose, isMobile }: AppSide
   const defaultEdgeMarkerEnd = useCanvasStore((s) => s.defaultEdgeMarkerEnd);
   const defaultEdgeMarkerStart = useCanvasStore((s) => s.defaultEdgeMarkerStart);
   const setDefaultEdgeMarkers = useCanvasStore((s) => s.setDefaultEdgeMarkers);
+  const defaultEdgeConnectorType = useCanvasStore((s) => s.defaultEdgeConnectorType);
+  const setDefaultEdgeConnectorType = useCanvasStore((s) => s.setDefaultEdgeConnectorType);
   const edges = useCanvasStore((s) => s.edges);
   const pushUndo = useCanvasStore((s) => s.pushUndo);
   const selectedEdgeIds = useMemo(
@@ -307,6 +309,37 @@ export default function AppSidebar({ isOpen = true, onClose, isMobile }: AppSide
               ))}
             </div>
             <span className="text-[10px] font-medium text-gray-500 uppercase tracking-wider block mt-3 mb-1">
+              Default edge path
+            </span>
+            <p className="text-[10px] text-gray-500 mb-2">
+              Path style for new edges and when an edge has no style set. Select an edge on the canvas to change it, or apply below.
+            </p>
+            <div className="flex flex-wrap gap-1">
+              {(
+                [
+                  { value: null as DefaultEdgeConnectorType | null, label: "Auto" },
+                  { value: "default" as const, label: "Bezier" },
+                  { value: "straight" as const, label: "Straight" },
+                  { value: "smoothstep" as const, label: "Smooth step" },
+                  { value: "step" as const, label: "Step" },
+                ] as const
+              ).map(({ value, label }) => (
+                <button
+                  key={label}
+                  type="button"
+                  onClick={() => setDefaultEdgeConnectorType(value)}
+                  className={cn(
+                    "px-2 py-1 rounded text-[10px] font-medium border transition-all",
+                    defaultEdgeConnectorType === value
+                      ? "border-violet-400 bg-violet-800/40 text-violet-200"
+                      : "border-gray-600 text-gray-400 hover:border-gray-500 hover:text-gray-300"
+                  )}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+            <span className="text-[10px] font-medium text-gray-500 uppercase tracking-wider block mt-3 mb-1">
               Default markers
             </span>
             <div className="flex flex-wrap gap-1">
@@ -367,6 +400,7 @@ export default function AppSidebar({ isOpen = true, onClose, isMobile }: AppSide
                               ...(e.data ?? {}),
                               strokeColor: defaultEdgeStrokeColor ?? undefined,
                               strokeWidth: defaultEdgeStrokeWidth ?? undefined,
+                              ...(defaultEdgeConnectorType != null && { connectorType: defaultEdgeConnectorType, pathPoints: [] }),
                             },
                             markerEnd: defaultEdgeMarkerEnd ?? undefined,
                             markerStart: defaultEdgeMarkerStart ?? undefined,
@@ -391,6 +425,7 @@ export default function AppSidebar({ isOpen = true, onClose, isMobile }: AppSide
                           ...(e.data ?? {}),
                           strokeColor: defaultEdgeStrokeColor ?? undefined,
                           strokeWidth: defaultEdgeStrokeWidth ?? undefined,
+                          ...(defaultEdgeConnectorType != null && { connectorType: defaultEdgeConnectorType, pathPoints: [] }),
                         },
                         markerEnd: defaultEdgeMarkerEnd ?? undefined,
                         markerStart: defaultEdgeMarkerStart ?? undefined,

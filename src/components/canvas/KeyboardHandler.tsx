@@ -4,6 +4,8 @@ import { useCallback, useEffect } from "react";
 import { useCopyPaste } from "@/hooks/useCopyPaste";
 import type { Node, Edge } from "@xyflow/react";
 import { useCanvasStore } from "@/lib/store/canvas-store";
+import { resolveCollisions } from "@/lib/resolve-collisions";
+import { fitGroupBoundsAndCenterChildren } from "@/lib/layout-engine";
 
 interface KeyboardHandlerProps {
   getNodes: () => Node[];
@@ -236,8 +238,8 @@ export function KeyboardHandler({
         };
 
         setNodes((nds) => {
-          // Add group node, then update selected nodes to be children
-          const newNodes = [groupNode, ...nds.map((n) => {
+          // Add group node, then update selected nodes to be children (positions relative to group)
+          let newNodes: Node[] = [groupNode, ...nds.map((n) => {
             if (n.selected && n.type !== "group") {
               return {
                 ...n,
@@ -252,6 +254,26 @@ export function KeyboardHandler({
             }
             return n;
           })];
+
+          // Resolve collisions between grouped children so there is a gap and no overlap
+          const GROUP_CHILD_GAP = 24;
+          const children = newNodes.filter((n) => n.parentId === groupId);
+          if (children.length >= 2) {
+            const resolved = resolveCollisions(children, {
+              margin: GROUP_CHILD_GAP,
+              maxIterations: 80,
+              overlapThreshold: 0.1,
+            });
+            const byId = new Map(resolved.map((r) => [r.id, r]));
+            newNodes = newNodes.map((n) =>
+              n.parentId === groupId && byId.has(n.id)
+                ? { ...n, position: byId.get(n.id)!.position }
+                : n
+            );
+          }
+
+          // Resize group to fit children with padding and align children properly
+          newNodes = fitGroupBoundsAndCenterChildren(newNodes);
           return newNodes;
         });
         return;

@@ -362,6 +362,66 @@ async function layoutWithElk(
   return { nodes: allNodes, edges: resultEdges };
 }
 
+/** Bounding box of laid-out nodes (uses getNodeSize for dimensions). */
+export type LayoutContentBounds = {
+  minX: number;
+  minY: number;
+  maxX: number;
+  maxY: number;
+  width: number;
+  height: number;
+};
+
+/**
+ * Compute the bounding box of the layout content (all nodes with their sizes).
+ * Includes spacing implied by node positions; add padding when using as "layout canvas" size.
+ */
+export function getLayoutContentBounds(nodes: Node[]): LayoutContentBounds {
+  if (nodes.length === 0) {
+    return { minX: 0, minY: 0, maxX: 0, maxY: 0, width: 0, height: 0 };
+  }
+  let minX = Infinity;
+  let minY = Infinity;
+  let maxX = -Infinity;
+  let maxY = -Infinity;
+  for (const node of nodes) {
+    const { width, height } = getNodeSize(node);
+    const x = node.position?.x ?? 0;
+    const y = node.position?.y ?? 0;
+    if (x < minX) minX = x;
+    if (y < minY) minY = y;
+    if (x + width > maxX) maxX = x + width;
+    if (y + height > maxY) maxY = y + height;
+  }
+  return {
+    minX,
+    minY,
+    maxX,
+    maxY,
+    width: Math.max(0, maxX - minX),
+    height: Math.max(0, maxY - minY),
+  };
+}
+
+/**
+ * Translate nodes so the layout content sits in a box starting at (padding, padding).
+ * Use after layout so the diagram uses only the "layout canvas" (content + padding), not the whole canvas.
+ */
+export function translateNodesToLayoutBox(nodes: Node[], padding: number): Node[] {
+  if (nodes.length === 0) return nodes;
+  const bounds = getLayoutContentBounds(nodes);
+  const dx = padding - bounds.minX;
+  const dy = padding - bounds.minY;
+  if (Math.abs(dx) < 1 && Math.abs(dy) < 1) return nodes;
+  return nodes.map((n) => ({
+    ...n,
+    position: {
+      x: (n.position?.x ?? 0) + dx,
+      y: (n.position?.y ?? 0) + dy,
+    },
+  }));
+}
+
 const GROUP_PADDING = 100;
 const GROUP_HEADER_INSET = 48;
 const CHILD_PADDING = 40;

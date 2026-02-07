@@ -42,6 +42,9 @@ export type Tool = NodeType | "connector" | "pan" | "select" | "selection" | "mo
 /** Edge connector type for new edges (Bezier, Straight, Smooth step). */
 export type PendingEdgeType = "default" | "straight" | "smoothstep";
 
+/** Global default edge path when an edge has no connectorType. Used for all edges unless overridden per edge. */
+export type DefaultEdgeConnectorType = "default" | "straight" | "smoothstep" | "step";
+
 /** Theme options */
 export type ThemeMode = "light" | "dark" | "system";
 
@@ -165,6 +168,9 @@ interface CanvasState {
   /** Global default edge start marker. Null = none. */
   defaultEdgeMarkerStart: string | null;
   setDefaultEdgeMarkers: (end: string | null, start: string | null) => void;
+  /** Global default edge path (Bezier, Straight, Smooth step, Step). Null = use "default" (Bezier). */
+  defaultEdgeConnectorType: DefaultEdgeConnectorType | null;
+  setDefaultEdgeConnectorType: (type: DefaultEdgeConnectorType | null) => void;
   mindMapLayout: MindMapLayoutOptions;
   undoStack: { nodes: Node[]; edges: Edge[] }[];
   redoStack: { nodes: Node[]; edges: Edge[] }[];
@@ -393,6 +399,7 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
   defaultEdgeStrokeWidth: 1.5,
   defaultEdgeMarkerEnd: null,
   defaultEdgeMarkerStart: null,
+  defaultEdgeConnectorType: "default",
   mindMapLayout: DEFAULT_MIND_MAP_LAYOUT,
   undoStack: [],
   redoStack: [],
@@ -731,6 +738,7 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
   setDefaultEdgeStrokeColor: (color) => set({ defaultEdgeStrokeColor: color }),
   setDefaultEdgeStrokeWidth: (width) => set({ defaultEdgeStrokeWidth: width }),
   setDefaultEdgeMarkers: (end, start) => set({ defaultEdgeMarkerEnd: end, defaultEdgeMarkerStart: start }),
+  setDefaultEdgeConnectorType: (type) => set({ defaultEdgeConnectorType: type }),
   setPendingFitView: (value) => set({ pendingFitView: value }),
   setPendingFitViewNodeIds: (ids) => set({ pendingFitViewNodeIds: ids }),
   setPendingApplyLayout: (value: boolean) => set({ pendingApplyLayout: value }),

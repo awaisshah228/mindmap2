@@ -195,46 +195,64 @@ async function loadProjectContentFromStream(projectId: string): Promise<void> {
   if (!res.ok || !res.body) return;
   const { setNodes, setEdges, setNodeNote, setNodeTasks } = useCanvasStore.getState();
   const nodeIdMap = new Map<string, string>();
+  const MIN_NODES_PER_CHUNK = 5;
   let streamBuffer = "";
-  let streamedNodeCount = 0;
-  let streamedEdgeCount = 0;
-  const processChunk = (delta: string) => {
+  let lastAppliedNodeCount = 0;
+  let lastAppliedEdgeCount = 0;
+  const processChunk = (delta: string, done?: boolean) => {
     streamBuffer += delta;
     const parsed = parseStreamingDiagramBuffer(streamBuffer);
-    for (let i = streamedNodeCount; i < parsed.nodes.length; i++) {
-      const raw = parsed.nodes[i] as { id: string; type?: string; parentId?: string; style?: Record<string, unknown>; [k: string]: unknown };
+    for (let i = 0; i < parsed.nodes.length; i++) {
+      const raw = parsed.nodes[i] as { id: string; [k: string]: unknown };
       nodeIdMap.set(raw.id, raw.id);
-      const node: Node = {
-        id: raw.id,
-        type: (raw.type as string) || "rectangle",
-        position: (raw.position as { x: number; y: number }) ?? { x: 0, y: 0 },
-        data: (raw.data as Record<string, unknown>) ?? {},
-        ...(raw.style && { style: raw.style }),
-        ...(raw.parentId && nodeIdMap.has(raw.parentId as string) && { parentId: raw.parentId as string, extent: "parent" as const }),
-      };
-      if (streamedNodeCount === 0 && i === 0) {
-        setNodes([node]);
-        setEdges([]);
-      } else {
-        setNodes((prev) => (prev.some((n) => n.id === node.id) ? prev : [...prev, node]));
+    }
+    const newNodeCount = parsed.nodes.length - lastAppliedNodeCount;
+    const shouldApply = newNodeCount >= MIN_NODES_PER_CHUNK || done;
+    if (shouldApply && parsed.nodes.length > lastAppliedNodeCount) {
+      const batchNodes: Node[] = [];
+      for (let i = lastAppliedNodeCount; i < parsed.nodes.length; i++) {
+        const raw = parsed.nodes[i] as { id: string; type?: string; parentId?: string; style?: Record<string, unknown>; [k: string]: unknown };
+        batchNodes.push({
+          id: raw.id,
+          type: (raw.type as string) || "rectangle",
+          position: (raw.position as { x: number; y: number }) ?? { x: 0, y: 0 },
+          data: (raw.data as Record<string, unknown>) ?? {},
+          ...(raw.style && { style: raw.style }),
+          ...(raw.parentId && nodeIdMap.has(raw.parentId as string) && { parentId: raw.parentId as string, extent: "parent" as const }),
+        });
       }
+      const batchEdges: Edge[] = [];
+      for (let i = lastAppliedEdgeCount; i < parsed.edges.length; i++) {
+        const raw = parsed.edges[i] as { id?: string; source: string; target: string; [k: string]: unknown };
+        const source = nodeIdMap.get(raw.source) ?? raw.source;
+        const target = nodeIdMap.get(raw.target) ?? raw.target;
+        batchEdges.push({
+          id: (raw.id as string) || `e-${source}-${target}-${i}`,
+          source,
+          target,
+          ...(raw.data != null && typeof raw.data === "object" && !Array.isArray(raw.data)
+            ? { data: raw.data as Record<string, unknown> }
+            : {}),
+        });
+      }
+      if (lastAppliedNodeCount === 0) {
+        setNodes(batchNodes.length ? batchNodes : []);
+        setEdges(batchEdges);
+      } else {
+        setNodes((prev) => {
+          const byId = new Map(prev.map((n) => [n.id, n]));
+          for (const n of batchNodes) byId.set(n.id, n);
+          return [...byId.values()];
+        });
+        setEdges((prev) => {
+          const byId = new Map(prev.map((e) => [e.id, e]));
+          for (const e of batchEdges) byId.set(e.id, e);
+          return [...byId.values()];
+        });
+      }
+      lastAppliedNodeCount = parsed.nodes.length;
+      lastAppliedEdgeCount = parsed.edges.length;
     }
-    streamedNodeCount = parsed.nodes.length;
-    for (let i = streamedEdgeCount; i < parsed.edges.length; i++) {
-      const raw = parsed.edges[i] as { id?: string; source: string; target: string; [k: string]: unknown };
-      const source = nodeIdMap.get(raw.source) ?? raw.source;
-      const target = nodeIdMap.get(raw.target) ?? raw.target;
-      const edge: Edge = {
-        id: (raw.id as string) || `e-${source}-${target}-${i}`,
-        source,
-        target,
-        ...(raw.data != null && typeof raw.data === "object" && !Array.isArray(raw.data)
-          ? { data: raw.data as Record<string, unknown> }
-          : {}),
-      };
-      setEdges((prev) => (prev.some((e) => e.id === edge.id) ? prev : [...prev, edge]));
-    }
-    streamedEdgeCount = parsed.edges.length;
   };
   const reader = res.body.getReader();
   const decoder = new TextDecoder();
@@ -248,6 +266,7 @@ async function loadProjectContentFromStream(projectId: string): Promise<void> {
       processChunk(chunk);
     }
   }
+  processChunk("", true);
   try {
     const data = JSON.parse(full.trim()) as Parameters<typeof applyLoadedProjectData>[1];
     await applyLoadedProjectData(projectId, data, { fromCloud: true });

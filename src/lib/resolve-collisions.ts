@@ -180,7 +180,7 @@ export function resolveCollisionsWithGroups(
   const resolvedRoots = resolveCollisions(roots, {
     maxIterations: Number.POSITIVE_INFINITY,
     overlapThreshold: 0.5,
-    margin: 15,
+    margin: 24,
     ...options,
   });
 
@@ -216,7 +216,7 @@ export function resolveCollisionsWithGroups(
     });
 
     const absoluteChildren = children.map(toAbsolute);
-    const resolvedAbsolute = resolveCollisions(absoluteChildren, options);
+    const resolvedAbsolute = resolveCollisions(absoluteChildren, { margin: 16, ...options });
     resolvedChildren.push(...resolvedAbsolute.map(toRelative));
   }
 

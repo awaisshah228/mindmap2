@@ -4,6 +4,7 @@
  */
 
 import { ICON_IDS_FOR_PROMPT } from "@/lib/icon-prompt-list";
+import { MARKER_IDS_FOR_PROMPT } from "@/lib/marker-prompt-list";
 
 export interface CanvasBounds {
   minX: number;
@@ -87,6 +88,19 @@ export interface PromptParams {
   mindMapStructure?: MindMapStructure | null;
 }
 
+function formatMarkerIdsForPrompt(
+  markers: { id: string; label: string; group: "basic" | "er" | "uml" }[] | undefined
+): string {
+  const list = Array.isArray(markers) ? markers : [];
+  const byGroup = { basic: [] as string[], er: [] as string[], uml: [] as string[] };
+  for (const m of list) byGroup[m.group].push(m.id);
+  const lines: string[] = [];
+  if (byGroup.basic.length) lines.push(`- Basic: ${byGroup.basic.join(", ")}.`);
+  if (byGroup.er.length) lines.push(`- ER / cardinality: ${byGroup.er.join(", ")}.`);
+  if (byGroup.uml.length) lines.push(`- UML: ${byGroup.uml.join(", ")}.`);
+  return lines.length ? lines.join("\n") : "- Basic: cm-arrow-open, cm-arrow-closed, cm-circle, cm-circle-filled, cm-diamond, cm-diamond-filled, cm-bar.\n- ER / cardinality: cm-er-one, cm-er-many, cm-er-one-only, cm-er-zero-or-one, cm-er-one-or-many, cm-er-zero-or-many.\n- UML: cm-uml-composition, cm-uml-aggregation, cm-uml-inheritance, cm-uml-realization.";
+}
+
 export function buildSystemPrompt(layoutDirection?: string): string {
   const isVertical = layoutDirection === "vertical";
   const preferredLayoutDirection = isVertical ? "vertical" : "horizontal";
@@ -110,21 +124,35 @@ CRITICAL — NODE TYPE SELECTION: Do NOT default to type "rectangle" for all nod
 - image: when showing an image with data.imageUrl.
 Available types: mindMap, stickyNote, rectangle, diamond, circle, document, text, image, databaseSchema, service, queue, actor, icon. Do NOT use type "group" — use the groups array instead.
 
-STRUCTURE — WHAT TO RETURN:
+STRUCTURE — WHAT TO RETURN (single JSON object; the app renders in batches for a smooth diagram):
+- Return one JSON object: { "nodes": [ ... ], "edges": [ ... ], "groups"?: [ ... ] }. No nested chunks — flat nodes and edges arrays. The app draws in batches of 5+ nodes at a time.
 - Nodes: id (string), type, data { label, shape?, icon?, iconUrl?, emoji?, imageUrl?, subtitle?, annotation?, columns? }. NO position.
-- Edges: id (unique), source (exact node id), target (exact node id), data { label?, strokeColor?, flowDirection? }. NO sourceHandle, NO targetHandle.
+- Edges: id (unique), source (exact node id), target (exact node id), data { label?, strokeColor?, flowDirection?, markerEnd?, markerStart? }. NO sourceHandle, NO targetHandle.
   flowDirection: "mono" (→ one-way arrow at target), "bi" (↔ arrows at both ends), "none" (— no arrows, plain line).
+  markerEnd / markerStart (optional): only when you need a non-arrow symbol; use IDs from our marker library below. If you omit both, the app applies arrows from flowDirection (mono = arrow at target, bi = arrows both ends, none = no marker).
 - groups (optional): [{ id, label, nodeIds }] — cluster related nodes. Use 2–4 groups for architecture diagrams with 6+ nodes.
 
+EDGE MARKERS — FROM OUR MARKER LIBRARY (use only these exact IDs):
+When you need a specific symbol (not the default arrow), set data.markerEnd (target side) and/or data.markerStart (source side) to one of the IDs below. When you need NO marker: set flowDirection to "none" and omit markerEnd/markerStart — the edge will render as a plain line. When you need the default arrow: omit markerEnd/markerStart and use flowDirection "mono" (arrow at target) or "bi" (arrows at both ends); the app will apply the arrow automatically.
+
+Marker library — all available markers (use the id exactly as written):
+${formatMarkerIdsForPrompt(MARKER_IDS_FOR_PROMPT)}
+
+When to use markers vs default arrow:
+- Flowcharts, sequences, architecture flows: omit markerEnd/markerStart; use flowDirection "mono" or "bi" so the app draws arrows.
+- Entity-relationship: use data.markerEnd / data.markerStart with cm-er-* IDs (e.g. cm-er-one, cm-er-many).
+- UML class diagrams: use cm-uml-inheritance, cm-uml-composition, cm-uml-aggregation, cm-uml-realization as needed.
+- No arrow / plain line: use flowDirection "none" and omit markers.
+
 EDGES — CLEAN CONNECTIONS (MINIMIZE INTERSECTIONS):
-Every edge: id, source, target. Optional data.label, data.strokeColor, data.flowDirection.
+Every edge: id, source, target. Optional data.label, data.strokeColor, data.flowDirection, data.markerEnd, data.markerStart.
 KEEP EDGES MINIMAL: Only add edges that convey essential relationships. Omit redundant or obvious connections. Prefer a clear linear flow (A→B→C) over a dense mesh. Aim for max 3–4 edges per node when possible. Fewer edges = cleaner diagram, fewer intersections.
 
-Edge direction markers (data.flowDirection) — USE ARROWS TO SHOW DIRECTION:
-- "mono" (default): One-way arrow at target. Use for flows, sequences, process steps, data flow (A→B).
-- "bi": Arrows at both ends. Use for bidirectional flows (sync, request-response, mutual dependency).
-- "none": No arrows. Use for undirected relationships (e.g. "relates to", grouping links).
-Add flowDirection when direction matters: flowcharts, sequence diagrams, architecture data flow, BPMN. Omit or use "none" for mind map branches or when direction is irrelevant.
+Edge direction (data.flowDirection) — controls default arrow placement when you omit markerEnd/markerStart:
+- "mono" (default): App draws one arrow at target. Use for flows, sequences, process steps, data flow (A→B).
+- "bi": App draws arrows at both ends. Use for bidirectional flows (sync, request-response, mutual dependency).
+- "none": No marker; plain line. Use for undirected relationships or when you want no arrow.
+When direction matters (flowcharts, sequences, architecture, BPMN), use "mono" or "bi" and omit markers to get arrows. When you want no arrow, use "none". For ER/UML, set markerEnd/markerStart from the marker library and flowDirection as needed.
 
 Edge labels (data.label): Add ONLY when the relationship is not obvious — e.g. protocol (HTTP, gRPC), event type. Keep to 1–3 words. Omit when self-explanatory.
 

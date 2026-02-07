@@ -26,7 +26,7 @@ import { PresentationMode } from "@/components/panels/PresentationMode";
 import { HelperLines } from "./HelperLines";
 import { getLayoutedElements, resizeGroupToFitChildren, type LayoutDirection } from "@/lib/layout-engine";
 import { useAutoLayout } from "@/hooks/useAutoLayout";
-import { resolveCollisions } from "@/lib/resolve-collisions";
+import { resolveCollisions, resolveCollisionsWithGroups } from "@/lib/resolve-collisions";
 import { getHiddenNodeIds } from "@/lib/mindmap-utils";
 import "@xyflow/react/dist/style.css";
 import { useCanvasStore } from "@/lib/store/canvas-store";
@@ -138,6 +138,8 @@ export default function DiagramCanvas() {
   const canvasBackgroundVariant = useCanvasStore((s) => s.canvasBackgroundVariant);
   const presentationNodeIndex = useCanvasStore((s) => s.presentationNodeIndex);
   const reactFlowRef = useRef<ReactFlowInstance | null>(null);
+  /** Edge intersection: edge id under the currently dragged node (for insert-into-edge on drop). */
+  const overlappedEdgeRef = useRef<string | null>(null);
 
   const [helperLines, setHelperLines] = useState<{
     horizontal: { y: number; x1: number; x2: number } | null;
@@ -440,8 +442,34 @@ export default function DiagramCanvas() {
           n.type === "group" ? { ...n, data: { ...n.data, hoveredGroupId } } : n
         )
       );
+
+      // Edge intersection: detect edge under node center (screen coords) for insert-on-drop
+      const nodeEl = document.querySelector(`.react-flow__node[data-id="${draggedNode.id}"]`);
+      if (nodeEl) {
+        const rect = nodeEl.getBoundingClientRect();
+        const screenCenterX = rect.left + rect.width / 2;
+        const screenCenterY = rect.top + rect.height / 2;
+        const edgeEl = document
+          .elementsFromPoint(screenCenterX, screenCenterY)
+          .find((el) => el.classList.contains("react-flow__edge-interaction"))
+          ?.parentElement;
+        const edgeId = edgeEl?.getAttribute("data-id") ?? null;
+        if (edgeId !== overlappedEdgeRef.current) {
+          setEdges((prev) =>
+            prev.map((e) => {
+              if (e.id === overlappedEdgeRef.current) {
+                const { stroke: _s, ...rest } = (e.style ?? {}) as Record<string, unknown>;
+                return { ...e, style: Object.keys(rest).length ? rest : undefined };
+              }
+              if (e.id === edgeId) return { ...e, style: { ...e.style, stroke: "#6366f1" } };
+              return e;
+            })
+          );
+          overlappedEdgeRef.current = edgeId;
+        }
+      }
     },
-    [checkAlignment, getFlowPosition, setNodes]
+    [checkAlignment, getFlowPosition, setNodes, setEdges]
   );
 
   const onNodeDragStop = useCallback(
@@ -454,6 +482,39 @@ export default function DiagramCanvas() {
           n.type === "group" ? { ...n, data: { ...n.data, hoveredGroupId: null } } : n
         )
       );
+
+      // Edge intersection: if node was dropped onto an edge, insert it (split edge: A→B becomes A→node, node→B)
+      const edgeId = overlappedEdgeRef.current;
+      if (edgeId && node.type !== "group" && node.type !== "freeDraw") {
+        overlappedEdgeRef.current = null;
+        pushUndo();
+        setEdges((prev) => {
+          const edge = prev.find((e) => e.id === edgeId);
+          if (!edge || edge.source === node.id) return prev;
+          const updated = prev.map((e) =>
+            e.id === edgeId ? { ...e, target: node.id } : e
+          );
+          const newEdge: Edge = {
+            ...edge,
+            id: `e-${node.id}-${edge.target}-${Date.now()}`,
+            source: node.id,
+            target: edge.target,
+          };
+          return [...updated, newEdge];
+        });
+        setTimeout(() => saveNow(), 200);
+        return;
+      }
+      if (overlappedEdgeRef.current) {
+        setEdges((prev) =>
+          prev.map((e) => {
+            if (e.id !== overlappedEdgeRef.current) return e;
+            const { stroke: _s, ...rest } = (e.style ?? {}) as Record<string, unknown>;
+            return { ...e, style: Object.keys(rest).length ? rest : undefined };
+          })
+        );
+      }
+      overlappedEdgeRef.current = null;
 
       // Subflow: if dropped node is over a group, make it a child (parentId + extent: 'parent').
       // Run after React Flow applies drag position (setTimeout) so our update isn't overwritten by onNodesChange.
@@ -519,7 +580,7 @@ export default function DiagramCanvas() {
         setTimeout(() => saveNow(), 200);
       }, 0);
     },
-    [getFlowPosition, isDescendantOf, setNodes]
+    [getFlowPosition, isDescendantOf, setNodes, setEdges, pushUndo]
   );
 
   const onInit = useCallback((instance: ReactFlowInstance) => {
@@ -623,11 +684,12 @@ export default function DiagramCanvas() {
     [setEdges, setStoreEdges, pushUndo]
   );
 
-  const pendingEdgeType = useCanvasStore((s) => s.pendingEdgeType);
   const defaultEdgeStrokeColor = useCanvasStore((s) => s.defaultEdgeStrokeColor);
   const defaultEdgeStrokeWidth = useCanvasStore((s) => s.defaultEdgeStrokeWidth);
   const defaultEdgeMarkerEnd = useCanvasStore((s) => s.defaultEdgeMarkerEnd);
   const defaultEdgeMarkerStart = useCanvasStore((s) => s.defaultEdgeMarkerStart);
+  const defaultEdgeConnectorType = useCanvasStore((s) => s.defaultEdgeConnectorType);
+  const edgeConnectorForNewEdges = defaultEdgeConnectorType ?? "default";
   const onConnect = useCallback(
     (params: Connection) => {
       pushUndo();
@@ -662,7 +724,7 @@ export default function DiagramCanvas() {
         sourceHandle: resolvedSourceHandle,
         type: "labeledConnector",
         data: {
-          connectorType: pendingEdgeType,
+          connectorType: edgeConnectorForNewEdges,
           pathPoints: [],
           ...(defaultEdgeStrokeColor && { strokeColor: defaultEdgeStrokeColor }),
           ...(defaultEdgeStrokeWidth != null && { strokeWidth: defaultEdgeStrokeWidth }),
@@ -677,7 +739,7 @@ export default function DiagramCanvas() {
         return updated;
       });
     },
-    [setEdges, setStoreEdges, pendingEdgeType, defaultEdgeStrokeColor, defaultEdgeStrokeWidth, defaultEdgeMarkerEnd, defaultEdgeMarkerStart, pushUndo]
+    [setEdges, setStoreEdges, edgeConnectorForNewEdges, defaultEdgeStrokeColor, defaultEdgeStrokeWidth, defaultEdgeMarkerEnd, defaultEdgeMarkerStart, pushUndo]
   );
 
   const onConnectEnd = useCallback(
@@ -849,13 +911,16 @@ export default function DiagramCanvas() {
         sourceHandle: fromNodeHandle,
         targetHandle: newNodeHandle,
         type: "labeledConnector",
-        data: { connectorType: pendingEdgeType, pathPoints: [] },
+        data: { connectorType: edgeConnectorForNewEdges, pathPoints: [] },
       };
 
-      // Add both node and edge in a single batched update.
+      // Add both node and edge in a single batched update; resolve collisions so new node doesn't overlap.
       fromCanvasRef.current += 1;
       setNodes((nds) => {
-        const updated = [...nds, { ...newNode, selected: false }];
+        const updated = resolveCollisionsWithGroups([...nds, { ...newNode, selected: false }], {
+          margin: 20,
+          maxIterations: 80,
+        });
         queueMicrotask(() => setStoreNodes(updated));
         return updated;
       });
@@ -865,7 +930,7 @@ export default function DiagramCanvas() {
         return updated;
       });
     },
-    [setNodes, setEdges, setStoreNodes, setStoreEdges, pushUndo, pendingEdgeType]
+    [setNodes, setEdges, setStoreNodes, setStoreEdges, pushUndo, edgeConnectorForNewEdges]
   );
 
   const handleAddMindMapNode = useCallback(
@@ -958,8 +1023,10 @@ export default function DiagramCanvas() {
         width: maxX - minX + padding * 2,
         height: maxY - minY + padding * 2,
       };
-      // Keep existing selections; also select the new freehand node
-      setNodes((nds) => [...nds, { ...newNode, selected: true }]);
+      // Keep existing selections; also select the new freehand node; resolve collisions so it doesn't overlap.
+      setNodes((nds) =>
+        resolveCollisionsWithGroups([...nds, { ...newNode, selected: true }], { margin: 20, maxIterations: 80 })
+      );
       addNode(newNode);
     },
     [pushUndo, setNodes, addNode]
@@ -1009,7 +1076,7 @@ export default function DiagramCanvas() {
         setEdgeDrawEndPreview({ x: pos.x, y: pos.y });
 
         // For straight edges, always preview a simple straight line (no intermediate points).
-        if (pendingEdgeType === "straight") {
+        if (edgeConnectorForNewEdges === "straight") {
           return;
         }
 
@@ -1035,7 +1102,7 @@ export default function DiagramCanvas() {
         return;
       }
     },
-    [activeTool, edgeDrawStart, pendingEdgeType, isErasing, eraseAt]
+    [activeTool, edgeDrawStart, edgeConnectorForNewEdges, isErasing, eraseAt]
   );
 
   const onPointerUp = useCallback(
@@ -1084,7 +1151,7 @@ export default function DiagramCanvas() {
             targetHandle: "left",
             type: "labeledConnector",
             data: {
-              connectorType: pendingEdgeType,
+              connectorType: edgeConnectorForNewEdges,
               pathPoints: defaultPathPoints,
               ...(defaultEdgeStrokeColor && { strokeColor: defaultEdgeStrokeColor }),
               ...(defaultEdgeStrokeWidth != null && { strokeWidth: defaultEdgeStrokeWidth }),
@@ -1116,7 +1183,7 @@ export default function DiagramCanvas() {
       activeTool,
       edgeDrawStart,
       edgeDrawPoints,
-      pendingEdgeType,
+      edgeConnectorForNewEdges,
       defaultEdgeStrokeColor,
       defaultEdgeStrokeWidth,
       defaultEdgeMarkerEnd,
@@ -1179,7 +1246,9 @@ export default function DiagramCanvas() {
             height: size,
           };
           addNode(newNode);
-          setNodes((nds) => [...nds, { ...newNode, selected: true }]);
+          setNodes((nds) =>
+            resolveCollisionsWithGroups([...nds, { ...newNode, selected: true }], { margin: 20, maxIterations: 80 })
+          );
           setActiveTool("select");
           useCanvasStore.getState().setPendingCustomIcon(null);
           setPendingIconLabel(null);
@@ -1196,7 +1265,9 @@ export default function DiagramCanvas() {
             height: size,
           };
           addNode(newNode);
-          setNodes((nds) => [...nds, { ...newNode, selected: true }]);
+          setNodes((nds) =>
+            resolveCollisionsWithGroups([...nds, { ...newNode, selected: true }], { margin: 20, maxIterations: 80 })
+          );
           setActiveTool("select");
           setPendingIconId(null);
           setPendingIconLabel(null);
@@ -1213,7 +1284,9 @@ export default function DiagramCanvas() {
             height: size,
           };
           addNode(newNode);
-          setNodes((nds) => [...nds, { ...newNode, selected: true }]);
+          setNodes((nds) =>
+            resolveCollisionsWithGroups([...nds, { ...newNode, selected: true }], { margin: 20, maxIterations: 80 })
+          );
           setActiveTool("select");
           setPendingEmoji(null);
           setPendingIconLabel(null);
@@ -1234,7 +1307,9 @@ export default function DiagramCanvas() {
           height: 150,
         };
         addNode(newNode);
-        setNodes((nds) => [...nds, { ...newNode, selected: true }]);
+        setNodes((nds) =>
+          resolveCollisionsWithGroups([...nds, { ...newNode, selected: true }], { margin: 20, maxIterations: 80 })
+        );
         setActiveTool("select");
         setPendingImage(null);
         return;
@@ -1306,7 +1381,9 @@ export default function DiagramCanvas() {
       };
 
       addNode(newNode);
-      setNodes((nds) => [...nds, { ...newNode, selected: false }]);
+      setNodes((nds) =>
+        resolveCollisionsWithGroups([...nds, { ...newNode, selected: false }], { margin: 20, maxIterations: 80 })
+      );
       setActiveTool("select");
       setPendingShape(null);
     },
@@ -1461,15 +1538,19 @@ export default function DiagramCanvas() {
       addNode(newNode);
       const nodeToAdd = { ...newNode, selected: true };
       setNodes((nds) => {
+        let next: Node[];
         if (nodeToAdd.parentId) {
           const groupIndex = nds.findIndex((n) => n.id === nodeToAdd.parentId);
           if (groupIndex !== -1) {
-            const next = [...nds];
+            next = [...nds];
             next.splice(groupIndex + 1, 0, nodeToAdd);
-            return next;
+          } else {
+            next = [...nds, nodeToAdd];
           }
+        } else {
+          next = [...nds, nodeToAdd];
         }
-        return [...nds, nodeToAdd];
+        return resolveCollisionsWithGroups(next, { margin: 20, maxIterations: 80 });
       });
       setActiveTool("select");
     },
@@ -1666,17 +1747,18 @@ export default function DiagramCanvas() {
           minZoom={0.1}
           maxZoom={4}
           connectionLineType={
-            pendingEdgeType === "straight"
+            edgeConnectorForNewEdges === "straight"
               ? ConnectionLineType.Straight
-              : pendingEdgeType === "smoothstep"
+              : edgeConnectorForNewEdges === "smoothstep"
                 ? ConnectionLineType.SmoothStep
                 : ConnectionLineType.Bezier
           }
           connectionLineComponent={CustomConnectionLine}
           defaultEdgeOptions={{
             type: "labeledConnector",
+            interactionWidth: 75,
             data: {
-              connectorType: "default",
+              connectorType: edgeConnectorForNewEdges,
               ...(defaultEdgeStrokeColor && { strokeColor: defaultEdgeStrokeColor }),
               ...(defaultEdgeStrokeWidth != null && { strokeWidth: defaultEdgeStrokeWidth }),
             },
@@ -1697,7 +1779,7 @@ export default function DiagramCanvas() {
           start={edgeDrawStart}
           end={edgeDrawEndPreview}
           // For straight edges, preview a pure straight line.
-          points={pendingEdgeType === "straight" ? [] : edgeDrawPoints}
+          points={edgeConnectorForNewEdges === "straight" ? [] : edgeDrawPoints}
         />
         <EraserPreview points={isErasing ? eraserPoints : []} />
         {presentationMode

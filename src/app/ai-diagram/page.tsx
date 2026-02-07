@@ -8,15 +8,18 @@ import type { Node, Edge } from "@xyflow/react";
 import { useCanvasStore } from "@/lib/store/canvas-store";
 import {
   getLayoutedElements,
+  chooseBestLayoutOptions,
+  translateNodesToLayoutBox,
   normalizeMindMapEdgeHandles,
   fitGroupBoundsAndCenterChildren,
   applyGroupingFromMetadata,
   layoutChildrenInsideGroups,
   ensureExtentForGroupedNodes,
-  resolveNodeCollisions,
   type LayoutDirection,
   type LayoutAlgorithm,
 } from "@/lib/layout-engine";
+import { resolveCollisionsWithGroups } from "@/lib/resolve-collisions";
+import { cn } from "@/lib/utils";
 import { buildSystemPrompt, buildUserMessage, getMindMapStructure, type CanvasBounds } from "@/lib/ai/prompt-builder";
 import { streamDiagramGeneration } from "@/lib/ai/frontend-ai";
 import EditorLayout from "@/components/layout/EditorLayout";
@@ -33,6 +36,7 @@ import { normalizeSkeletons } from "@/lib/skeleton-normalize";
 import { applyCloudIconMatching } from "@/lib/cloud-icon-match";
 import { dslToExcalidraw } from "@/lib/j2-converter";
 import { computeFitViewAppState } from "@/lib/excalidraw-render";
+import { CUSTOM_MARKER_IDS, type CustomMarkerId } from "@/components/edges/CustomMarkerDefs";
 
 /** Apply layout with smooth animation when current nodes overlap target (e.g. streaming → final layout). */
 async function applyLayoutWithAnimation(
@@ -190,6 +194,8 @@ function AIDiagramPage() {
   const [error, setError] = useState<string | null>(null);
   const [diagramType, setDiagramType] = useState<DiagramTypeValue>("auto");
   const [preset, setPreset] = useState<string>("none");
+  /** When a preset is selected: "cache" = load saved diagram from DB; "ai" = generate with AI (skip cache). */
+  const [presetSource, setPresetSource] = useState<"cache" | "ai">("cache");
   const [apiPresets, setApiPresets] = useState<PresetOption[]>([]);
   const [presetLoading, setPresetLoading] = useState(false);
   /** Target canvas for AI generation: diagram (React Flow), excalidraw, or drawio. */
@@ -351,8 +357,12 @@ function AIDiagramPage() {
     const targetCanvasMode = effectiveTarget;
 
     try {
-      // ─── Preset/template: try load from DB first; if 404 (no data), generate and save ───
-      if (preset !== "none" && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(preset)) {
+      // ─── Preset: load saved from DB (when presetSource === "cache") or skip to AI (when presetSource === "ai") ───
+      if (
+        preset !== "none" &&
+        presetSource === "cache" &&
+        /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(preset)
+      ) {
         let data: { drawioData?: string; excalidrawData?: unknown; nodes?: Node[]; edges?: Edge[] } | null = null;
         const presetRes = await fetch(
           `/api/diagrams/preset?preset=${encodeURIComponent(preset)}`,
@@ -361,12 +371,9 @@ function AIDiagramPage() {
         if (presetRes.ok) {
           data = await presetRes.json();
         } else if (presetRes.status === 404) {
-          // No diagram data yet — generate via API and save to DB (works without sign-in)
-          const genRes = await fetch(
-            `/api/diagrams/preset/generate?preset=${encodeURIComponent(preset)}`,
-            { method: "POST", credentials: "omit" }
-          );
-          if (genRes.ok) data = await genRes.json();
+          setLoading(false);
+          setError("No saved diagram for this preset. Choose \"Generate with AI\" to create it.");
+          return;
         }
         if (data) {
           if (data.drawioData) {
@@ -718,74 +725,168 @@ function AIDiagramPage() {
       const isNewDiagram = mode !== "mindmap-refine";
       const refId = isNewDiagram ? `ref-${Date.now()}-${Math.random().toString(36).slice(2, 9)}` : null;
 
-      // ─── Preset (React Flow): stream nodes/edges from DB, or fall through to AI if no data yet ──
+      // ─── Preset (React Flow): stream nodes/edges from DB when presetSource === "cache"; else use AI ──
       const nodeIdMap = new Map<string, string>();
-      if (preset !== "none" && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(preset)) {
+      if (
+        preset !== "none" &&
+        presetSource === "cache" &&
+        /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(preset)
+      ) {
         const presetRes = await fetch(
           `/api/diagrams/preset/stream?preset=${encodeURIComponent(preset)}`,
           { credentials: "omit" }
         );
         if (!presetRes.ok || !presetRes.body) {
-          // 404 = preset has no nodes yet (first-time); fall through to AI generation
-          parsed = null;
+          setLoading(false);
+          setError("No saved diagram for this preset. Choose \"Generate with AI\" to create it.");
+          return;
         } else {
+          const MIN_NODES_PER_CHUNK_PRESET = 2;
           let full = "";
           let streamBuffer = "";
-          let streamedNodeCount = 0;
-          let streamedEdgeCount = 0;
+          let lastAppliedNodeCount = 0;
+          let lastAppliedEdgeCount = 0;
+          let streamingLayoutVersion = 0;
 
-          const processStreamChunk = (delta: string) => {
+          const processStreamChunk = (delta: string, done?: boolean) => {
             streamBuffer += delta;
             const res = parseStreamingDiagramBuffer(streamBuffer);
             const store = useCanvasStore.getState();
             const setNodesNow = store.setNodes;
             const setEdgesNow = store.setEdges;
-
-            for (let i = streamedNodeCount; i < res.nodes.length; i++) {
-              const raw = res.nodes[i] as { id: string; type?: string; parentId?: string; [k: string]: unknown };
-              if (raw.type === "group") continue;
-              const newId = refId ? `${refId}-${raw.id}` : raw.id;
-              const newParentId = raw.parentId && refId ? `${refId}-${raw.parentId}` : raw.parentId;
-              nodeIdMap.set(raw.id, newId);
-              const rawPos = raw.position as { x: number; y: number } | undefined;
-              const hasValidPos = rawPos && typeof rawPos.x === "number" && typeof rawPos.y === "number";
-              const STREAM_COLS = 6;
-              const STREAM_DX = 200;
-              const STREAM_DY = 100;
-              const streamingPosition = hasValidPos
-                ? rawPos
-                : { x: (i % STREAM_COLS) * STREAM_DX, y: Math.floor(i / STREAM_COLS) * STREAM_DY };
-              const node: Node = {
-                id: newId,
-                type: (raw.type as string) || "rectangle",
-                position: streamingPosition,
-                data: (raw.data as Record<string, unknown>) ?? {},
-                ...(newParentId && { parentId: newParentId, extent: "parent" as const }),
-              };
-              if (streamedNodeCount === 0 && i === 0 && isNewDiagram) {
-                setNodesNow([node]);
-                setEdgesNow([]);
-              } else {
-                setNodesNow((prev) => (prev.some((n) => n.id === node.id) ? prev : [...prev, node]));
+            const STREAM_COLS = 6;
+            const STREAM_DX = 200;
+            const STREAM_DY = 100;
+            for (let i = 0; i < res.nodes.length; i++) {
+              const raw = res.nodes[i] as { id: string; [k: string]: unknown };
+              nodeIdMap.set(raw.id, refId ? `${refId}-${raw.id}` : raw.id);
+            }
+            const newNodeCount = res.nodes.length - lastAppliedNodeCount;
+            const shouldApply = newNodeCount >= MIN_NODES_PER_CHUNK_PRESET || done;
+            if (shouldApply && res.nodes.length > lastAppliedNodeCount) {
+              const batchNodes: Node[] = [];
+              for (let i = lastAppliedNodeCount; i < res.nodes.length; i++) {
+                const raw = res.nodes[i] as { id: string; type?: string; parentId?: string; [k: string]: unknown };
+                if (raw.type === "group") continue;
+                const newId = nodeIdMap.get(raw.id)!;
+                const newParentId = raw.parentId && refId ? `${refId}-${raw.parentId}` : (raw.parentId as string | undefined);
+                const rawPos = raw.position as { x: number; y: number } | undefined;
+                const hasValidPos = rawPos && typeof rawPos.x === "number" && typeof rawPos.y === "number";
+                const streamingPosition = hasValidPos
+                  ? rawPos
+                  : { x: (i % STREAM_COLS) * STREAM_DX, y: Math.floor(i / STREAM_COLS) * STREAM_DY };
+                batchNodes.push({
+                  id: newId,
+                  type: (raw.type as string) || "rectangle",
+                  position: streamingPosition,
+                  data: (raw.data as Record<string, unknown>) ?? {},
+                  ...(newParentId && { parentId: newParentId, extent: "parent" as const }),
+                });
               }
-            }
-            streamedNodeCount = res.nodes.length;
+              const batchEdges: Edge[] = [];
+              for (let i = lastAppliedEdgeCount; i < res.edges.length; i++) {
+                const raw = res.edges[i] as { id?: string; source: string; target: string; [k: string]: unknown };
+                const source = nodeIdMap.get(raw.source) ?? raw.source;
+                const target = nodeIdMap.get(raw.target) ?? raw.target;
+                batchEdges.push({
+                  id: raw.id ? (refId ? `${refId}-${raw.id}` : raw.id) : `e-${source}-${target}-${i}`,
+                  source,
+                  target,
+                  ...(raw.data != null && typeof raw.data === "object" && !Array.isArray(raw.data)
+                    ? { data: raw.data as Record<string, unknown> }
+                    : {}),
+                });
+              }
+              const prevNodes: Node[] = store.nodes;
+              const prevEdges: Edge[] = store.edges;
+              const mergedNodes: Node[] =
+                lastAppliedNodeCount === 0 && isNewDiagram
+                  ? batchNodes
+                  : (() => {
+                      const byId = new Map<string, Node>(prevNodes.map((n: Node) => [n.id, n]));
+                      for (const n of batchNodes) byId.set(n.id, n);
+                      return [...byId.values()];
+                    })();
+              const mergedEdges: Edge[] =
+                lastAppliedNodeCount === 0 && isNewDiagram
+                  ? batchEdges
+                  : (() => {
+                      const byId = new Map<string, Edge>(prevEdges.map((e: Edge) => [e.id, e]));
+                      for (const e of batchEdges) byId.set(e.id, e);
+                      return [...byId.values()];
+                    })();
+              setNodesNow(mergedNodes.length ? mergedNodes : []);
+              setEdgesNow(mergedEdges);
+              lastAppliedNodeCount = res.nodes.length;
+              lastAppliedEdgeCount = res.edges.length;
 
-            for (let i = streamedEdgeCount; i < res.edges.length; i++) {
-              const raw = res.edges[i] as { id?: string; source: string; target: string; [k: string]: unknown };
-              const source = nodeIdMap.get(raw.source) ?? raw.source;
-              const target = nodeIdMap.get(raw.target) ?? raw.target;
-              const edge: Edge = {
-                id: raw.id ? (refId ? `${refId}-${raw.id}` : raw.id) : `e-${source}-${target}-${i}`,
-                source,
-                target,
-                ...(raw.data != null && typeof raw.data === "object" && !Array.isArray(raw.data)
-                  ? { data: raw.data as Record<string, unknown> }
-                  : {}),
-              };
-              setEdgesNow((prev) => (prev.some((e) => e.id === edge.id) ? prev : [...prev, edge]));
+              // After each chunk: run full "Layout all" on all previously rendered nodes from this stream
+              streamingLayoutVersion += 1;
+              const myVersion = streamingLayoutVersion;
+              (async () => {
+                try {
+                  const LAYOUT_EXCLUDED = new Set(["freeDraw", "edgeAnchor"]);
+                  const targetNodes = mergedNodes.filter((n) => !LAYOUT_EXCLUDED.has((n.type as string) ?? ""));
+                  const targetIds = new Set(targetNodes.map((n) => n.id));
+                  const targetEdges = mergedEdges.filter(
+                    (e) => targetIds.has(e.source) && targetIds.has(e.target)
+                  );
+                  if (targetNodes.length < 2) return;
+                  const { algorithm, direction, spacing } = chooseBestLayoutOptions(
+                    targetNodes,
+                    targetEdges,
+                    targetIds
+                  );
+                  const { nodes: layoutedNodes, edges: layoutedEdges } =
+                    await getLayoutedElements(
+                      targetNodes,
+                      targetEdges,
+                      direction,
+                      spacing,
+                      algorithm
+                    );
+                  const withGroupChildren = await layoutChildrenInsideGroups(
+                    layoutedNodes,
+                    layoutedEdges,
+                    direction,
+                    [40, 32]
+                  );
+                  const collisionFreeNodes = resolveCollisionsWithGroups(
+                    ensureExtentForGroupedNodes(withGroupChildren),
+                    { maxIterations: 150, overlapThreshold: 0, margin: 24 }
+                  );
+                  // Place layout in a box (content bounds + padding), not the whole canvas
+                  const LAYOUT_BOX_PADDING = 40;
+                  const nodesInLayoutBox = translateNodesToLayoutBox(
+                    collisionFreeNodes,
+                    LAYOUT_BOX_PADDING
+                  );
+                  if (streamingLayoutVersion !== myVersion) return;
+                  const store = useCanvasStore.getState();
+                  store.setNodes((all: Node[]) =>
+                    all.map((n) => {
+                      const ln = nodesInLayoutBox.find((x) => x.id === n.id);
+                      return ln ? { ...n, position: ln.position } : n;
+                    })
+                  );
+                  store.setEdges((all: Edge[]) =>
+                    all.map((e) => {
+                      const le = layoutedEdges.find((x) => x.id === e.id);
+                      return le
+                        ? {
+                            ...e,
+                            sourceHandle: le.sourceHandle ?? e.sourceHandle,
+                            targetHandle: le.targetHandle ?? e.targetHandle,
+                          }
+                        : e;
+                    })
+                  );
+                  useCanvasStore.getState().setPendingFitView(true);
+                } catch {
+                  // ignore
+                }
+              })();
             }
-            streamedEdgeCount = res.edges.length;
           };
 
           const reader = presetRes.body!.getReader();
@@ -800,6 +901,7 @@ function AIDiagramPage() {
             }
           }
           full += decoder.decode();
+          processStreamChunk("", true);
 
           try {
             parsed = JSON.parse(full.trim()) as Record<string, unknown>;
@@ -808,10 +910,12 @@ function AIDiagramPage() {
             setLoading(false);
             return;
           }
-          // If preset has no pre-built diagram, fall through to LLM with preset's prompt
+          // If preset has no pre-built diagram, show error when loading saved only
           const presetNodes = parsed?.nodes;
           if (Array.isArray(presetNodes) && presetNodes.length === 0) {
-            parsed = null;
+            setLoading(false);
+            setError("No saved diagram for this preset. Choose \"Generate with AI\" to create it.");
+            return;
           }
         }
       }
@@ -824,64 +928,160 @@ function AIDiagramPage() {
       }
 
       // ─── Call LLM: use user's API key + selected model when set; otherwise server (credits). Stream in both cases. ──
+      /** Minimum nodes to apply per chunk so we render in batches instead of node-by-node. */
+      const MIN_NODES_PER_CHUNK = 2;
+
       if (!parsed) {
         let full = "";
         let streamBuffer = "";
-        let streamedNodeCount = 0;
-        let streamedEdgeCount = 0;
+        let lastAppliedNodeCount = 0;
+        let lastAppliedEdgeCount = 0;
+        let streamingLayoutVersion = 0;
 
-        const processStreamChunk = (delta: string) => {
+        const processStreamChunk = (delta: string, done?: boolean) => {
           streamBuffer += delta;
           const res = parseStreamingDiagramBuffer(streamBuffer);
           const store = useCanvasStore.getState();
           const setNodesNow = store.setNodes;
           const setEdgesNow = store.setEdges;
+          const STREAM_COLS = 6;
+          const STREAM_DX = 200;
+          const STREAM_DY = 100;
 
-          for (let i = streamedNodeCount; i < res.nodes.length; i++) {
-            const raw = res.nodes[i] as { id: string; type?: string; parentId?: string; [k: string]: unknown };
-            if (raw.type === "group") continue;
+          // Ensure nodeIdMap is populated for all parsed nodes (needed for edge source/target mapping)
+          for (let i = 0; i < res.nodes.length; i++) {
+            const raw = res.nodes[i] as { id: string; type?: string; [k: string]: unknown };
             const newId = refId ? `${refId}-${raw.id}` : raw.id;
-            const newParentId = raw.parentId && refId ? `${refId}-${raw.parentId}` : raw.parentId;
             nodeIdMap.set(raw.id, newId);
-            const rawPos = raw.position as { x: number; y: number } | undefined;
-            const hasValidPos = rawPos && typeof rawPos.x === "number" && typeof rawPos.y === "number";
-            const STREAM_COLS = 6;
-            const STREAM_DX = 200;
-            const STREAM_DY = 100;
-            const streamingPosition = hasValidPos
-              ? rawPos
-              : { x: (i % STREAM_COLS) * STREAM_DX, y: Math.floor(i / STREAM_COLS) * STREAM_DY };
-            const node: Node = {
-              id: newId,
-              type: (raw.type as string) || "rectangle",
-              position: streamingPosition,
-              data: (raw.data as Record<string, unknown>) ?? {},
-              ...(newParentId && { parentId: newParentId, extent: "parent" as const }),
-            };
-            if (streamedNodeCount === 0 && i === 0 && isNewDiagram) {
-              setNodesNow([node]);
-              setEdgesNow([]);
-            } else {
-              setNodesNow((prev) => (prev.some((n) => n.id === node.id) ? prev : [...prev, node]));
-            }
           }
-          streamedNodeCount = res.nodes.length;
 
-          for (let i = streamedEdgeCount; i < res.edges.length; i++) {
-            const raw = res.edges[i] as { id?: string; source: string; target: string; [k: string]: unknown };
-            const source = nodeIdMap.get(raw.source) ?? raw.source;
-            const target = nodeIdMap.get(raw.target) ?? raw.target;
-            const edge: Edge = {
-              id: raw.id ? (refId ? `${refId}-${raw.id}` : raw.id) : `e-${source}-${target}-${i}`,
-              source,
-              target,
-              ...(raw.data != null && typeof raw.data === "object" && !Array.isArray(raw.data)
-                ? { data: raw.data as Record<string, unknown> }
-                : {}),
-            };
-            setEdgesNow((prev) => (prev.some((e) => e.id === edge.id) ? prev : [...prev, edge]));
+          const newNodeCount = res.nodes.length - lastAppliedNodeCount;
+          const shouldApply = newNodeCount >= MIN_NODES_PER_CHUNK || done;
+
+          if (shouldApply && res.nodes.length > lastAppliedNodeCount) {
+            const batchNodes: Node[] = [];
+            for (let i = lastAppliedNodeCount; i < res.nodes.length; i++) {
+              const raw = res.nodes[i] as { id: string; type?: string; parentId?: string; [k: string]: unknown };
+              if (raw.type === "group") continue;
+              const newId = nodeIdMap.get(raw.id)!;
+              const newParentId = raw.parentId && refId ? `${refId}-${raw.parentId}` : (raw.parentId as string | undefined);
+              const rawPos = raw.position as { x: number; y: number } | undefined;
+              const hasValidPos = rawPos && typeof rawPos.x === "number" && typeof rawPos.y === "number";
+              const streamingPosition = hasValidPos
+                ? rawPos
+                : { x: (i % STREAM_COLS) * STREAM_DX, y: Math.floor(i / STREAM_COLS) * STREAM_DY };
+              batchNodes.push({
+                id: newId,
+                type: (raw.type as string) || "rectangle",
+                position: streamingPosition,
+                data: (raw.data as Record<string, unknown>) ?? {},
+                ...(newParentId && { parentId: newParentId, extent: "parent" as const }),
+              });
+            }
+            const batchEdges: Edge[] = [];
+            for (let i = lastAppliedEdgeCount; i < res.edges.length; i++) {
+              const raw = res.edges[i] as { id?: string; source: string; target: string; [k: string]: unknown };
+              const source = nodeIdMap.get(raw.source) ?? raw.source;
+              const target = nodeIdMap.get(raw.target) ?? raw.target;
+              batchEdges.push({
+                id: raw.id ? (refId ? `${refId}-${raw.id}` : raw.id) : `e-${source}-${target}-${i}`,
+                source,
+                target,
+                ...(raw.data != null && typeof raw.data === "object" && !Array.isArray(raw.data)
+                  ? { data: raw.data as Record<string, unknown> }
+                  : {}),
+              });
+            }
+            const prevNodes: Node[] = store.nodes;
+            const prevEdges: Edge[] = store.edges;
+            const mergedNodes: Node[] =
+              lastAppliedNodeCount === 0 && isNewDiagram
+                ? batchNodes
+                : (() => {
+                    const byId = new Map<string, Node>(prevNodes.map((n: Node) => [n.id, n]));
+                    for (const n of batchNodes) byId.set(n.id, n);
+                    return [...byId.values()];
+                  })();
+            const mergedEdges: Edge[] =
+              lastAppliedNodeCount === 0 && isNewDiagram
+                ? batchEdges
+                : (() => {
+                    const byId = new Map<string, Edge>(prevEdges.map((e: Edge) => [e.id, e]));
+                    for (const e of batchEdges) byId.set(e.id, e);
+                    return [...byId.values()];
+                  })();
+            setNodesNow(mergedNodes.length ? mergedNodes : []);
+            setEdgesNow(mergedEdges);
+            lastAppliedNodeCount = res.nodes.length;
+            lastAppliedEdgeCount = res.edges.length;
+
+            // After each chunk: run full "Layout all" on all previously rendered nodes from AI response
+            streamingLayoutVersion += 1;
+            const myVersion = streamingLayoutVersion;
+            (async () => {
+              try {
+                const LAYOUT_EXCLUDED = new Set(["freeDraw", "edgeAnchor"]);
+                const targetNodes = mergedNodes.filter((n) => !LAYOUT_EXCLUDED.has((n.type as string) ?? ""));
+                const targetIds = new Set(targetNodes.map((n) => n.id));
+                const targetEdges = mergedEdges.filter(
+                  (e) => targetIds.has(e.source) && targetIds.has(e.target)
+                );
+                if (targetNodes.length < 2) return;
+                const { algorithm, direction, spacing } = chooseBestLayoutOptions(
+                  targetNodes,
+                  targetEdges,
+                  targetIds
+                );
+                const { nodes: layoutedNodes, edges: layoutedEdges } =
+                  await getLayoutedElements(
+                    targetNodes,
+                    targetEdges,
+                    direction,
+                    spacing,
+                    algorithm
+                  );
+                const withGroupChildren = await layoutChildrenInsideGroups(
+                  layoutedNodes,
+                  layoutedEdges,
+                  direction,
+                  [40, 32]
+                );
+                const collisionFreeNodes = resolveCollisionsWithGroups(
+                  ensureExtentForGroupedNodes(withGroupChildren),
+                  { maxIterations: 150, overlapThreshold: 0, margin: 24 }
+                );
+                // Place layout in a box (content bounds + padding), not the whole canvas
+                const LAYOUT_BOX_PADDING = 40;
+                const nodesInLayoutBox = translateNodesToLayoutBox(
+                  collisionFreeNodes,
+                  LAYOUT_BOX_PADDING
+                );
+                if (streamingLayoutVersion !== myVersion) return;
+                const store = useCanvasStore.getState();
+                store.setNodes((all: Node[]) =>
+                  all.map((n) => {
+                    const ln = nodesInLayoutBox.find((x) => x.id === n.id);
+                    return ln ? { ...n, position: ln.position } : n;
+                  })
+                );
+                store.setEdges((all: Edge[]) =>
+                  all.map((e) => {
+                    const le = layoutedEdges.find((x) => x.id === e.id);
+                    return le
+                      ? {
+                          ...e,
+                          sourceHandle: le.sourceHandle ?? e.sourceHandle,
+                          targetHandle: le.targetHandle ?? e.targetHandle,
+                        }
+                      : e;
+                  })
+                );
+                useCanvasStore.getState().setPendingFitView(true);
+              } catch {
+                // ignore layout errors during stream (e.g. empty graph)
+              }
+            })();
           }
-          streamedEdgeCount = res.edges.length;
         };
 
         if (llmApiKey) {
@@ -910,6 +1110,7 @@ function AIDiagramPage() {
               setStreamingText((prev) => prev + delta);
             },
           });
+          processStreamChunk("", true);
         } else {
           // Signed in, no API key: use server Langchain; response is streamed and processed in chunks.
           const res = await fetch("/api/diagrams/langchain", {
@@ -955,6 +1156,7 @@ function AIDiagramPage() {
             }
           }
           full += decoder.decode();
+          processStreamChunk("", true);
         }
         try {
           let jsonStr = full.trim();
@@ -1154,17 +1356,27 @@ function AIDiagramPage() {
           "#3b82f6", "#22c55e", "#eab308", "#f97316", "#ec4899",
           "#8b5cf6", "#14b8a6", "#ef4444", "#6366f1", "#a855f7",
         ];
+        const validMarkerIds = new Set<string>(Object.values(CUSTOM_MARKER_IDS));
+        // Always use Bezier (default) for AI-generated diagrams; apply data.markerEnd/markerStart when valid
         layoutedEdges = layoutedEdges.map((edge: Edge, idx: number) => {
           const d = typeof edge.data === "object" && edge.data ? edge.data : {};
+          const dataMarkerEnd = (d.markerEnd as string) ?? (edge as { markerEnd?: string }).markerEnd;
+          const dataMarkerStart = (d.markerStart as string) ?? (edge as { markerStart?: string }).markerStart;
+          const markerEnd: CustomMarkerId | undefined = dataMarkerEnd && validMarkerIds.has(dataMarkerEnd) ? (dataMarkerEnd as CustomMarkerId) : undefined;
+          const markerStart: CustomMarkerId | undefined = dataMarkerStart && validMarkerIds.has(dataMarkerStart) ? (dataMarkerStart as CustomMarkerId) : undefined;
           return {
             ...edge,
             type: "labeledConnector" as const,
+            ...(markerEnd !== undefined && { markerEnd }),
+            ...(markerStart !== undefined && { markerStart }),
             data: {
               ...d,
-              connectorType: "smoothstep" as const,
+              connectorType: "default",
               flowDirection: (d.flowDirection as string) || "mono" as const,
               strokeColor: (d.strokeColor as string) || STROKE_COLORS[idx % STROKE_COLORS.length],
               ...(isDense && { strokeWidth: 1.5 }),
+              ...(markerEnd !== undefined && { markerEnd }),
+              ...(markerStart !== undefined && { markerStart }),
             },
           };
         });
@@ -1319,7 +1531,10 @@ function AIDiagramPage() {
           }),
           mergedDirection
         );
-        const refinedResolved = resolveNodeCollisions(refineLayoutAgain.nodes);
+        const refinedResolved = resolveCollisionsWithGroups(
+          ensureExtentForGroupedNodes(refineLayoutAgain.nodes),
+          { margin: 24, maxIterations: 150, overlapThreshold: 0 }
+        );
         await applyLayoutWithAnimation(
           setNodes,
           setEdges,
@@ -1331,7 +1546,10 @@ function AIDiagramPage() {
         setPendingFitViewNodeIds(refinedResolved.map((n: { id: string }) => n.id));
         await syncDiagramToExcalidraw(refinedResolved, refinedEdgesAfterLayout);
       } else if (mode === "mindmap-refine") {
-        const mindmapResolved = resolveNodeCollisions(layoutedNodes);
+        const mindmapResolved = resolveCollisionsWithGroups(
+          ensureExtentForGroupedNodes(layoutedNodes),
+          { margin: 24, maxIterations: 150, overlapThreshold: 0 }
+        );
         const currentForAnim = Array.isArray(canvasNodes) ? canvasNodes : [];
         await applyLayoutWithAnimation(
           setNodes,
@@ -1372,15 +1590,22 @@ function AIDiagramPage() {
               },
             };
           });
-          const offsetResolved = resolveNodeCollisions(offsetNodes as Node[]);
+          const offsetResolved = resolveCollisionsWithGroups(offsetNodes as Node[], {
+            margin: 24,
+            maxIterations: 150,
+            overlapThreshold: 0,
+          });
           const mergedNodes: Node[] = [...(existingNodes as Node[]), ...(offsetResolved as Node[])];
           const mergedEdges: Edge[] = [...(existingEdges as Edge[]), ...(layoutedEdges as Edge[])];
           await applyNodesAndEdgesInChunks(setNodes, setEdges, mergedNodes, mergedEdges);
           setPendingFitViewNodeIds(offsetResolved.map((n: { id: string }) => n.id));
           await syncDiagramToExcalidraw(mergedNodes, mergedEdges);
         } else {
-          // Canvas is empty — resolve collisions, then animate from streamed positions if overlap
-          const emptyResolved = resolveNodeCollisions(layoutedNodes);
+          // Canvas is empty — use same collision resolution as "Layout all" so result looks good
+          const emptyResolved = resolveCollisionsWithGroups(
+            ensureExtentForGroupedNodes(layoutedNodes),
+            { margin: 24, maxIterations: 150, overlapThreshold: 0 }
+          );
           const currentForAnim = Array.isArray(canvasNodes) ? canvasNodes : [];
           await applyLayoutWithAnimation(
             setNodes,
@@ -1638,6 +1863,7 @@ function AIDiagramPage() {
                       onChange={(e) => {
                         const v = e.target.value;
                         setPreset(v);
+                        setPresetSource("cache");
                         if (v !== "none" && error === "signup-or-key") setError(null);
                         const p = presetOptions.find((x) => x.value === v);
                         if (p) {
@@ -1670,6 +1896,35 @@ function AIDiagramPage() {
                         />
                       ) : null;
                     })()}
+                  </div>
+                  <div className="flex items-center gap-2 mt-1.5">
+                    <span className="text-[11px] text-gray-500">Use:</span>
+                    <div className="flex rounded-lg border border-gray-300 bg-gray-50 dark:bg-gray-800 dark:border-gray-600 overflow-hidden">
+                      <button
+                        type="button"
+                        onClick={() => { setPresetSource("cache"); if (error?.includes("No saved diagram")) setError(null); }}
+                        className={cn(
+                          "px-2.5 py-1.5 text-[11px] font-medium transition-colors",
+                          presetSource === "cache"
+                            ? "bg-violet-600 text-white dark:bg-violet-500"
+                            : "text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700"
+                        )}
+                      >
+                        Load saved
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => { setPresetSource("ai"); if (error?.includes("No saved diagram")) setError(null); }}
+                        className={cn(
+                          "px-2.5 py-1.5 text-[11px] font-medium transition-colors",
+                          presetSource === "ai"
+                            ? "bg-violet-600 text-white dark:bg-violet-500"
+                            : "text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700"
+                        )}
+                      >
+                        Generate with AI
+                      </button>
+                    </div>
                   </div>
                 </div>
                 {targetCanvas === "reactflow" && mode !== "mindmap-refine" && (
