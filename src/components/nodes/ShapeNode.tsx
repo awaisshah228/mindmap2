@@ -4,10 +4,12 @@ import { memo } from "react";
 import { Handle, type NodeProps, Position } from "@xyflow/react";
 import { BaseNode } from "./BaseNode";
 import { EditableNodeContent } from "./EditableNodeContent";
+import { LayoutHandles } from "./LayoutHandles";
 import { SHAPE_PATHS, type ShapeType } from "@/lib/shape-types";
 import { PALETTE_COLORS } from "@/lib/branch-colors";
 import { getIconById } from "@/lib/icon-registry";
 import { cn } from "@/lib/utils";
+import type { LayoutDirection } from "@/lib/layout-engine";
 
 const DEFAULT_SHAPE: ShapeType = "rectangle";
 const MIN_WIDTH = 100;
@@ -43,6 +45,29 @@ function ShapeNode({ id, data, selected }: NodeProps) {
   const justifyClass = { top: "justify-start", center: "justify-center", bottom: "justify-end" }[textVerticalAlign];
 
   const isLongText = label.length > LONG_TEXT_THRESHOLD;
+  const layoutHandles = data.layoutHandles as { source: number; target: number } | undefined;
+  const layoutDir = (data.layoutDirection as LayoutDirection) ?? "LR";
+
+  const renderHandles = () => {
+    if (layoutHandles && layoutHandles.source >= 1 && layoutHandles.target >= 1) {
+      return (
+        <LayoutHandles
+          nodeId={id}
+          direction={layoutDir}
+          sourceCount={layoutHandles.source}
+          targetCount={layoutHandles.target}
+        />
+      );
+    }
+    return (
+      <>
+        <Handle id="top" type="source" position={Position.Top} className="node-connect-handle" />
+        <Handle id="bottom" type="source" position={Position.Bottom} className="node-connect-handle" />
+        <Handle id="left" type="source" position={Position.Left} className="node-connect-handle" />
+        <Handle id="right" type="source" position={Position.Right} className="node-connect-handle" />
+      </>
+    );
+  };
 
   if (isLongText) {
     return (
@@ -62,10 +87,7 @@ function ShapeNode({ id, data, selected }: NodeProps) {
             {...formatProps}
           />
         </div>
-        <Handle id="top" type="source" position={Position.Top} className="node-connect-handle" />
-        <Handle id="bottom" type="source" position={Position.Bottom} className="node-connect-handle" />
-        <Handle id="left" type="source" position={Position.Left} className="node-connect-handle" />
-        <Handle id="right" type="source" position={Position.Right} className="node-connect-handle" />
+        {renderHandles()}
       </BaseNode>
     );
   }
@@ -121,10 +143,7 @@ function ShapeNode({ id, data, selected }: NodeProps) {
           />
         </div>
       </div>
-      <Handle id="top" type="source" position={Position.Top} className="node-connect-handle" />
-      <Handle id="bottom" type="source" position={Position.Bottom} className="node-connect-handle" />
-      <Handle id="left" type="source" position={Position.Left} className="node-connect-handle" />
-      <Handle id="right" type="source" position={Position.Right} className="node-connect-handle" />
+      {renderHandles()}
     </BaseNode>
   );
 }

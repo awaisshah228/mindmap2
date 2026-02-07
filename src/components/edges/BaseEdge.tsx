@@ -4,7 +4,7 @@ import { memo } from "react";
 import { BaseEdge as ReactFlowBaseEdge, type EdgeMarker } from "@xyflow/react";
 import { cn } from "@/lib/utils";
 
-const DEFAULT_STROKE_WIDTH = 6;
+const DEFAULT_STROKE_WIDTH = 1.5;
 
 export interface BaseEdgeProps {
   id: string;

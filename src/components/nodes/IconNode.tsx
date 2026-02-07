@@ -3,9 +3,11 @@
 import { memo, useState, useRef, useEffect } from "react";
 import { Handle, Position, type NodeProps, useReactFlow } from "@xyflow/react";
 import { BaseNode } from "./BaseNode";
+import { LayoutHandles } from "./LayoutHandles";
 import { getIconById } from "@/lib/icon-registry";
 import { useCanvasStore } from "@/lib/store/canvas-store";
 import { cn } from "@/lib/utils";
+import type { LayoutDirection } from "@/lib/layout-engine";
 
 interface IconNodeData {
   iconId?: string;
@@ -19,7 +21,25 @@ function IconNode({ id, data, selected }: NodeProps) {
   const { iconId, emoji, customIcon, iconUrl, label } = (data || {}) as unknown as IconNodeData;
   const def = iconId ? getIconById(iconId) : null;
   const IconComponent = def?.Icon;
+  const layoutHandles = data?.layoutHandles as { source: number; target: number } | undefined;
+  const layoutDir = (data?.layoutDirection as LayoutDirection) ?? "LR";
   const { updateNodeData } = useReactFlow();
+
+  const renderHandles = () => {
+    if (layoutHandles && layoutHandles.source >= 1 && layoutHandles.target >= 1) {
+      return (
+        <LayoutHandles nodeId={id} direction={layoutDir} sourceCount={layoutHandles.source} targetCount={layoutHandles.target} />
+      );
+    }
+    return (
+      <>
+        <Handle id="top" type="source" position={Position.Top} className="node-connect-handle" />
+        <Handle id="bottom" type="source" position={Position.Bottom} className="node-connect-handle" />
+        <Handle id="left" type="source" position={Position.Left} className="node-connect-handle" />
+        <Handle id="right" type="source" position={Position.Right} className="node-connect-handle" />
+      </>
+    );
+  };
   const pushUndo = useCanvasStore((s) => s.pushUndo);
   const [editingLabel, setEditingLabel] = useState(false);
   const [labelInput, setLabelInput] = useState(label ?? "");
@@ -47,10 +67,7 @@ function IconNode({ id, data, selected }: NodeProps) {
       style={{ width: 64, minHeight }}
     >
       {/* Connection handles on all 4 sides */}
-      <Handle id="top" type="source" position={Position.Top} className="node-connect-handle" />
-      <Handle id="bottom" type="source" position={Position.Bottom} className="node-connect-handle" />
-      <Handle id="left" type="source" position={Position.Left} className="node-connect-handle" />
-      <Handle id="right" type="source" position={Position.Right} className="node-connect-handle" />
+      {renderHandles()}
 
       <div className="w-full shrink-0 flex items-center justify-center" style={{ height: 64 }}>
         {customIcon ? (

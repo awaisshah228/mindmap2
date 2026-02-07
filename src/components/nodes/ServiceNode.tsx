@@ -4,9 +4,11 @@ import { memo } from "react";
 import { Handle, type NodeProps, Position } from "@xyflow/react";
 import { BaseNode } from "./BaseNode";
 import { EditableNodeContent } from "./EditableNodeContent";
+import { LayoutHandles } from "./LayoutHandles";
 import { Server } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { getIconById } from "@/lib/icon-registry";
+import type { LayoutDirection } from "@/lib/layout-engine";
 
 const DEFAULT_WIDTH = 160;
 const DEFAULT_HEIGHT = 72;
@@ -19,6 +21,29 @@ function ServiceNode({ id, data, selected }: NodeProps) {
   const iconUrl = data.iconUrl as string | undefined;
   const customIcon = data.customIcon as string | undefined;
   const emoji = data.emoji as string | undefined;
+  const layoutHandles = data.layoutHandles as { source: number; target: number } | undefined;
+  const layoutDir = (data.layoutDirection as LayoutDirection) ?? "LR";
+
+  const renderHandles = () => {
+    if (layoutHandles && layoutHandles.source >= 1 && layoutHandles.target >= 1) {
+      return (
+        <LayoutHandles
+          nodeId={id}
+          direction={layoutDir}
+          sourceCount={layoutHandles.source}
+          targetCount={layoutHandles.target}
+        />
+      );
+    }
+    return (
+      <>
+        <Handle type="source" position={Position.Left} id="left" className="node-connect-handle" />
+        <Handle type="source" position={Position.Right} id="right" className="node-connect-handle" />
+        <Handle type="source" position={Position.Top} id="top" className="node-connect-handle" />
+        <Handle type="source" position={Position.Bottom} id="bottom" className="node-connect-handle" />
+      </>
+    );
+  };
 
   const renderIcon = () => {
     if (customIcon) return <img src={customIcon} alt="" className="w-5 h-5 object-contain" />;
@@ -40,10 +65,7 @@ function ServiceNode({ id, data, selected }: NodeProps) {
       minWidth={100}
       minHeight={56}
     >
-      <Handle type="source" position={Position.Left} id="left" className="node-connect-handle" />
-      <Handle type="source" position={Position.Right} id="right" className="node-connect-handle" />
-      <Handle type="source" position={Position.Top} id="top" className="node-connect-handle" />
-      <Handle type="source" position={Position.Bottom} id="bottom" className="node-connect-handle" />
+      {renderHandles()}
 
       <div className="h-full flex items-center gap-3 px-4 py-2 bg-gradient-to-br from-slate-50 to-slate-100">
         <div className="shrink-0 w-10 h-10 rounded-lg bg-violet-100 flex items-center justify-center">

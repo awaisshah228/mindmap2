@@ -59,7 +59,7 @@ const GLOBAL_EDGE_COLORS = [
   { id: "black", label: "Black", hex: "#1f2937" },
 ];
 
-const EDGE_STROKE_WIDTHS = [2, 4, 6, 8, 10, 12] as const;
+const EDGE_STROKE_WIDTHS = [1.5, 2, 4, 6, 8, 10, 12] as const;
 const ARROW_MARKER_ID = CUSTOM_MARKER_IDS.arrowClosed;
 
 export default function AppSidebar({ isOpen = true, onClose, isMobile }: AppSidebarProps) {

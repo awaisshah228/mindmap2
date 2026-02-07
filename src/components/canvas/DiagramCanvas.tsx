@@ -1653,6 +1653,7 @@ export default function DiagramCanvas() {
           nodesDraggable={!presentationMode && activeTool !== "freeDraw" && activeTool !== "connector"}
           nodesConnectable={!presentationMode && activeTool !== "freeDraw"}
           edgesReconnectable={!presentationMode}
+          elevateEdgesOnSelect
           elementsSelectable={activeTool !== "freeDraw"}
           edgesFocusable={activeTool !== "freeDraw"}
           zoomOnScroll={!presentationMode}

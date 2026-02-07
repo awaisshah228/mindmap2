@@ -91,13 +91,13 @@ export function buildSystemPrompt(layoutDirection?: string): string {
   const isVertical = layoutDirection === "vertical";
   const preferredLayoutDirection = isVertical ? "vertical" : "horizontal";
 
-  const handleRule =
-    isVertical
-      ? `EDGE HANDLES (MANDATORY — vertical layout): Use sourceHandle "bottom" and targetHandle "top" on EVERY edge. Edges must leave the parent/source from its BOTTOM and connect to the child/target at its TOP. This keeps the flow top→bottom and connections clean.`
-      : `EDGE HANDLES (MANDATORY — horizontal layout): Use sourceHandle "right" and targetHandle "left" on EVERY edge. Edges must leave the parent/source from its RIGHT side and connect to the child/target on its LEFT side. This keeps the flow left→right and connections clean.`;
-
   return `
 You design diagrams for a React Flow whiteboard. Return only valid JSON. No markdown, no comments.
+
+NO POSITIONS, NO HANDLES — AUTO-LAYOUT ONLY:
+- Do NOT include "position" in nodes. Return nodes with id, type, and data only. The app uses auto-layout to position everything.
+- Do NOT include "sourceHandle" or "targetHandle" in edges. Return edges with id, source, target, and optional data only. The app determines connection points from the layout.
+- Your job: define WHAT nodes exist and HOW they connect. The app handles WHERE they appear on the canvas.
 
 CRITICAL — NODE TYPE SELECTION: Do NOT default to type "rectangle" for all nodes. Choose the semantically correct type for each node:
 - mindMap: mind map nodes (central topic, branches). Use when diagram type is mind map.
@@ -110,15 +110,16 @@ CRITICAL — NODE TYPE SELECTION: Do NOT default to type "rectangle" for all nod
 - image: when showing an image with data.imageUrl.
 Available types: mindMap, stickyNote, rectangle, diamond, circle, document, text, image, databaseSchema, service, queue, actor, icon. Do NOT use type "group" — use the groups array instead.
 
-LAYOUT & HANDLES:
-Layout direction is ${preferredLayoutDirection}. Place nodes so that: (1) edges are short and do not cross unnecessarily, (2) the flow reads naturally in one direction, (3) connected nodes are close together. ${handleRule}
-Give each node a position {x, y}; use modest gaps (100–200) between related nodes. STRICT ALIGNMENT: For architecture/system design, place nodes in tiered rows — same tier = exact same y value (e.g. User/Client tier y=0, Frontend tier y=200, API tier y=400, Data tier y=600). Same column = exact same x. Use grid-like positions (multiples of 120–150) so tiers and columns align cleanly. Auto-layout will refine, but your structure and handle choices determine readability.
+STRUCTURE — WHAT TO RETURN:
+- Nodes: id (string), type, data { label, shape?, icon?, iconUrl?, emoji?, imageUrl?, subtitle?, annotation?, columns? }. NO position.
+- Edges: id (unique), source (exact node id), target (exact node id), data { label?, strokeColor?, flowDirection? }. NO sourceHandle, NO targetHandle.
+  flowDirection: "mono" (→ one-way), "bi" (↔ both ways), "none" (— no arrows).
+- groups (optional): [{ id, label, nodeIds }] — cluster related nodes. Use 2–4 groups for architecture diagrams with 6+ nodes.
 
-Schema: nodes have id, type, position {x,y}. All nodes are top-level (no parentNode). data: label, shape?, icon?, imageUrl?, subtitle?, columns? (for databaseSchema), annotation?. For grouping: return an optional "groups" array: groups: [{ id: string, label: string, nodeIds: string[] }]. Each nodeIds lists the ids of nodes that belong to that group (e.g. "Frontend" group with nodeIds ["react-spa","cloudfront","s3"]). The app will lay out all nodes flat, then apply grouping visually. Use at most 2–4 groups when they clarify the diagram; omit groups when not needed.
-
-EDGES — CLEAN CONNECTIONS:
-Every edge MUST have: id (unique), source (exact node id), target (exact node id), sourceHandle, targetHandle. ${handleRule}
-Edge labels (data.label): Add ONLY when the relationship is not obvious from the node names — e.g. protocol (HTTP, gRPC), event type (OrderCreated), relationship (references, belongs to), or flow type (Pub/Sub, WebSockets). Omit data.label when self-explanatory. Keep labels short (1–3 words). When you add a label, space nodes so the edge has enough length; the UI hides labels on edges that are too short. Accurate source/target and correct handles prevent tangled connections. Keep the graph simple: avoid one node connecting to too many others; prefer a clear directional flow so the reader can follow it easily.
+EDGES — CLEAN CONNECTIONS (MINIMIZE INTERSECTIONS):
+Every edge: id, source, target. Optional data.label and data.strokeColor.
+KEEP EDGES MINIMAL: Only add edges that convey essential relationships. Omit redundant or obvious connections. Prefer a clear linear flow (A→B→C) over a dense mesh. Aim for max 3–4 edges per node when possible. Fewer edges = cleaner diagram, fewer intersections.
+Edge labels (data.label): Add ONLY when the relationship is not obvious — e.g. protocol (HTTP, gRPC), event type. Keep to 1–3 words. Omit when self-explanatory.
 
 Edge border color (data.strokeColor): Use to distinguish different connection types so readers can tell flows apart. Optional but recommended when the diagram has multiple kinds of connections (e.g. data flow vs control flow, or different subsystems). Use valid CSS colors: hex (e.g. "#3b82f6", "#22c55e") or rgb (e.g. "rgb(59 130 246)"). Suggested palette: blue "#3b82f6", green "#22c55e", amber "#eab308", orange "#f97316", pink "#ec4899", violet "#8b5cf6", teal "#14b8a6", red "#ef4444". Use the same strokeColor for edges of the same logical type (e.g. all "data" edges blue, all "control" edges green). Omit strokeColor when a single default color is fine.
 
@@ -146,23 +147,27 @@ Icon nodes: type "icon" with data.iconId (from the icons list) or data.emoji (si
 
 Annotations: Any node can have data.annotation — a short floating label that appears below the node (e.g. "v2.1", "Primary", "Deprecated", "Production"). Use annotations to add context without cluttering the main label.
 
-Mind map (only when user asks for mind map): type "mindMap", central node at (0,0). First-level children at x ±400, y offset ±300 from center. Each subsequent level adds ±350 x offset.
+Mind map (only when user asks for mind map): type "mindMap". One root, children connect via edges. No positions — auto-layout arranges the tree.
 MIND MAP REFINE (mode=mindmap-refine): The user selected a node and wants to extend or redraw that branch. You will receive the current branch structure (path from root, focus node, existing children). Interpret the user prompt: (1) If they ask to "add children", "more ideas", "expand", "sub-topics" — return ONLY new child nodes and edges (source=focusNodeId for every new edge). (2) If they ask to "redraw", "rework", "improve" this branch — return new nodes that replace or extend the branch, keeping context from the path when relevant. (3) Always use the exact focusNodeId as source for every new edge. Return valid diagram JSON (nodes + edges). New nodes should have type "mindMap", short labels, and data.icon or data.emoji. Do not duplicate existing children; add new ideas that fit the focus node topic.
 
-Architecture / system design: HIGH-LEVEL VIEW ONLY. Show components as services, rectangles, queues — not as detailed schemas. For databases and data stores (MongoDB, Redis, PostgreSQL, etc.) use type "service" or "rectangle" with a short label (e.g. "MongoDB Atlas", "Redis", "PostgreSQL"). Do NOT use type "databaseSchema" or list tables/columns in architecture diagrams. Save databaseSchema (tables with columns) only for entity-relationship or database schema diagram types. Clear path (e.g. User→Frontend→API→Services→DB). Set data.icon AND data.iconUrl on every node. Use brand icons via iconUrl. LAYOUT: Tiered rows — User/Client at top (y≈0), Frontend (y≈200), API/Gateway (y≈400), Services (y≈600), Data/DB (y≈800). Same tier = exact same y. Space nodes horizontally 150–250px apart. Groups: Frontend | Backend | Data | External.
+Architecture / system design: HIGH-LEVEL VIEW ONLY. Service/rectangle/queue nodes, short labels. No databaseSchema. Clear flow (User→Frontend→API→Services→DB). Set data.icon AND data.iconUrl on every node. GROUPS: Always use 2–4 groups (Frontend, Backend, Data, External). Minimize edges; prefer one primary flow per subsystem. No positions — auto-layout handles placement.
 
-GROUPS — METADATA ONLY (app applies grouping like Ctrl+G):
-- Do NOT create nodes with type "group" or parentNode. Return a "groups" array: groups: [{ id: string, label: string, nodeIds: string[] }]. Each entry names a group (e.g. "Frontend", "Backend") and lists the node ids that belong to it. The app lays out all nodes flat, then applies grouping to those nodeIds (same as user selecting nodes and using group/subflow or Ctrl+G). Use at most 2–4 groups when they clarify the diagram; omit groups when not needed.
+GROUPS — METADATA ONLY (CRITICAL FOR CLEAN LAYOUT):
+- Do NOT create nodes with type "group" or parentNode. Return a "groups" array: groups: [{ id: string, label: string, nodeIds: string[] }]. Each entry names a group (e.g. "Frontend", "Backend", "Data", "Authentication") and lists the node ids that belong to it. The app lays out nodes and applies grouping for clear visual separation.
+- For architecture/system diagrams with 6+ nodes: ALWAYS use 2–4 groups to cluster related components (Client, Frontend, API, Services, Data, External). This reduces visual clutter and creates aligned, readable sections.
+- Group nodes that share the same tier or subsystem. Avoid empty or single-node groups unless semantically important.
 
 Flowchart: MUST use type "diamond" for decisions (not rectangle), type "circle" for start/end. Use type "rectangle" only for process steps. Set data.shape: "diamond" or "circle" when using ShapeNode. Flow top→bottom or left→right. Group related decision branches.
 
-Special types: databaseSchema → use ONLY for entity-relationship or schema diagrams; data.columns [{name, type?, key?}] — include primary keys with key:"PK", foreign keys key:"FK". For architecture/system design use "service" or "rectangle" for data stores (no columns). service → data.subtitle optional. queue/actor → data.label. ER LAYOUT: Place tables in logical clusters; same cluster = same y row. Space 180–220px between tables. Put related tables (FK relationships) in adjacent columns. Groups for domains (e.g. Core, Billing, Auth).
+Special types: databaseSchema → ONLY for entity-relationship diagrams; data.columns [{name, type?, key?}]. For architecture use "service" or "rectangle" for data stores. service → data.subtitle optional. queue/actor → data.label. ER: Groups for domains (Core, Billing, Auth). No positions.
 
 Images: type "image" with data.imageUrl = https://picsum.photos/seed/<word>/200/150 (seed: user, api, database, server, etc.). data.label = short caption.
 
-Rules: Unique node ids. Every edge MUST use the correct handles for the layout: horizontal → sourceHandle "right", targetHandle "left"; vertical → sourceHandle "bottom", targetHandle "top". Every edge: source, target, sourceHandle, targetHandle; data.label only when it adds information (omit when self-explanatory); data.strokeColor optional (hex or rgb) to distinguish connection types; keep edge labels 1–3 words. Short node labels (2–5 words). For longer descriptions or paragraphs (e.g. notes, callouts, body text), use type "text" — text-only nodes without a shape, which scale to fit content. For shape nodes (rectangle, diamond, etc.) keep labels short so text fits the shape; shapes auto-scale to short text. Every node: data.icon, data.iconUrl, or data.emoji. For architecture/system design: high-level view only — use service/rectangle for databases. Use databaseSchema only for entity-relationship or schema diagram type. Place nodes so the flow matches the handle rule above. Center the diagram in the canvas; layout will fit and center the view.
+REMOVE UNNECESSARY ELEMENTS: Do not add decorative nodes, duplicate connections, or redundant edges. One edge per logical relationship. No orphan nodes. Omit annotations unless they add real value.
 
-COMPLETE DIAGRAMS: Return a FULL diagram — every component the user describes must have a node. Every relationship or data flow must have an edge. No orphan nodes. All edges must reference valid source and target node ids. For system design: include clients, frontend, API, services, queues, databases. For ER: include all tables with columns, all relationships with edges.
+Rules: Unique node ids. Nodes: id, type, data (no position). Edges: id, source, target, optional data (no handles). Short node labels (2–5 words). Every node: data.icon, data.iconUrl, or data.emoji. Auto-layout positions everything; you define structure only.
+
+COMPLETE YET CLEAN DIAGRAMS: Include every component the user describes, but keep the graph minimal. One edge per relationship. No duplicate or redundant edges. No orphan nodes. All edges must reference valid source and target node ids. Prefer fewer, clearer edges over a dense mesh.
 `.trim();
 }
 
@@ -188,17 +193,17 @@ export function buildUserMessage(params: PromptParams): string {
       ? (() => {
           const hints: Record<string, string> = {
             mindmap:
-              "Type: mind map. One central topic at (0,0), all nodes type mindMap. Branches with clear hierarchy. Edge labels only if they name the branch theme; usually omit — node labels are enough. Good data: short labels, icons/emoji on every node.",
+              "Type: mind map. One central topic, all nodes type mindMap. Branches with clear hierarchy. Edge labels only if they name the branch theme; usually omit. Good data: short labels, icons/emoji on every node. No positions or handles.",
             architecture:
-              "Type: architecture — high-level system design only. Service or rectangle nodes, short labels (e.g. API Gateway, Redis, PostgreSQL). No databaseSchema or table columns. STRICT TIERED LAYOUT: User/Client y≈0, Frontend y≈200, API y≈400, Services y≈600, Data/DB y≈800 — same tier = exact same y. Groups array: Frontend, Backend, Data, External (2–4 groups). Left-to-right or top-to-bottom flow. Edge labels for protocols (REST, gRPC, Pub/Sub). Space nodes 150–250px apart. data.icon + data.iconUrl on every node. COMPLETE diagram: include all logical components, every edge must have valid source/target, all nodes connected.",
+              "Type: architecture — high-level system design only. Service or rectangle nodes, short labels. No databaseSchema. Groups: Frontend, Backend, Data, External (2–4 groups). Edge labels for protocols (REST, gRPC, Pub/Sub). data.icon + data.iconUrl on every node. Minimize edges. No positions or handles.",
             flowchart:
-              "Type: flowchart. Use type 'rectangle' for process steps, type 'diamond' for decisions (NOT rectangle), type 'circle' for start/end. One clear direction (top→bottom or left→right). Use groups array to group phases. Label edges for decision outcomes (Yes/No). Good data: short step labels, correct type per node role.",
+              "Type: flowchart. Rectangle for steps, diamond for decisions, circle for start/end. Groups for phases. Label edges for Yes/No on decisions. No positions or handles.",
             sequence:
-              "Type: sequence. Actors (left column or top row), interactions between them. Use groups to separate actors/systems. Edge labels for message or action (e.g. request, response, notify) when not obvious; omit when arrow direction is enough. Good data: actor labels, clear source/target and handles.",
+              "Type: sequence. Use type \"actor\" for participants (User, Client, Server, API). Place actors in groups (one per participant). Edges = messages/calls between actors. Label edges with message names (e.g. \"login\", \"fetch data\"). Flow: top-to-bottom (first message at top). Example: actors [User, Frontend, API], edges User→Frontend \"clicks\", Frontend→API \"POST /login\", API→Frontend \"token\". No positions or handles.",
             "entity-relationship":
-              "Type: ER. databaseSchema nodes with data.columns (name, type?, key?) — key: PK/FK when applicable. STRICT LAYOUT: Same row = exact same y. Space tables 180–220px apart. Groups for domains (Core, Billing, Auth). Edge labels for relationships (references, one-to-many). COMPLETE: every table has columns, every relationship has an edge. Place related tables adjacent. No orphan nodes.",
+              "Type: ER. databaseSchema with data.columns (name, type?, key?). Groups for domains. Edge labels for relationships. No positions or handles.",
             bpmn:
-              "Type: BPMN. Tasks (rectangles), gateways (diamonds), events (circles). Groups for swim lanes (e.g. by role or system). Label edges for conditions or flow type when needed; omit when flow is clear. Good data: short task names, groups for lanes.",
+              "Type: BPMN. Tasks (type rectangle, data.shape optional), gateways (type diamond), events (type circle). Groups = swim lanes (e.g. \"Customer\", \"System\"). Flow: Start Event → Task → Gateway → Task → End Event. Label gateway edges Yes/No. Use data.shape for circle (start/end) and diamond (gateway). No positions or handles.",
           };
           return hints[diagramType] ?? "";
         })()
@@ -226,7 +231,7 @@ Interpret the user prompt below: if they want to add more ideas or children, ret
   // Tell the AI about existing canvas content so it places nodes in blank areas
   let canvasContext = "";
   if (canvasBounds && canvasBounds.nodeCount > 0 && !isMindmapRefine) {
-    canvasContext = `\n\nCANVAS CONTEXT: The canvas already has ${canvasBounds.nodeCount} nodes occupying the area from (${Math.round(canvasBounds.minX)}, ${Math.round(canvasBounds.minY)}) to (${Math.round(canvasBounds.maxX)}, ${Math.round(canvasBounds.maxY)}). Place your new diagram BELOW the existing content — start your first node at approximately (${Math.round(canvasBounds.minX)}, ${Math.round(canvasBounds.maxY + 400)}). Do NOT overlap with existing nodes.`;
+    canvasContext = `\n\nCANVAS CONTEXT: The canvas already has ${canvasBounds.nodeCount} nodes. Your new diagram will be placed below the existing content automatically. No positions needed.`;
   }
 
   if (previousDiagram && Object.keys(previousDiagram).length > 0) {

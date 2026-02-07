@@ -390,7 +390,7 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
   pendingImageLabel: null,
   pendingEdgeType: "default",
   defaultEdgeStrokeColor: null,
-  defaultEdgeStrokeWidth: 2,
+  defaultEdgeStrokeWidth: 1.5,
   defaultEdgeMarkerEnd: null,
   defaultEdgeMarkerStart: null,
   mindMapLayout: DEFAULT_MIND_MAP_LAYOUT,

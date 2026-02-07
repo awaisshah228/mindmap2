@@ -17,7 +17,7 @@ import { useCanvasStore } from "@/lib/store/canvas-store";
 import { BaseEdge } from "./BaseEdge";
 import { CUSTOM_MARKER_IDS, MARKER_SHAPES, renderDynamicMarker } from "./CustomMarkerDefs";
 
-const EDGE_STROKE_WIDTH = 2;
+const EDGE_STROKE_WIDTH = 1.5;
 /** Offset toolbar above the label so it doesn't cover placeholder/input */
 const TOOLBAR_OFFSET_Y = -52;
 /** Min edge length (px) to show a label so the edge stays visible; also require edge >= label width + this padding */
@@ -126,8 +126,19 @@ function LabeledConnectorEdge({
   const strokeDasharray = (data?.strokeDasharray as string | undefined) ?? undefined;
   const strokeWidth =
     (data?.strokeWidth as number | undefined) ?? globalDefaultStrokeWidth ?? EDGE_STROKE_WIDTH;
-  const markerEndWithDefault = markerEnd ?? globalDefaultMarkerEnd ?? undefined;
-  const markerStartWithDefault = markerStart ?? globalDefaultMarkerStart ?? undefined;
+  const flowDirection = (data?.flowDirection as "mono" | "bi" | "none") ?? "mono";
+  let markerEndWithDefault = markerEnd ?? globalDefaultMarkerEnd ?? undefined;
+  let markerStartWithDefault = markerStart ?? globalDefaultMarkerStart ?? undefined;
+  if (flowDirection === "mono") {
+    markerEndWithDefault = CUSTOM_MARKER_IDS.arrowClosed;
+    markerStartWithDefault = undefined;
+  } else if (flowDirection === "bi") {
+    markerEndWithDefault = CUSTOM_MARKER_IDS.arrowClosed;
+    markerStartWithDefault = CUSTOM_MARKER_IDS.arrowClosed;
+  } else if (flowDirection === "none") {
+    markerEndWithDefault = undefined;
+    markerStartWithDefault = undefined;
+  }
   const erRelation = (data?.erRelation as ERRelation) ?? null;
   const markerColor = (data?.markerColor as string | undefined) ?? undefined;
   const markerScale = (data?.markerScale as number | undefined) ?? 1;
@@ -311,6 +322,21 @@ function LabeledConnectorEdge({
       setRelationOpen(false);
     },
     [id, updateEdgeData, pushUndo]
+  );
+
+  const setFlowDirection = useCallback(
+    (dir: "mono" | "bi" | "none") => {
+      pushUndo();
+      updateEdgeData(id, { flowDirection: dir });
+      setEdges((eds) =>
+        eds.map((e) =>
+          e.id === id
+            ? { ...e, markerEnd: undefined, markerStart: undefined }
+            : e
+        )
+      );
+    },
+    [id, updateEdgeData, setEdges, pushUndo]
   );
 
   /* ── Flip markers (swap start ↔ end) ── */
@@ -1034,6 +1060,44 @@ function LabeledConnectorEdge({
               className="px-2 py-1 rounded hover:bg-gray-600 text-xs whitespace-nowrap"
             >
               {label ? "Edit text" : "Add text"}
+            </button>
+          </div>
+          {/* Flow direction: mono (→), bi (↔), none (—) */}
+          <div className="w-px h-4 bg-gray-600" />
+          <div className="flex items-center gap-0.5">
+            <span className="text-[10px] font-medium text-gray-500 uppercase tracking-wider mr-0.5">Flow</span>
+            <button
+              type="button"
+              onClick={() => setFlowDirection("mono")}
+              title="One direction (→)"
+              className={cn(
+                "px-2 py-1 rounded hover:bg-gray-600 text-xs",
+                flowDirection === "mono" && "bg-violet-600"
+              )}
+            >
+              →
+            </button>
+            <button
+              type="button"
+              onClick={() => setFlowDirection("bi")}
+              title="Bidirectional (↔)"
+              className={cn(
+                "px-2 py-1 rounded hover:bg-gray-600 text-xs",
+                flowDirection === "bi" && "bg-violet-600"
+              )}
+            >
+              ↔
+            </button>
+            <button
+              type="button"
+              onClick={() => setFlowDirection("none")}
+              title="No direction (—)"
+              className={cn(
+                "px-2 py-1 rounded hover:bg-gray-600 text-xs",
+                flowDirection === "none" && "bg-violet-600"
+              )}
+            >
+              —
             </button>
           </div>
           {/* ER Relation */}

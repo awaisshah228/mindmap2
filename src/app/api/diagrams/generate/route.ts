@@ -25,7 +25,7 @@ const nodeSchema = z.object({
     "icon",
     "image",
   ]),
-  position: z.object({ x: z.number(), y: z.number() }),
+  position: z.object({ x: z.number(), y: z.number() }).optional(),
   data: z.object({
     label: z.string(),
     shape: z.string().optional(),
@@ -100,20 +100,19 @@ export async function POST(req: NextRequest) {
       schema: diagramSchema,
       prompt: `Generate a COMPLETE diagram JSON for: "${prompt}"
 
-NODES: Each node must have: id (string), type, position {x, y}, data {label, shape?, icon?, iconUrl?, emoji?, imageUrl?, subtitle?, annotation?, columns?}.
-TYPES: mindMap (mind maps), stickyNote (notes), rectangle (generic/process), diamond (decisions), circle (start/end), document (files), text, databaseSchema (ER/schema with data.columns), service (architecture), queue (message queues), actor (users/actors), icon (standalone icons), image (with data.imageUrl).
-Do NOT default everything to rectangle. Use databaseSchema for entity-relationship with data.columns. Use service/queue/actor for architecture. Use icon/image when appropriate.
+NO POSITIONS, NO HANDLES — auto-layout handles placement.
 
-POSITIONING — STRICT ALIGNMENT:
-- Architecture/system design: tiered rows — User y≈0, Frontend y≈200, API y≈400, Services y≈600, Data y≈800. Same tier = exact same y. Space 150–250px horizontally.
-- ER/database: same row = same y. Space tables 180–220px apart. Groups for logical clusters.
-- General: grid positions (multiples of 120–150). Space 150–250px between nodes. Never overlap.
+NODES: id (string), type, data {label, shape?, icon?, iconUrl?, emoji?, imageUrl?, subtitle?, annotation?, columns?}. Do NOT include position.
+TYPES: mindMap, stickyNote, rectangle, diamond, circle, document, text, databaseSchema (ER with data.columns), service, queue, actor, icon, image.
+Use databaseSchema for ER. Use service/queue/actor for architecture. Use icon/image when appropriate.
 
-EDGES: id, source, target, sourceHandle, targetHandle. Horizontal flow: sourceHandle "right", targetHandle "left". Vertical: sourceHandle "bottom", targetHandle "top". data.label for protocols (HTTP, gRPC) or relationships. Keep labels short.
+EDGES: id, source, target, optional data {label?, strokeColor?}. Do NOT include sourceHandle or targetHandle.
 
-COMPLETE: Include every component. Every relationship needs an edge. No orphan nodes. All edges must reference valid node ids.
+GROUPS (optional): groups: [{ id, label, nodeIds }] for architecture diagrams with 6+ nodes.
 
-Icon libs: ${ICON_IDS_FOR_PROMPT}. Architecture: service/queue/actor with data.icon + data.iconUrl. ER: databaseSchema with data.columns (name, type?, key?). Unique ids.`,
+COMPLETE: Every component as a node. Every relationship as an edge. No orphan nodes. Minimize edges (max 3–4 per node).
+
+Icon libs: ${ICON_IDS_FOR_PROMPT}. Architecture: data.icon + data.iconUrl. Unique ids.`,
     });
 
     if (userId && !admin) {

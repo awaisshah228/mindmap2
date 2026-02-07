@@ -13,6 +13,7 @@ import {
   applyGroupingFromMetadata,
   layoutChildrenInsideGroups,
   ensureExtentForGroupedNodes,
+  resolveNodeCollisions,
   type LayoutDirection,
   type LayoutAlgorithm,
 } from "@/lib/layout-engine";
@@ -22,7 +23,9 @@ import EditorLayout from "@/components/layout/EditorLayout";
 import { saveNow, recordPromptHistory } from "@/lib/store/project-storage";
 import { Loader2, Settings } from "lucide-react";
 import { applyNodesAndEdgesInChunks } from "@/lib/chunked-nodes";
+import { useAnimatedLayout } from "@/hooks/useAnimatedLayout";
 import { parseStreamingDiagramBuffer, parseStreamingElementsBuffer } from "@/lib/ai/streaming-json-parser";
+import { validateDiagramOutput } from "@/lib/ai/validate-diagram-output";
 import { diagramToExcalidraw } from "@/lib/excalidraw-convert";
 import { excalidrawToDrawioXml } from "@/lib/excalidraw-to-drawio";
 import { validateAndFixXml } from "@/lib/drawio-utils";
@@ -31,12 +34,41 @@ import { applyCloudIconMatching } from "@/lib/cloud-icon-match";
 import { dslToExcalidraw } from "@/lib/j2-converter";
 import { computeFitViewAppState } from "@/lib/excalidraw-render";
 
+/** Apply layout with smooth animation when current nodes overlap target (e.g. streaming → final layout). */
+async function applyLayoutWithAnimation(
+  setNodes: (n: Node[] | ((prev: Node[]) => Node[])) => void,
+  setEdges: (e: Edge[] | ((prev: Edge[]) => Edge[])) => void,
+  targetNodes: Node[],
+  targetEdges: Edge[],
+  currentNodes: Node[],
+  applyAnimatedLayout: (
+    target: Node[],
+    set: (n: Node[] | ((prev: Node[]) => Node[])) => void,
+    start: Node[],
+    duration?: number
+  ) => void
+): Promise<void> {
+  setEdges(targetEdges);
+  const curMap = new Map(currentNodes.map((n) => [n.id, n]));
+  const startNodes = targetNodes.map((t) => {
+    const cur = curMap.get(t.id);
+    return cur?.position ? { ...t, position: cur.position } : t;
+  });
+  const hasOverlap = targetNodes.some((t) => curMap.has(t.id));
+  if (hasOverlap && targetNodes.length > 0) {
+    setNodes(startNodes);
+    applyAnimatedLayout(targetNodes, setNodes, startNodes, 500);
+    return Promise.resolve();
+  }
+  return applyNodesAndEdgesInChunks(setNodes, setEdges, targetNodes, targetEdges);
+}
+
 export const DIAGRAM_TYPE_OPTIONS = [
   { value: "auto", label: "Auto detect (default)" },
   { value: "mindmap", label: "Mind map" },
   { value: "architecture", label: "Cloud / System architecture" },
   { value: "flowchart", label: "Flowchart" },
-  { value: "sequence", label: "Sequence" },
+  { value: "sequence", label: "Sequence diagram" },
   { value: "entity-relationship", label: "Entity relationship" },
   { value: "bpmn", label: "BPMN" },
 ] as const;
@@ -241,6 +273,8 @@ function AIDiagramPage() {
     setDrawioData,
     setHasUnsavedChanges,
   } = useCanvasStore() as any;
+
+  const applyAnimatedLayout = useAnimatedLayout();
 
   // Sync target canvas from current tab when landing on AI page
   useEffect(() => {
@@ -713,10 +747,18 @@ function AIDiagramPage() {
               const newId = refId ? `${refId}-${raw.id}` : raw.id;
               const newParentId = raw.parentId && refId ? `${refId}-${raw.parentId}` : raw.parentId;
               nodeIdMap.set(raw.id, newId);
+              const rawPos = raw.position as { x: number; y: number } | undefined;
+              const hasValidPos = rawPos && typeof rawPos.x === "number" && typeof rawPos.y === "number";
+              const STREAM_COLS = 6;
+              const STREAM_DX = 200;
+              const STREAM_DY = 100;
+              const streamingPosition = hasValidPos
+                ? rawPos
+                : { x: (i % STREAM_COLS) * STREAM_DX, y: Math.floor(i / STREAM_COLS) * STREAM_DY };
               const node: Node = {
                 id: newId,
                 type: (raw.type as string) || "rectangle",
-                position: (raw.position as { x: number; y: number }) ?? { x: 0, y: 0 },
+                position: streamingPosition,
                 data: (raw.data as Record<string, unknown>) ?? {},
                 ...(newParentId && { parentId: newParentId, extent: "parent" as const }),
               };
@@ -801,10 +843,18 @@ function AIDiagramPage() {
             const newId = refId ? `${refId}-${raw.id}` : raw.id;
             const newParentId = raw.parentId && refId ? `${refId}-${raw.parentId}` : raw.parentId;
             nodeIdMap.set(raw.id, newId);
+            const rawPos = raw.position as { x: number; y: number } | undefined;
+            const hasValidPos = rawPos && typeof rawPos.x === "number" && typeof rawPos.y === "number";
+            const STREAM_COLS = 6;
+            const STREAM_DX = 200;
+            const STREAM_DY = 100;
+            const streamingPosition = hasValidPos
+              ? rawPos
+              : { x: (i % STREAM_COLS) * STREAM_DX, y: Math.floor(i / STREAM_COLS) * STREAM_DY };
             const node: Node = {
               id: newId,
               type: (raw.type as string) || "rectangle",
-              position: (raw.position as { x: number; y: number }) ?? { x: 0, y: 0 },
+              position: streamingPosition,
               data: (raw.data as Record<string, unknown>) ?? {},
               ...(newParentId && { parentId: newParentId, extent: "parent" as const }),
             };
@@ -918,11 +968,12 @@ function AIDiagramPage() {
       }
 
       const { nodes, edges, layoutDirection, groups: rawGroups } = parsed ?? {};
-      // Only flat nodes: LLM returns groups as metadata (groups array), not as group nodes.
-      let safeNodes = Array.isArray(nodes)
-        ? (nodes as { id: string; type?: string; [k: string]: unknown }[]).filter((n) => n.type !== "group")
-        : [];
-      let rawEdges = Array.isArray(edges) ? edges : [];
+      const validated = validateDiagramOutput(nodes, edges);
+      let safeNodes = (validated.nodes as { id: string; type?: string; [k: string]: unknown }[]).filter((n) => n.type !== "group");
+      let rawEdges = validated.edges;
+      if (validated.errors.length > 0) {
+        console.warn("Diagram validation:", validated.errors.slice(0, 5).join("; "));
+      }
       let groupMetadata: { id: string; label: string; nodeIds: string[] }[] = Array.isArray(rawGroups)
         ? (rawGroups as { id?: string; label?: string; nodeIds?: string[] }[])
             .filter((g) => g && typeof g.id === "string" && Array.isArray(g.nodeIds))
@@ -955,24 +1006,16 @@ function AIDiagramPage() {
               nodeIdMap.has(e.source) &&
               nodeIdMap.has(e.target)
           )
-          .map(
-            (
-              e: {
-                id: string;
-                source: string;
-                target: string;
-                sourceHandle?: string;
-                targetHandle?: string;
-                data?: Record<string, unknown>;
-              },
-              index: number
-            ) => ({
+          .map((e, index) => {
+            const src = String((e as { source: string }).source);
+            const tgt = String((e as { target: string }).target);
+            return {
               ...e,
-              id: `${refId}-e-${index}-${e.source}-${e.target}`,
-              source: nodeIdMap.get(e.source) ?? e.source,
-              target: nodeIdMap.get(e.target) ?? e.target,
-            })
-          );
+              id: `${refId}-e-${index}-${src}-${tgt}`,
+              source: nodeIdMap.get(src) ?? src,
+              target: nodeIdMap.get(tgt) ?? tgt,
+            };
+          });
         const nodeIdsSet = new Set(safeNodes.map((n: { id: string }) => n.id));
         groupMetadata = groupMetadata
           .map((g) => ({
@@ -982,6 +1025,14 @@ function AIDiagramPage() {
           }))
           .filter((g) => g.nodeIds.length > 0);
       }
+
+      // Ensure all nodes have position (auto-layout overwrites; AI may omit position)
+      safeNodes = safeNodes.map((n: { id: string; position?: { x: number; y: number }; [k: string]: unknown }) => ({
+        ...n,
+        position: n.position && typeof n.position.x === "number" && typeof n.position.y === "number"
+          ? n.position
+          : { x: 0, y: 0 },
+      }));
 
       const nodeIds = new Set(safeNodes.map((n: { id: string }) => n.id));
       const connectedEdges = refId
@@ -1052,21 +1103,37 @@ function AIDiagramPage() {
       const isMindMapDiagram =
         safeNodes.length > 0 &&
         safeNodes.every((n: { type?: string }) => n.type === "mindMap");
+      const hasGroups = groupMetadata.length > 0;
+      const nodeCount = safeNodes.length;
+      const edgeCount = connectedEdges.length;
+      const isDenseDiagram = nodeCount >= 8 || edgeCount >= 10;
+      const hasActors = safeNodes.some((n: { type?: string }) => n.type === "actor");
+      const isSequenceDiagram = effectiveDiagramType === "sequence" && hasActors;
+      const isFlowchartDiagram = effectiveDiagramType === "flowchart";
+      const isBpmnDiagram = effectiveDiagramType === "bpmn";
+
+      // Diagram-type-specific layout: flowchart/BPMN/sequence → TB (time/flow down), architecture → LR
       const direction: LayoutDirection = isMindMapDiagram
         ? (mindMapLayout?.direction ?? "LR")
         : layoutDirection === "vertical"
           ? "TB"
-          : "LR";
-      const hasGroups = groupMetadata.length > 0;
-      // Generous spacing when we have groups so flat layout has clear gaps; then we apply grouping and run layout again
+          : isFlowchartDiagram || isBpmnDiagram || isSequenceDiagram
+            ? "TB"
+            : "LR";
       const spacing: [number, number] = isMindMapDiagram
         ? [mindMapLayout?.spacingX ?? 120, mindMapLayout?.spacingY ?? 100]
         : hasGroups
-          ? [240, 200]
-          : [160, 120];
+          ? isDenseDiagram
+            ? [280, 220]
+            : [240, 200]
+          : isDenseDiagram
+            ? [200, 160]
+            : [160, 120];
       const layoutAlgorithm: LayoutAlgorithm = isMindMapDiagram
         ? (mindMapLayout?.algorithm ?? "elk-mrtree")
-        : "elk-layered";
+        : isSequenceDiagram
+          ? "elk-layered"
+          : "elk-layered";
 
       // Layout all nodes flat (no group nodes yet). Then apply grouping at render time
       // (like user selecting nodes and Ctrl+G / sidebar group tool).
@@ -1079,6 +1146,29 @@ function AIDiagramPage() {
       );
       let layoutedNodes = layoutResult.nodes;
       let layoutedEdges = layoutResult.edges;
+
+      // Beautify: smoothstep, distinct stroke colors, flow direction, thinner for dense.
+      if (!isMindMapDiagram) {
+        const isDense = layoutedNodes.length >= 8 || layoutedEdges.length >= 10;
+        const STROKE_COLORS = [
+          "#3b82f6", "#22c55e", "#eab308", "#f97316", "#ec4899",
+          "#8b5cf6", "#14b8a6", "#ef4444", "#6366f1", "#a855f7",
+        ];
+        layoutedEdges = layoutedEdges.map((edge: Edge, idx: number) => {
+          const d = typeof edge.data === "object" && edge.data ? edge.data : {};
+          return {
+            ...edge,
+            type: "labeledConnector" as const,
+            data: {
+              ...d,
+              connectorType: "smoothstep" as const,
+              flowDirection: (d.flowDirection as string) || "mono" as const,
+              strokeColor: (d.strokeColor as string) || STROKE_COLORS[idx % STROKE_COLORS.length],
+              ...(isDense && { strokeWidth: 1.5 }),
+            },
+          };
+        });
+      }
 
       // Apply grouping from LLM metadata: create group nodes and set parentId + extent: "parent"
       // on every child so nodes cannot be dragged outside the group until ungrouped (⌘⇧G).
@@ -1229,13 +1319,30 @@ function AIDiagramPage() {
           }),
           mergedDirection
         );
-        await applyNodesAndEdgesInChunks(setNodes, setEdges, refineLayoutAgain.nodes, refinedEdgesAfterLayout);
-        setPendingFitViewNodeIds(refineLayoutAgain.nodes.map((n: { id: string }) => n.id));
-        await syncDiagramToExcalidraw(refineLayoutAgain.nodes, refinedEdgesAfterLayout);
+        const refinedResolved = resolveNodeCollisions(refineLayoutAgain.nodes);
+        await applyLayoutWithAnimation(
+          setNodes,
+          setEdges,
+          refinedResolved,
+          refinedEdgesAfterLayout,
+          existingNodes,
+          applyAnimatedLayout
+        );
+        setPendingFitViewNodeIds(refinedResolved.map((n: { id: string }) => n.id));
+        await syncDiagramToExcalidraw(refinedResolved, refinedEdgesAfterLayout);
       } else if (mode === "mindmap-refine") {
-        await applyNodesAndEdgesInChunks(setNodes, setEdges, layoutedNodes, layoutedEdges);
-        setPendingFitViewNodeIds(layoutedNodes.map((n: { id: string }) => n.id));
-        await syncDiagramToExcalidraw(layoutedNodes, layoutedEdges);
+        const mindmapResolved = resolveNodeCollisions(layoutedNodes);
+        const currentForAnim = Array.isArray(canvasNodes) ? canvasNodes : [];
+        await applyLayoutWithAnimation(
+          setNodes,
+          setEdges,
+          mindmapResolved,
+          layoutedEdges,
+          currentForAnim,
+          applyAnimatedLayout
+        );
+        setPendingFitViewNodeIds(mindmapResolved.map((n: { id: string }) => n.id));
+        await syncDiagramToExcalidraw(mindmapResolved, layoutedEdges);
       } else {
         // ─── Keep existing nodes, add AI nodes alongside them ─────────
         if (existingNodes.length > 0 && canvasBounds) {
@@ -1265,17 +1372,26 @@ function AIDiagramPage() {
               },
             };
           });
-
-          const mergedNodes: Node[] = [...(existingNodes as Node[]), ...(offsetNodes as Node[])];
+          const offsetResolved = resolveNodeCollisions(offsetNodes as Node[]);
+          const mergedNodes: Node[] = [...(existingNodes as Node[]), ...(offsetResolved as Node[])];
           const mergedEdges: Edge[] = [...(existingEdges as Edge[]), ...(layoutedEdges as Edge[])];
           await applyNodesAndEdgesInChunks(setNodes, setEdges, mergedNodes, mergedEdges);
-          setPendingFitViewNodeIds(offsetNodes.map((n: { id: string }) => n.id));
+          setPendingFitViewNodeIds(offsetResolved.map((n: { id: string }) => n.id));
           await syncDiagramToExcalidraw(mergedNodes, mergedEdges);
         } else {
-          // Canvas is empty — apply in chunks to avoid "Maximum call stack exceeded"
-          await applyNodesAndEdgesInChunks(setNodes, setEdges, layoutedNodes, layoutedEdges);
-          setPendingFitViewNodeIds(layoutedNodes.map((n: { id: string }) => n.id));
-          await syncDiagramToExcalidraw(layoutedNodes, layoutedEdges);
+          // Canvas is empty — resolve collisions, then animate from streamed positions if overlap
+          const emptyResolved = resolveNodeCollisions(layoutedNodes);
+          const currentForAnim = Array.isArray(canvasNodes) ? canvasNodes : [];
+          await applyLayoutWithAnimation(
+            setNodes,
+            setEdges,
+            emptyResolved,
+            layoutedEdges,
+            currentForAnim,
+            applyAnimatedLayout
+          );
+          setPendingFitViewNodeIds(emptyResolved.map((n: { id: string }) => n.id));
+          await syncDiagramToExcalidraw(emptyResolved, layoutedEdges);
         }
       }
 

@@ -4,9 +4,11 @@ import { memo } from "react";
 import { Handle, type NodeProps, Position } from "@xyflow/react";
 import { BaseNode } from "./BaseNode";
 import { EditableNodeContent } from "./EditableNodeContent";
+import { LayoutHandles } from "./LayoutHandles";
 import { User } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { getIconById } from "@/lib/icon-registry";
+import type { LayoutDirection } from "@/lib/layout-engine";
 
 const DEFAULT_WIDTH = 100;
 const DEFAULT_HEIGHT = 100;
@@ -17,6 +19,24 @@ function ActorNode({ id, data, selected }: NodeProps) {
   const IconComp = iconDef?.Icon;
   const iconUrl = data.iconUrl as string | undefined;
   const emoji = data.emoji as string | undefined;
+  const layoutHandles = data.layoutHandles as { source: number; target: number } | undefined;
+  const layoutDir = (data.layoutDirection as LayoutDirection) ?? "LR";
+
+  const renderHandles = () => {
+    if (layoutHandles && layoutHandles.source >= 1 && layoutHandles.target >= 1) {
+      return (
+        <LayoutHandles nodeId={id} direction={layoutDir} sourceCount={layoutHandles.source} targetCount={layoutHandles.target} />
+      );
+    }
+    return (
+      <>
+        <Handle id="left" type="source" position={Position.Left} className="node-connect-handle" />
+        <Handle id="right" type="source" position={Position.Right} className="node-connect-handle" />
+        <Handle id="top" type="source" position={Position.Top} className="node-connect-handle" />
+        <Handle id="bottom" type="source" position={Position.Bottom} className="node-connect-handle" />
+      </>
+    );
+  };
 
   const renderIcon = () => {
     if (IconComp) return <IconComp className="w-6 h-6 text-slate-600" />;
@@ -34,10 +54,7 @@ function ActorNode({ id, data, selected }: NodeProps) {
       minWidth={70}
       minHeight={90}
     >
-      <Handle id="left" type="source" position={Position.Left} className="node-connect-handle" />
-      <Handle id="right" type="source" position={Position.Right} className="node-connect-handle" />
-      <Handle id="top" type="source" position={Position.Top} className="node-connect-handle" />
-      <Handle id="bottom" type="source" position={Position.Bottom} className="node-connect-handle" />
+      {renderHandles()}
 
       <div className="flex flex-col items-center gap-2 flex-1 justify-center">
         <div

@@ -112,6 +112,22 @@ export function getHandleIds(direction: LayoutDirection): { target: string; sour
   }
 }
 
+/** ELK port side: NORTH, SOUTH, EAST, WEST */
+function directionToPortSides(direction: LayoutDirection): { source: string; target: string } {
+  switch (direction) {
+    case "LR": return { source: "EAST", target: "WEST" };
+    case "RL": return { source: "WEST", target: "EAST" };
+    case "TB": return { source: "SOUTH", target: "NORTH" };
+    case "BT": return { source: "NORTH", target: "SOUTH" };
+    default: return { source: "EAST", target: "WEST" };
+  }
+}
+
+/** Multi-handle IDs for ELK ports: right-0, right-1, left-0, etc. */
+export function getMultiHandleId(base: string, index: number): string {
+  return index === 0 ? base : `${base}-${index}`;
+}
+
 /**
  * ELK layout: same pattern as React Flow's official example.
  * - Graph: { id: 'root', layoutOptions, children: [{ id, width, height, ... }], edges: [{ id, sources: [id], targets: [id] }] }
@@ -120,7 +136,18 @@ export function getHandleIds(direction: LayoutDirection): { target: string; sour
  * @see https://www.eclipse.org/elk/reference/algorithms.html
  * @see https://www.eclipse.org/elk/reference/options.html
  */
-type ElkNode = { id: string; width: number; height: number; x?: number; y?: number; children?: ElkNode[]; edges?: { id: string; sources: string[]; targets: string[] }[] };
+type ElkPort = { id: string; layoutOptions?: Record<string, string> };
+type ElkNode = {
+  id: string;
+  width: number;
+  height: number;
+  x?: number;
+  y?: number;
+  layoutOptions?: Record<string, string>;
+  ports?: ElkPort[];
+  children?: ElkNode[];
+  edges?: { id: string; sources: string[]; targets: string[] }[];
+};
 
 function getRootId(nodeId: string, nodes: Node[]): string {
   const node = nodes.find((n) => n.id === nodeId);
@@ -143,11 +170,64 @@ async function layoutWithElk(
   const nodeById = new Map(nodes.map((n) => [n.id, n]));
 
   const hasGroups = rootNodes.some((n) => n.type === "group");
-  const layoutOptions = {
+  const isDense = edges.length >= nodes.length * 1.2;
+  const [nodeSpacing, layerSpacing] = isDense ? [spacing[0] * 1.15, spacing[1] * 1.2] : [spacing[0], spacing[1]];
+  const layoutOptions: Record<string, string> = {
     "elk.algorithm": algorithm,
     "elk.direction": directionToElk(direction),
-    "elk.spacing.nodeNode": String(spacing[0]),
-    "elk.layered.spacing.nodeNodeBetweenLayers": String(spacing[1]),
+    "elk.spacing.nodeNode": String(nodeSpacing),
+    "elk.layered.spacing.nodeNodeBetweenLayers": String(layerSpacing),
+    "elk.spacing.componentComponent": String(Math.max(nodeSpacing * 2, 120)),
+  };
+  if (algorithm === "layered") {
+    layoutOptions["elk.layered.mergeEdges"] = isDense ? "false" : "true";
+    layoutOptions["elk.layered.crossingMinimization.strategy"] = "LAYER_SWEEP";
+    layoutOptions["elk.layered.crossingMinimization.greedySwitch.type"] = "TWO_SIDED";
+    layoutOptions["elk.layered.crossingMinimization.greedySwitch.activationThreshold"] = "0";
+  }
+
+  const { target: targetHandleId, source: sourceHandleId } = getHandleIds(direction);
+  const { source: sourcePortSide, target: targetPortSide } = directionToPortSides(direction);
+
+  const rootEdgesForElk = hasGroups
+    ? edges
+        .map((e) => ({
+          id: e.id,
+          source: e.source,
+          target: e.target,
+          rootSource: getRootId(e.source, nodes),
+          rootTarget: getRootId(e.target, nodes),
+        }))
+        .filter((e) => e.rootSource !== e.rootTarget)
+    : edges
+        .filter((e) => rootIds.has(e.source) && rootIds.has(e.target))
+        .map((e) => ({ ...e, rootSource: e.source, rootTarget: e.target }));
+
+  const useMultiHandles =
+    algorithm === "layered" && isDense && rootEdgesForElk.length > 2 && !hasGroups;
+  const layoutHandlesByNodeId = new Map<string, { source: number; target: number; direction: LayoutDirection }>();
+
+  const outDegree = new Map<string, number>();
+  const inDegree = new Map<string, number>();
+  const outIndex = new Map<string, number>();
+  const inIndex = new Map<string, number>();
+  for (const e of rootEdgesForElk) {
+    outDegree.set(e.rootSource, (outDegree.get(e.rootSource) ?? 0) + 1);
+    inDegree.set(e.rootTarget, (inDegree.get(e.rootTarget) ?? 0) + 1);
+  }
+  const getSourcePortId = (nid: string): string => {
+    const deg = outDegree.get(nid) ?? 1;
+    if (deg <= 1) return sourceHandleId;
+    const idx = outIndex.get(nid) ?? 0;
+    outIndex.set(nid, idx + 1);
+    return getMultiHandleId(sourceHandleId, idx);
+  };
+  const getTargetPortId = (nid: string): string => {
+    const deg = inDegree.get(nid) ?? 1;
+    if (deg <= 1) return targetHandleId;
+    const idx = inIndex.get(nid) ?? 0;
+    inIndex.set(nid, idx + 1);
+    return getMultiHandleId(targetHandleId, idx);
   };
 
   function buildElkNode(node: Node): ElkNode {
@@ -156,10 +236,7 @@ async function layoutWithElk(
       const children = nodes.filter((n) => n.parentId === node.id);
       const childIds = new Set(children.map((c) => c.id));
       const groupEdges = edges.filter((e) => childIds.has(e.source) && childIds.has(e.target));
-      const childrenElk = children.map((c) => {
-        const { width: cw, height: ch } = getNodeSize(c);
-        return { id: c.id, width: cw, height: ch };
-      });
+      const childrenElk = children.map((c) => buildElkNode(c));
       const padding = GROUP_PADDING;
       const contentW =
         childrenElk.length > 0
@@ -183,28 +260,51 @@ async function layoutWithElk(
         })),
       };
     }
-    return { id: node.id, width, height };
+    const base: ElkNode = { id: node.id, width, height };
+    if (useMultiHandles) {
+      const out = Math.max(1, outDegree.get(node.id) ?? 0);
+      const inn = Math.max(1, inDegree.get(node.id) ?? 0);
+      const ports: ElkPort[] = [];
+      for (let i = 0; i < out; i++) {
+        const pid = getMultiHandleId(sourceHandleId, i);
+        ports.push({ id: pid, layoutOptions: { "org.eclipse.elk.port.side": sourcePortSide } });
+      }
+      for (let i = 0; i < inn; i++) {
+        const pid = getMultiHandleId(targetHandleId, i);
+        ports.push({ id: pid, layoutOptions: { "org.eclipse.elk.port.side": targetPortSide } });
+      }
+      if (ports.length > 0) {
+        base.ports = ports;
+        base.layoutOptions = { "org.eclipse.elk.portConstraints": "FIXED_ORDER" };
+        layoutHandlesByNodeId.set(node.id, { source: out, target: inn, direction });
+      }
+    }
+    return base;
   }
 
-  const rootEdgesForElk = hasGroups
-    ? edges
-        .map((e) => ({
-          id: e.id,
-          sources: [getRootId(e.source, nodes)],
-          targets: [getRootId(e.target, nodes)],
-        }))
-        .filter((e) => e.sources[0] !== e.targets[0])
-    : edges.filter((e) => rootIds.has(e.source) && rootIds.has(e.target));
+  const edgePortAssignments = new Map<string, { sourceHandle: string; targetHandle: string }>();
+  const elkEdges = rootEdgesForElk.map((e, i) => {
+    const srcPort = useMultiHandles ? getSourcePortId(e.rootSource) : undefined;
+    const tgtPort = useMultiHandles ? getTargetPortId(e.rootTarget) : undefined;
+    const src = srcPort ? `${e.rootSource}:${srcPort}` : e.rootSource;
+    const tgt = tgtPort ? `${e.rootTarget}:${tgtPort}` : e.rootTarget;
+    if (srcPort && tgtPort) {
+      edgePortAssignments.set(e.id, { sourceHandle: srcPort, targetHandle: tgtPort });
+    }
+    return {
+      id: e.id || `root-e${i}`,
+      sources: [src],
+      targets: [tgt],
+      originalSource: e.source,
+      originalTarget: e.target,
+    };
+  });
 
   const graph = {
     id: "root",
     layoutOptions: layoutOptions,
     children: rootNodes.map((node) => buildElkNode(node)),
-    edges: rootEdgesForElk.map((e: { id?: string; source?: string; target?: string; sources?: string[]; targets?: string[] }, i) => ({
-      id: e.id || `root-e${i}`,
-      sources: [e.sources?.[0] ?? e.source ?? ""],
-      targets: [e.targets?.[0] ?? e.target ?? ""],
-    })),
+    edges: elkEdges.map(({ id, sources, targets }) => ({ id, sources, targets })),
   };
 
   const layoutedGraph = (await elk.layout(graph)) as { children?: ElkNode[] };
@@ -215,11 +315,13 @@ async function layoutWithElk(
     if (!node) return;
     const x = elkNode.x ?? 0;
     const y = elkNode.y ?? 0;
+    const lh = layoutHandlesByNodeId.get(elkNode.id);
     byId.set(elkNode.id, {
       ...node,
       targetPosition: targetPos,
       sourcePosition: sourcePos,
       position: { x, y },
+      data: lh ? { ...node.data, layoutHandles: { source: lh.source, target: lh.target }, layoutDirection: lh.direction } : node.data,
     });
     if (elkNode.children?.length) {
       for (const ch of elkNode.children) {
@@ -245,12 +347,23 @@ async function layoutWithElk(
   });
 
   const layoutedIds = new Set(nodes.map((n) => n.id));
-  const normalizedEdges = normalizeEdgeHandlesForDirection(layoutedIds, edges, direction);
-  return { nodes: allNodes, edges: normalizedEdges };
+  let resultEdges: Edge[];
+  if (useMultiHandles && edgePortAssignments.size > 0) {
+    resultEdges = edges.map((e) => {
+      const assigns = edgePortAssignments.get(e.id);
+      if (assigns && layoutedIds.has(e.source) && layoutedIds.has(e.target)) {
+        return { ...e, sourceHandle: assigns.sourceHandle, targetHandle: assigns.targetHandle };
+      }
+      return normalizeEdgeHandlesForDirection(layoutedIds, [e], direction)[0] ?? e;
+    });
+  } else {
+    resultEdges = normalizeEdgeHandlesForDirection(layoutedIds, edges, direction);
+  }
+  return { nodes: allNodes, edges: resultEdges };
 }
 
-const GROUP_PADDING = 80;
-const GROUP_HEADER_INSET = 44;
+const GROUP_PADDING = 100;
+const GROUP_HEADER_INSET = 48;
 const CHILD_PADDING = 40;
 
 export type GroupMetadata = { id: string; label: string; nodeIds: string[] };
@@ -281,8 +394,9 @@ export async function layoutChildrenInsideGroups(
 
     let layoutedChildren: Node[];
     if (children.length >= 2 || childEdges.length > 0) {
+      const childrenAsRoot = children.map((c) => ({ ...c, parentId: undefined }));
       const { nodes: laid } = await getLayoutedElements(
-        children,
+        childrenAsRoot,
         childEdges,
         direction,
         spacing,
@@ -784,6 +898,70 @@ export function chooseBestLayoutOptions(
   const spacing: LayoutSpacing = [80, 60];
 
   return { algorithm, direction, spacing };
+}
+
+/** Minimum gap between nodes after collision resolution (px). */
+const COLLISION_PADDING = 16;
+
+/**
+ * Resolves overlapping nodes by nudging them apart.
+ * Only used during AI diagram generation; no persistent state.
+ * Processes root-level nodes and siblings within groups separately.
+ */
+export function resolveNodeCollisions(nodes: Node[], padding = COLLISION_PADDING): Node[] {
+  if (nodes.length < 2) return nodes;
+
+  const byParent = new Map<string | null, Node[]>();
+  for (const n of nodes) {
+    const key = n.parentId ?? null;
+    if (!byParent.has(key)) byParent.set(key, []);
+    byParent.get(key)!.push(n);
+  }
+
+  const result = nodes.map((n) => ({ ...n, position: { ...n.position } }));
+
+  for (const group of byParent.values()) {
+    if (group.length < 2) continue;
+
+    for (let iter = 0; iter < 12; iter++) {
+      let moved = false;
+      for (let i = 0; i < group.length; i++) {
+        for (let j = i + 1; j < group.length; j++) {
+          const a = result.find((n) => n.id === group[i].id)!;
+          const b = result.find((n) => n.id === group[j].id)!;
+          const sizeA = getNodeSize(a);
+          const sizeB = getNodeSize(b);
+          const ax = a.position.x ?? 0;
+          const ay = a.position.y ?? 0;
+          const bx = b.position.x ?? 0;
+          const by = b.position.y ?? 0;
+
+          const aRight = ax + sizeA.width;
+          const aBottom = ay + sizeA.height;
+          const bRight = bx + sizeB.width;
+          const bBottom = by + sizeB.height;
+
+          const overlapX = Math.min(aRight, bRight) - Math.max(ax, bx);
+          const overlapY = Math.min(aBottom, bBottom) - Math.max(ay, by);
+          const pushX = overlapX > -padding ? (padding + overlapX) / 2 : 0;
+          const pushY = overlapY > -padding ? (padding + overlapY) / 2 : 0;
+          if (pushX <= 0 && pushY <= 0) continue;
+
+          const dx = pushX * (ax < bx ? -1 : 1);
+          const dy = pushY * (ay < by ? -1 : 1);
+
+          a.position.x = ax + dx;
+          a.position.y = ay + dy;
+          b.position.x = bx - dx;
+          b.position.y = by - dy;
+          moved = true;
+        }
+      }
+      if (!moved) break;
+    }
+  }
+
+  return result;
 }
 
 export async function getLayoutedElements(
