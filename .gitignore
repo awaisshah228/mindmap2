@@ -42,3 +42,6 @@ next-env.d.ts
 
 # clerk configuration (can include secrets)
 /.clerk/
+
+# subprojects (not part of main app build; avoid pushing to trigger deployment)
+/excalidraw-ai/
